@@ -1,0 +1,21 @@
+[package]
+name = "sbmm-nexus"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+# Defaults already bring TLS, HTTP/2 and system-proxy support; `stream` is for
+# downloading large files without holding them in memory.
+reqwest = { version = "0.13", features = ["stream"] }
+tokio = { version = "1.53", features = ["fs", "time", "sync", "macros"] }
+futures-util = "0.3"
+
+[dev-dependencies]
+tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "net", "io-util"] }
+tempfile = { workspace = true }
