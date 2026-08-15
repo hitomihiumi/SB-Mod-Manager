@@ -64,6 +64,8 @@ export interface AppSnapshot {
   pending: PendingChange[];
   drift: string[];
   autoApply: boolean;
+  /** Null until an API key has been validated. */
+  nexus: NexusAccount | null;
 }
 
 export interface ComponentFile {
@@ -96,10 +98,25 @@ export interface ApplyReport {
   failed: { name: string; reason: string }[];
 }
 
+export interface NexusAccount {
+  name: string;
+  isPremium: boolean;
+  userId: number;
+}
+
+export interface RateLimit {
+  hourlyRemaining: number | null;
+  hourlyLimit: number | null;
+  dailyRemaining: number | null;
+  dailyLimit: number | null;
+  resetAfterSecs: number | null;
+}
+
 export interface Folders {
   library: string;
   mods: string;
   backups: string;
+  downloads: string;
   game: string | null;
   /** False when the library is on a different drive from the game, which
       means mods are copied instead of hard-linked and stored twice. */
@@ -141,6 +158,9 @@ export const ipc = {
   setAutoApply: (enabled: boolean) => invoke<void>("set_auto_apply", { enabled }),
   folders: () => invoke<Folders>("folders"),
   setLibraryRoot: (path: string) => invoke<LibraryMoveReport>("set_library_root", { path }),
+
+  setNexusKey: (apiKey: string) => invoke<NexusAccount | null>("set_nexus_key", { apiKey }),
+  nexusRateLimit: () => invoke<RateLimit>("nexus_rate_limit"),
 };
 
 /** Display names and accent colours for each payload type. */

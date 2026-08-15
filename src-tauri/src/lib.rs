@@ -6,10 +6,13 @@
 
 use std::sync::Mutex;
 
-use sbmm_app::dto::{AppSnapshot, ApplyReport, FoldersView, LibraryMoveReport, StagedInstall};
+use sbmm_app::dto::{
+    AppSnapshot, ApplyReport, FoldersView, LibraryMoveReport, NexusAccount, StagedInstall,
+};
 use sbmm_app::App;
 use sbmm_core::model::ModType;
 use sbmm_game::GameInstall;
+use sbmm_nexus::{NexusClient, ReqwestTransport};
 use tauri::Manager;
 
 struct AppState(Mutex<App>);
@@ -161,6 +164,51 @@ fn set_library_root(
     with_app!(state, |app| app.set_library_root(path))
 }
 
+/// Check an API key with Nexus and remember whose it is.
+///
+/// The call is made here rather than inside `App` because the service is
+/// synchronous by design; only the short store-the-result step takes the lock.
+#[tauri::command]
+async fn set_nexus_key(
+    state: tauri::State<'_, AppState>,
+    api_key: String,
+) -> Result<Option<NexusAccount>, String> {
+    let trimmed = api_key.trim().to_string();
+
+    if trimmed.is_empty() {
+        return with_app!(state, |app| app.set_nexus_account("", None)).map(|()| None);
+    }
+
+    let transport = ReqwestTransport::new(USER_AGENT).map_err(fail)?;
+    let client = NexusClient::new(transport, trimmed.clone(), sbmm_game::NEXUS_DOMAIN);
+    let account = client.validate().await.map_err(fail)?;
+
+    let account = NexusAccount {
+        name: account.name,
+        is_premium: account.is_premium,
+        user_id: account.user_id,
+    };
+    with_app!(state, |app| app.set_nexus_account(&trimmed, Some(&account)))?;
+    Ok(Some(account))
+}
+
+/// The remaining API allowance, for the downloads screen.
+#[tauri::command]
+async fn nexus_rate_limit(
+    state: tauri::State<'_, AppState>,
+) -> Result<sbmm_nexus::RateLimit, String> {
+    let key = with_app!(state, |app| app.nexus_api_key())?.unwrap_or_default();
+    if key.is_empty() {
+        return Ok(sbmm_nexus::RateLimit::default());
+    }
+    let transport = ReqwestTransport::new(USER_AGENT).map_err(fail)?;
+    let client = NexusClient::new(transport, key, sbmm_game::NEXUS_DOMAIN);
+    client.validate().await.map_err(fail)?;
+    Ok(client.rate_limit())
+}
+
+const USER_AGENT: &str = concat!("SBModManager/", env!("CARGO_PKG_VERSION"));
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -192,6 +240,8 @@ pub fn run() {
             set_auto_apply,
             folders,
             set_library_root,
+            set_nexus_key,
+            nexus_rate_limit,
         ])
         .run(tauri::generate_context!())
         .expect("failed to start SB Mod Manager");

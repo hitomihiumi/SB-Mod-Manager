@@ -16,6 +16,8 @@ pub struct AppSnapshot {
     /// Files that were changed outside the manager.
     pub drift: Vec<String>,
     pub auto_apply: bool,
+    /// `None` until an API key has been validated.
+    pub nexus: Option<NexusAccount>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -102,12 +104,25 @@ pub struct FoldersView {
     pub library: String,
     pub mods: String,
     pub backups: String,
+    pub downloads: String,
     pub game: Option<String>,
     /// False when the library is on a different drive from the game, which
     /// means deployment falls back to copying and every enabled mod is stored
     /// twice.
     pub same_volume_as_game: bool,
     pub library_bytes: i64,
+}
+
+/// Who the stored Nexus key belongs to.
+///
+/// Premium status decides whether a collection can install unattended, so it
+/// is recorded rather than rediscovered from a failure.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NexusAccount {
+    pub name: String,
+    pub is_premium: bool,
+    pub user_id: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

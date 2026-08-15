@@ -543,3 +543,86 @@ fn a_new_library_location_survives_a_restart() {
     assert_eq!(app.library_root(), library);
     assert_eq!(app.mods_dir(), library.join("mods"));
 }
+
+// -- Nexus credentials ------------------------------------------------------
+
+#[test]
+fn the_api_key_never_reaches_the_database() {
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().join("data");
+
+    let mut app = App::new(&data)
+        .unwrap()
+        .with_key_store(Box::new(sbmm_app::credentials::MemoryKeyStore::default()));
+
+    let account = sbmm_app::dto::NexusAccount {
+        name: "tester".into(),
+        is_premium: true,
+        user_id: 7,
+    };
+    app.set_nexus_account("super-secret-key", Some(&account))
+        .unwrap();
+
+    // The account summary is fine to persist; the key is not.
+    assert_eq!(app.nexus_account().unwrap().as_ref(), Some(&account));
+    assert_eq!(
+        app.nexus_api_key().unwrap().as_deref(),
+        Some("super-secret-key")
+    );
+
+    drop(app);
+    let raw = fs::read(data.join("sbmm.db")).unwrap();
+    assert!(
+        !contains(&raw, b"super-secret-key"),
+        "the API key must not be written to the database file"
+    );
+    assert!(
+        contains(&raw, b"tester"),
+        "sanity check: the account name is stored, so the scan works"
+    );
+}
+
+#[test]
+fn clearing_the_key_forgets_the_account_too() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = App::new(dir.path().join("data"))
+        .unwrap()
+        .with_key_store(Box::new(sbmm_app::credentials::MemoryKeyStore::default()));
+
+    let account = sbmm_app::dto::NexusAccount {
+        name: "tester".into(),
+        is_premium: false,
+        user_id: 1,
+    };
+    app.set_nexus_account("key", Some(&account)).unwrap();
+    app.set_nexus_account("", None).unwrap();
+
+    assert_eq!(app.nexus_api_key().unwrap(), None);
+    assert_eq!(app.nexus_account().unwrap(), None);
+}
+
+#[test]
+fn downloads_live_in_the_library_and_move_with_it() {
+    let mut fx = Fixture::new();
+    assert_eq!(
+        fx.app.downloads_dir(),
+        fx.app.library_root().join("downloads")
+    );
+
+    // Something part-downloaded should survive a relocation.
+    fs::create_dir_all(fx.app.downloads_dir()).unwrap();
+    fs::write(fx.app.downloads_dir().join("half.zip"), b"partial").unwrap();
+
+    let new_root = fx._dir.path().join("elsewhere");
+    fx.app.set_library_root(&new_root).unwrap();
+
+    assert_eq!(
+        fs::read_to_string(new_root.join("downloads/half.zip")).unwrap(),
+        "partial"
+    );
+}
+
+/// Naive substring search over the raw database bytes.
+fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack.windows(needle.len()).any(|w| w == needle)
+}

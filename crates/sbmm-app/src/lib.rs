@@ -4,6 +4,7 @@
 //! which keeps it compilable and testable on any platform; `src-tauri` is only
 //! a set of thin command wrappers around this type.
 
+pub mod credentials;
 pub mod dto;
 pub mod library;
 
@@ -42,6 +43,10 @@ pub enum AppError {
     UnknownStaging(String),
     #[error("{0}")]
     BadLibraryRoot(String),
+    #[error(transparent)]
+    KeyStore(#[from] credentials::KeyStoreError),
+    #[error(transparent)]
+    Encode(#[from] serde_json::Error),
 }
 
 impl AppError {
@@ -58,11 +63,13 @@ type Result<T> = std::result::Result<T, AppError>;
 const SETTING_GAME_ROOT: &str = "gameRoot";
 const SETTING_AUTO_APPLY: &str = "autoApply";
 const SETTING_LIBRARY_ROOT: &str = "libraryRoot";
+const SETTING_NEXUS_ACCOUNT: &str = "nexusAccount";
 
 pub struct App {
     store: Store,
     data_dir: PathBuf,
     backend: HardlinkBackend,
+    keys: Box<dyn credentials::KeyStore>,
 }
 
 impl App {
@@ -76,9 +83,62 @@ impl App {
             store,
             data_dir,
             backend: HardlinkBackend,
+            keys: Box::new(credentials::OsKeyStore),
         };
         std::fs::create_dir_all(app.mods_dir()).map_err(|e| AppError::io(app.mods_dir(), e))?;
         Ok(app)
+    }
+
+    /// Build with a different credential store, for tests.
+    pub fn with_key_store(mut self, keys: Box<dyn credentials::KeyStore>) -> Self {
+        self.keys = keys;
+        self
+    }
+
+    pub fn downloads_dir(&self) -> PathBuf {
+        self.library_root().join("downloads")
+    }
+
+    // -- Nexus credentials -------------------------------------------------
+
+    /// The stored API key, if there is one.
+    pub fn nexus_api_key(&self) -> Result<Option<String>> {
+        Ok(self.keys.get()?)
+    }
+
+    /// Save a key and remember the account it belongs to.
+    ///
+    /// The key itself never reaches the database — only the account summary,
+    /// which the settings screen shows so the user can tell whose key is in
+    /// use without revealing it.
+    pub fn set_nexus_account(
+        &mut self,
+        api_key: &str,
+        account: Option<&NexusAccount>,
+    ) -> Result<()> {
+        if api_key.is_empty() {
+            self.keys.clear()?;
+            self.store.set_setting(SETTING_NEXUS_ACCOUNT, "")?;
+            return Ok(());
+        }
+        self.keys.set(api_key)?;
+        let summary = account
+            .map(serde_json::to_string)
+            .transpose()?
+            .unwrap_or_default();
+        self.store.set_setting(SETTING_NEXUS_ACCOUNT, &summary)?;
+        Ok(())
+    }
+
+    /// Who the stored key belongs to, as of the last check.
+    pub fn nexus_account(&self) -> Result<Option<NexusAccount>> {
+        let Some(raw) = self.store.get_setting(SETTING_NEXUS_ACCOUNT)? else {
+            return Ok(None);
+        };
+        if raw.is_empty() {
+            return Ok(None);
+        }
+        Ok(serde_json::from_str(&raw).ok())
     }
 
     /// Where mods and backups are kept. Defaults to the app data directory.
@@ -112,6 +172,7 @@ impl App {
             mods: path_string(self.mods_dir()),
             backups: path_string(self.backup_dir()),
             library_bytes: library::size_of(&library) as i64,
+            downloads: path_string(self.downloads_dir()),
             library: path_string(library),
         })
     }
@@ -147,6 +208,7 @@ impl App {
 
         library::move_tree(&old_root.join("mods"), &new_root.join("mods"))?;
         library::move_tree(&old_root.join("backups"), &new_root.join("backups"))?;
+        library::move_tree(&old_root.join("downloads"), &new_root.join("downloads"))?;
 
         self.store
             .set_setting(SETTING_LIBRARY_ROOT, &new_root.to_string_lossy())?;
@@ -393,6 +455,7 @@ impl App {
             pending,
             drift: self.drift()?,
             auto_apply: self.auto_apply()?,
+            nexus: self.nexus_account()?,
         })
     }
 

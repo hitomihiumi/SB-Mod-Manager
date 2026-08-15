@@ -11,6 +11,13 @@ sbmm-archive = { workspace = true }
 sbmm-game = { workspace = true }
 sbmm-deploy = { workspace = true }
 sbmm-store = { workspace = true }
+sbmm-nexus = { workspace = true }
+
+# The API key goes to the OS credential store rather than the database.
+# Windows uses Credential Manager; other platforms use the default backend so
+# development on Linux still compiles and reports a clear error when there is
+# no store to talk to.
+keyring = { version = "3.6", features = ["windows-native"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

@@ -1,6 +1,6 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { FolderOpen } from "lucide-react";
+import { FolderOpen, UserRound } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { formatBytes } from "../lib/format";
@@ -103,6 +103,8 @@ export function SettingsView() {
           </label>
         </Section>
 
+        <NexusSection />
+
         <Section
           title="Mod library"
           hint="Mods are kept unpacked here, outside the game folder, and hard-linked in when enabled. Move it to another drive to keep it off the system disk."
@@ -148,6 +150,91 @@ export function SettingsView() {
         </Section>
       </div>
     </div>
+  );
+}
+
+/// Nexus account. The key goes to the OS credential store, never the database,
+/// and premium status is shown because it decides whether a collection can
+/// install without the user clicking through each mod page.
+function NexusSection() {
+  const snapshot = useApp((s) => s.snapshot);
+  const refresh = useApp((s) => s.refresh);
+  const toast = useApp((s) => s.toast);
+
+  const account = snapshot?.nexus ?? null;
+  const [key, setKey] = useState("");
+  const [checking, setChecking] = useState(false);
+
+  async function save(value: string) {
+    setChecking(true);
+    try {
+      const result = await ipc.setNexusKey(value);
+      setKey("");
+      await refresh();
+      toast(
+        "success",
+        result ? `Signed in as ${result.name}.` : "Nexus key removed.",
+      );
+    } catch (error) {
+      toast("error", String(error));
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  return (
+    <Section
+      title="Nexus Mods"
+      hint="Needed to download mods and collections. Your key is kept in the Windows Credential Manager, not in the manager's database."
+    >
+      {account ? (
+        <div className="flex items-center gap-2.5">
+          <UserRound size={16} className="shrink-0 text-ink-muted" />
+          <div className="min-w-0 flex-1">
+            <div className="text-[13px] font-medium">{account.name}</div>
+            <div className="text-[11px] text-ink-muted">
+              {account.isPremium ? "Premium" : "Free account"}
+            </div>
+          </div>
+          <Button variant="ghost" disabled={checking} onClick={() => void save("")}>
+            Sign out
+          </Button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2">
+          <input
+            type="password"
+            value={key}
+            onChange={(event) => setKey(event.target.value)}
+            placeholder="Personal API key"
+            spellCheck={false}
+            className="h-8 min-w-0 flex-1 rounded-md border border-line bg-base px-2.5 font-mono text-[12px] placeholder:font-sans placeholder:text-ink-muted focus:border-accent-soft focus:outline-none"
+          />
+          <Button
+            variant="primary"
+            disabled={checking || key.trim().length === 0}
+            onClick={() => void save(key)}
+          >
+            {checking ? "Checking…" : "Connect"}
+          </Button>
+        </div>
+      )}
+
+      {!account && (
+        <p className="mt-2 text-[11px] leading-relaxed text-ink-muted">
+          Create one under Account settings → API keys on the Nexus Mods site.
+        </p>
+      )}
+
+      {account && !account.isPremium && (
+        <p className="mt-2.5 rounded-md border border-line bg-base px-2.5 py-2 text-[11px] leading-relaxed text-ink-muted">
+          Nexus only hands direct download links to Premium accounts. Without it, use the
+          <span className="text-ink-soft"> Mod Manager Download </span>
+          button on a mod page — the manager picks the link up and installs the mod for you.
+          Collections install the same way, one click per mod.
+        </p>
+      )}
+    </Section>
   );
 }
 
