@@ -1,10 +1,11 @@
+import { getVersion } from "@tauri-apps/api/app";
 import { open } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { FolderOpen, UserRound } from "lucide-react";
+import { Download, FolderOpen, UserRound } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { formatBytes } from "../lib/format";
-import { ipc, type Folders } from "../lib/ipc";
+import { ipc, type Folders, type UpdateChannel, type UpdateInfo } from "../lib/ipc";
 import { useApp } from "../store/useApp";
 import { Button } from "./ui";
 
@@ -104,6 +105,8 @@ export function SettingsView() {
         </Section>
 
         <NexusSection />
+
+        <UpdateSection />
 
         <Section
           title="Mod library"
@@ -233,6 +236,129 @@ function NexusSection() {
           button on a mod page — the manager picks the link up and installs the mod for you.
           Collections install the same way, one click per mod.
         </p>
+      )}
+    </Section>
+  );
+}
+
+/// Self-update. Stable follows tagged releases; nightly follows the rolling
+/// prerelease the release workflow rebuilds whenever something lands.
+function UpdateSection() {
+  const snapshot = useApp((s) => s.snapshot);
+  const refresh = useApp((s) => s.refresh);
+  const toast = useApp((s) => s.toast);
+
+  const channel = snapshot?.updateChannel ?? "stable";
+  const [info, setInfo] = useState<UpdateInfo | null>(null);
+  const [version, setVersion] = useState<string | null>(null);
+  const [busy, setBusy] = useState<"checking" | "installing" | null>(null);
+
+  // Shown straight away rather than waiting for a check to succeed.
+  useEffect(() => {
+    void getVersion()
+      .then(setVersion)
+      .catch(() => setVersion(null));
+  }, []);
+
+  async function check() {
+    setBusy("checking");
+    try {
+      const result = await ipc.checkForUpdate();
+      setInfo(result);
+      if (!result.available) toast("info", "You are on the latest build.");
+    } catch (error) {
+      toast("error", String(error));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function switchChannel(next: UpdateChannel) {
+    try {
+      await ipc.setUpdateChannel(next);
+      setInfo(null);
+      await refresh();
+    } catch (error) {
+      toast("error", String(error));
+    }
+  }
+
+  return (
+    <Section
+      title="App updates"
+      hint="Updates are downloaded from this project's GitHub releases and checked against a signature before anything is replaced."
+    >
+      <div className="flex items-center gap-2.5">
+        <span className="text-[12px] text-ink-muted">Version</span>
+        <code className="font-mono text-[12px] text-ink-soft">
+          {info?.currentVersion ?? version ?? "—"}
+        </code>
+        {channel === "nightly" && (
+          <span className="rounded bg-warn/15 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-warn uppercase">
+            nightly
+          </span>
+        )}
+        <div className="ml-auto" />
+        <Button variant="outline" disabled={busy !== null} onClick={check}>
+          {busy === "checking" ? "Checking…" : "Check now"}
+        </Button>
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-1.5">
+        {(
+          [
+            ["stable", "Stable", "Tagged releases only"],
+            ["nightly", "Nightly", "Latest commit, rough edges"],
+          ] as const
+        ).map(([id, label, detail]) => (
+          <button
+            key={id}
+            onClick={() => void switchChannel(id)}
+            className={
+              "rounded-md border px-2.5 py-2 text-left transition-colors " +
+              (channel === id
+                ? "border-accent bg-accent/10"
+                : "border-line hover:border-line-strong")
+            }
+          >
+            <div className="text-[12px] font-medium">{label}</div>
+            <div className="text-[10px] text-ink-muted">{detail}</div>
+          </button>
+        ))}
+      </div>
+
+      {info?.available && (
+        <div className="mt-3 rounded-md border border-accent-soft/40 bg-accent-soft/10 p-3">
+          <div className="flex items-center gap-2">
+            <Download size={14} className="shrink-0 text-accent-soft" />
+            <span className="text-[12px] font-medium">
+              Version {info.available.version} is available
+            </span>
+            <div className="ml-auto" />
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={busy !== null}
+              onClick={async () => {
+                setBusy("installing");
+                try {
+                  // On success the app restarts, so nothing after this runs.
+                  await ipc.installUpdate();
+                } catch (error) {
+                  toast("error", String(error));
+                  setBusy(null);
+                }
+              }}
+            >
+              {busy === "installing" ? "Installing…" : "Install and restart"}
+            </Button>
+          </div>
+          {info.available.notes && (
+            <p className="mt-2 max-h-32 overflow-y-auto text-[11px] leading-relaxed whitespace-pre-wrap text-ink-muted">
+              {info.available.notes}
+            </p>
+          )}
+        </div>
       )}
     </Section>
   );

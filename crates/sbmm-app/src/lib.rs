@@ -64,6 +64,7 @@ const SETTING_GAME_ROOT: &str = "gameRoot";
 const SETTING_AUTO_APPLY: &str = "autoApply";
 const SETTING_LIBRARY_ROOT: &str = "libraryRoot";
 const SETTING_NEXUS_ACCOUNT: &str = "nexusAccount";
+const SETTING_UPDATE_CHANNEL: &str = "updateChannel";
 
 pub struct App {
     store: Store,
@@ -139,6 +140,27 @@ impl App {
             return Ok(None);
         }
         Ok(serde_json::from_str(&raw).ok())
+    }
+
+    // -- self update -------------------------------------------------------
+
+    /// Which release stream to update from: `stable` or `nightly`.
+    pub fn update_channel(&self) -> Result<String> {
+        Ok(self
+            .store
+            .get_setting(SETTING_UPDATE_CHANNEL)?
+            .filter(|c| c == "nightly")
+            .unwrap_or_else(|| "stable".to_string()))
+    }
+
+    pub fn set_update_channel(&mut self, channel: &str) -> Result<()> {
+        let normalised = if channel == "nightly" {
+            "nightly"
+        } else {
+            "stable"
+        };
+        self.store.set_setting(SETTING_UPDATE_CHANNEL, normalised)?;
+        Ok(())
     }
 
     /// Where mods and backups are kept. Defaults to the app data directory.
@@ -456,6 +478,7 @@ impl App {
             drift: self.drift()?,
             auto_apply: self.auto_apply()?,
             nexus: self.nexus_account()?,
+            update_channel: self.update_channel()?,
         })
     }
 

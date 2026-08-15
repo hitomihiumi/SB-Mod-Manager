@@ -18,6 +18,8 @@ pub struct AppSnapshot {
     pub auto_apply: bool,
     /// `None` until an API key has been validated.
     pub nexus: Option<NexusAccount>,
+    /// Which release stream the app updates itself from.
+    pub update_channel: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

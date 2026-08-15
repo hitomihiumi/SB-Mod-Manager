@@ -14,6 +14,7 @@ use sbmm_core::model::ModType;
 use sbmm_game::GameInstall;
 use sbmm_nexus::{NexusClient, ReqwestTransport};
 use tauri::Manager;
+use tauri_plugin_updater::UpdaterExt;
 
 struct AppState(Mutex<App>);
 
@@ -209,11 +210,117 @@ async fn nexus_rate_limit(
 
 const USER_AGENT: &str = concat!("SBModManager/", env!("CARGO_PKG_VERSION"));
 
+// -- self update ------------------------------------------------------------
+
+/// Where the updater looks for a manifest, per channel.
+///
+/// Both point at GitHub releases: the stable channel follows whatever release
+/// is marked latest, the nightly channel follows the rolling `nightly` tag the
+/// release workflow keeps moving.
+fn updater_endpoint(channel: &str) -> &'static str {
+    match channel {
+        "nightly" => {
+            "https://github.com/hitomihiumi/SB-Mod-Manager/releases/download/nightly/latest.json"
+        }
+        _ => "https://github.com/hitomihiumi/SB-Mod-Manager/releases/latest/download/latest.json",
+    }
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateInfo {
+    current_version: String,
+    available: Option<AvailableUpdate>,
+    channel: String,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AvailableUpdate {
+    version: String,
+    notes: Option<String>,
+    date: Option<String>,
+}
+
+#[tauri::command]
+async fn check_for_update(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<UpdateInfo, String> {
+    let channel = with_app!(state, |app| app.update_channel())?;
+    let current_version = app.package_info().version.to_string();
+
+    let endpoint = updater_endpoint(&channel)
+        .parse()
+        .map_err(|e| format!("bad update endpoint: {e}"))?;
+
+    let updater = app
+        .updater_builder()
+        .endpoints(vec![endpoint])
+        .map_err(fail)?
+        .build()
+        .map_err(fail)?;
+
+    // "Nothing new" is the ordinary answer, not a failure.
+    let available = updater
+        .check()
+        .await
+        .map_err(fail)?
+        .map(|update| AvailableUpdate {
+            version: update.version.clone(),
+            notes: update.body.clone(),
+            date: update.date.map(|d| d.to_string()),
+        });
+
+    Ok(UpdateInfo {
+        current_version,
+        available,
+        channel,
+    })
+}
+
+/// Download and install the pending update, then restart into it.
+#[tauri::command]
+async fn install_update(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let channel = with_app!(state, |app| app.update_channel())?;
+    let endpoint = updater_endpoint(&channel)
+        .parse()
+        .map_err(|e| format!("bad update endpoint: {e}"))?;
+
+    let updater = app
+        .updater_builder()
+        .endpoints(vec![endpoint])
+        .map_err(fail)?
+        .build()
+        .map_err(fail)?;
+
+    let Some(update) = updater.check().await.map_err(fail)? else {
+        return Err("there is no update to install".into());
+    };
+
+    update
+        .download_and_install(|_chunk, _total| {}, || {})
+        .await
+        .map_err(fail)?;
+
+    app.restart();
+}
+
+#[tauri::command]
+fn set_update_channel(state: tauri::State<'_, AppState>, channel: String) -> Result<(), String> {
+    with_app!(state, |app| app.set_update_channel(&channel))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             let service = App::new(data_dir)?;
@@ -242,6 +349,9 @@ pub fn run() {
             set_library_root,
             set_nexus_key,
             nexus_rate_limit,
+            check_for_update,
+            install_update,
+            set_update_channel,
         ])
         .run(tauri::generate_context!())
         .expect("failed to start SB Mod Manager");

@@ -37,6 +37,9 @@ wrong is the usual reason a mod "doesn't work".
   drive; only the small database stays in the app data folder. If the library
   ends up on a different drive from the game, the app says so, because hard
   links stop working there and every enabled mod is then stored twice.
+- **Updates itself** from GitHub releases, on either the stable or the nightly
+  channel, with the download checked against a signature before anything is
+  replaced.
 - **Leaves nothing behind.** Every file written and every original displaced is
   recorded, so disabling everything restores the folder byte for byte —
   including removing directories and the `mods.txt` it created, while never
@@ -46,7 +49,8 @@ wrong is the usual reason a mod "doesn't work".
 
 The MVP core is complete and covered by tests. Not yet built:
 
-- Nexus Mods integration — API key, downloads, `nxm://` handling, collections
+- Nexus Mods downloads — `nxm://` handling, the download queue, collections
+  (the API client and key storage are in place)
 - ProjFS virtual filesystem as an alternative to hard-linking
 - Profiles (the schema already stores state per profile)
 - Asset-level conflict detection by reading `.pak` and `.utoc` indexes
@@ -63,9 +67,31 @@ pnpm tauri build    # produce an installer
 ```
 
 Releases are automated: pushing a `v*` tag builds the Windows installer and
-publishes a GitHub Release, and a nightly prerelease is refreshed whenever
-something landed in the previous day. The app version comes from
-`package.json` alone — `tauri.conf.json` points at it.
+publishes a GitHub Release with notes generated from the commits since the
+last tag, and a rolling `nightly` prerelease is rebuilt from `master` whenever
+something landed that day. The app version comes from `package.json` alone —
+`tauri.conf.json` points at it.
+
+### Update signing (do this before the first release)
+
+The app updates itself from these releases and refuses anything without a
+valid signature, so the repository needs its own signing keypair. The public
+key committed in `tauri.conf.json` is a placeholder that only keeps local
+builds valid — nobody holds its private half, so replace it:
+
+```sh
+pnpm tauri signer generate -w .tauri/updater.key
+```
+
+Then:
+
+1. Paste the contents of `.tauri/updater.key.pub` into `plugins.updater.pubkey`
+   in `src-tauri/tauri.conf.json`.
+2. Add the contents of `.tauri/updater.key` as the repository secret
+   `TAURI_SIGNING_PRIVATE_KEY`, and its password as
+   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
+3. Keep `.tauri/updater.key` somewhere safe. Losing it means existing installs
+   can no longer be updated — they will reject builds signed with a new key.
 
 ## Architecture
 
