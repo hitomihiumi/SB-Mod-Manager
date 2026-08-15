@@ -1,0 +1,40 @@
+# Deliberately its own workspace: this crate needs WebKit/WebView2 system
+# libraries, so keeping it out of the root workspace lets `cargo test
+# --workspace` run the domain crates on any machine, including CI on Linux.
+[workspace]
+
+[package]
+name = "sbmm"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "MIT"
+description = "Mod manager for Stellar Blade"
+default-run = "sbmm"
+
+[lib]
+name = "sbmm_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["devtools"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+
+sbmm-app = { path = "../crates/sbmm-app" }
+sbmm-core = { path = "../crates/sbmm-core" }
+sbmm-game = { path = "../crates/sbmm-game" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+incremental = false

@@ -59,7 +59,10 @@ fn a_redundant_wrapper_folder_is_ignored() {
 fn logic_mods_never_land_in_the_mods_folder() {
     let c = only(&["LogicMods/BetterCamera_P.pak"]);
     assert_eq!(c.mod_type, ModType::LogicMod);
-    assert_eq!(targets(&c), vec!["SB/Content/Paks/LogicMods/BetterCamera_P.pak"]);
+    assert_eq!(
+        targets(&c),
+        vec!["SB/Content/Paks/LogicMods/BetterCamera_P.pak"]
+    );
 }
 
 #[test]
@@ -108,8 +111,9 @@ fn reshade_installs_next_to_the_executable_with_its_shaders() {
         "reshade-shaders/Shaders/Clarity.fx",
     ]);
     assert_eq!(c.mod_type, ModType::RootBinary);
-    assert!(targets(&c)
-        .contains(&"SB/Binaries/Win64/reshade-shaders/Shaders/Clarity.fx".to_string()));
+    assert!(
+        targets(&c).contains(&"SB/Binaries/Win64/reshade-shaders/Shaders/Clarity.fx".to_string())
+    );
 }
 
 #[test]
@@ -164,11 +168,14 @@ fn a_mixed_archive_yields_one_component_per_payload() {
 
     assert_eq!(logic.files.len(), 1);
     assert_eq!(pak.files.len(), 3);
-    assert_eq!(targets(pak), vec![
-        "SB/Content/Paks/~mods/Cosmetic_P.pak",
-        "SB/Content/Paks/~mods/Cosmetic_P.ucas",
-        "SB/Content/Paks/~mods/Cosmetic_P.utoc",
-    ]);
+    assert_eq!(
+        targets(pak),
+        vec![
+            "SB/Content/Paks/~mods/Cosmetic_P.pak",
+            "SB/Content/Paks/~mods/Cosmetic_P.ucas",
+            "SB/Content/Paks/~mods/Cosmetic_P.utoc",
+        ]
+    );
 }
 
 #[test]
@@ -248,6 +255,10 @@ fn priority_changes_the_deployed_pak_name_consistently() {
     names.sort();
     assert_eq!(
         names,
-        vec!["0250_Outfit_P.pak", "0250_Outfit_P.ucas", "0250_Outfit_P.utoc"]
+        vec![
+            "0250_Outfit_P.pak",
+            "0250_Outfit_P.ucas",
+            "0250_Outfit_P.utoc"
+        ]
     );
 }

@@ -35,7 +35,9 @@ pub fn validate(path: impl AsRef<Path>) -> Result<GameInstall, DiscoveryError> {
 
     let root = if looks_like_game_root(path) {
         path.to_path_buf()
-    } else if path.file_name().is_some_and(|n| n.eq_ignore_ascii_case("SB"))
+    } else if path
+        .file_name()
+        .is_some_and(|n| n.eq_ignore_ascii_case("SB"))
         && path.parent().is_some_and(looks_like_game_root)
     {
         path.parent().unwrap().to_path_buf()

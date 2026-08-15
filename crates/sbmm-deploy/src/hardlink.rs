@@ -3,9 +3,7 @@ use std::path::{Path, PathBuf};
 
 use sbmm_core::plan::DeployPlan;
 
-use crate::backend::{
-    resolve_target, DeployBackend, DeployContext, DeployError, Drift, DriftKind,
-};
+use crate::backend::{resolve_target, DeployBackend, DeployContext, DeployError, Drift, DriftKind};
 use crate::manifest::{DeployedFile, Manifest};
 
 /// Deploys by hard-linking staged files into the game folder.
@@ -92,8 +90,8 @@ fn deploy_all(
 ) -> Result<(), DeployError> {
     for file in &plan.files {
         let source = plan.staging_root.join(&file.source);
-        let meta = fs::metadata(&source)
-            .map_err(|_| DeployError::MissingSource(file.source.clone()))?;
+        let meta =
+            fs::metadata(&source).map_err(|_| DeployError::MissingSource(file.source.clone()))?;
         if !meta.is_file() {
             continue;
         }
@@ -167,7 +165,7 @@ fn record_created_dirs(
 /// Remove directories we created, deepest first, and only while empty.
 ///
 /// A directory the user dropped their own files into simply stays.
-fn prune_dirs(game_root: &Path, dirs: &[PathBuf]) {
+pub fn prune_dirs(game_root: &Path, dirs: &[PathBuf]) {
     let mut sorted: Vec<&PathBuf> = dirs.iter().collect();
     sorted.sort_by_key(|d| std::cmp::Reverse(d.components().count()));
     for dir in sorted {

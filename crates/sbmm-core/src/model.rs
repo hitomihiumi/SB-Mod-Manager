@@ -63,7 +63,10 @@ impl ModType {
     /// Types whose destination directory is flat — subfolders in the archive
     /// carry no meaning and are collapsed away.
     pub fn is_flat_target(self) -> bool {
-        matches!(self, ModType::GenericPak | ModType::LogicMod | ModType::Movie)
+        matches!(
+            self,
+            ModType::GenericPak | ModType::LogicMod | ModType::Movie
+        )
     }
 
     /// Stable identifier used in the UI and in the database.
@@ -182,8 +185,12 @@ pub struct DetectedComponent {
     pub ue4ss_mod_name: Option<String>,
     /// Pak sets found in this component, keyed by source path.
     pub pak_sets: Vec<PakSet>,
-    /// Human-readable notes surfaced in the install dialog.
+    /// Real problems the user should know about: a missing `_P` suffix, a
+    /// half-complete IoStore set, an undetectable payload.
     pub warnings: Vec<String>,
+    /// Descriptive detail shown in the install dialog. Not a problem, so it
+    /// must not raise a warning marker in the mod list.
+    pub notes: Vec<String>,
 }
 
 impl DetectedComponent {

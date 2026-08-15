@@ -90,7 +90,11 @@ pub fn build_plan(
 ///
 /// Detection is a guess for `Unknown` payloads; this recomputes destinations
 /// from scratch for the chosen type rather than patching the old ones.
-pub fn retarget(component: &DetectedComponent, new_type: ModType, mod_name: &str) -> DetectedComponent {
+pub fn retarget(
+    component: &DetectedComponent,
+    new_type: ModType,
+    mod_name: &str,
+) -> DetectedComponent {
     let target_root = match new_type {
         ModType::Ue4ssLua | ModType::Ue4ssDll => {
             let folder = component
@@ -127,7 +131,11 @@ pub fn retarget(component: &DetectedComponent, new_type: ModType, mod_name: &str
         .files
         .iter()
         .map(|f| crate::tree::TreeEntry {
-            norm: f.source.to_string_lossy().to_ascii_lowercase().replace('\\', "/"),
+            norm: f
+                .source
+                .to_string_lossy()
+                .to_ascii_lowercase()
+                .replace('\\', "/"),
             rel: f.source.clone(),
             path: f.source.clone(),
         })
@@ -146,6 +154,7 @@ pub fn retarget(component: &DetectedComponent, new_type: ModType, mod_name: &str
             Vec::new()
         },
         warnings,
+        notes: component.notes.clone(),
     }
 }
 

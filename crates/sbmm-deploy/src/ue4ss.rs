@@ -32,11 +32,9 @@ pub fn sync_mods_txt(
     states: &BTreeMap<String, bool>,
 ) -> Result<(), DeployError> {
     let path = game_root.join(paths::UE4SS_MODS_TXT);
+    remember_ownership(&path, backup_root)?;
     let existing = match fs::read_to_string(&path) {
-        Ok(text) => {
-            back_up_original(&path, backup_root)?;
-            text
-        }
+        Ok(text) => text,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(DeployError::io(&path, e)),
     };
@@ -72,11 +70,9 @@ pub fn remove_from_mods_txt(
     names: &[String],
 ) -> Result<(), DeployError> {
     let path = game_root.join(paths::UE4SS_MODS_TXT);
+    remember_ownership(&path, backup_root)?;
     let existing = match fs::read_to_string(&path) {
-        Ok(text) => {
-            back_up_original(&path, backup_root)?;
-            text
-        }
+        Ok(text) => text,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(e) => return Err(DeployError::io(&path, e)),
     };
@@ -149,17 +145,68 @@ fn write(path: &Path, lines: &[Line]) -> Result<(), DeployError> {
     fs::write(path, out).map_err(|e| DeployError::io(path, e))
 }
 
-/// Keep one pristine copy so the file can be restored on a full uninstall.
-fn back_up_original(path: &Path, backup_root: &Path) -> Result<(), DeployError> {
-    let dest = original_backup_path(backup_root);
-    if dest.exists() {
+/// Called when no UE4SS mods are enabled any more.
+///
+/// If the user had their own `mods.txt` before we touched it, theirs comes
+/// back untouched. If the file only exists because we wrote it, it goes away
+/// entirely — otherwise disabling every mod would still leave a trace in the
+/// game folder.
+pub fn clear_registrations(game_root: &Path, backup_root: &Path) -> Result<(), DeployError> {
+    if ownership(backup_root) == Ownership::UsersOwn {
+        return restore_original(game_root, backup_root);
+    }
+    let path = game_root.join(paths::UE4SS_MODS_TXT);
+    match fs::remove_file(&path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(DeployError::io(&path, e)),
+    }
+    let _ = fs::remove_file(ownership_path(backup_root));
+    Ok(())
+}
+
+/// Who `mods.txt` belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Ownership {
+    /// The user already had one before we ever wrote to it.
+    UsersOwn,
+    /// It exists only because we created it.
+    Ours,
+}
+
+/// Record, once and for all, whether `mods.txt` predates us.
+///
+/// This has to be decided the very first time we touch the file and then never
+/// revisited: on a later run our own file would otherwise look like the user's,
+/// and disabling every UE4SS mod would leave it behind forever.
+fn remember_ownership(path: &Path, backup_root: &Path) -> Result<(), DeployError> {
+    let marker = ownership_path(backup_root);
+    if marker.exists() {
         return Ok(());
     }
-    if let Some(parent) = dest.parent() {
+    if let Some(parent) = marker.parent() {
         fs::create_dir_all(parent).map_err(|e| DeployError::io(parent, e))?;
     }
-    fs::copy(path, &dest).map_err(|e| DeployError::io(&dest, e))?;
+
+    if path.exists() {
+        let backup = original_backup_path(backup_root);
+        fs::copy(path, &backup).map_err(|e| DeployError::io(&backup, e))?;
+        fs::write(&marker, "users-own").map_err(|e| DeployError::io(&marker, e))?;
+    } else {
+        fs::write(&marker, "ours").map_err(|e| DeployError::io(&marker, e))?;
+    }
     Ok(())
+}
+
+fn ownership(backup_root: &Path) -> Ownership {
+    match fs::read_to_string(ownership_path(backup_root)) {
+        Ok(text) if text.trim() == "users-own" => Ownership::UsersOwn,
+        _ => Ownership::Ours,
+    }
+}
+
+fn ownership_path(backup_root: &Path) -> PathBuf {
+    backup_root.join("_originals").join("ue4ss-mods.owner")
 }
 
 /// Put `mods.txt` back the way it was found.
@@ -174,6 +221,7 @@ pub fn restore_original(game_root: &Path, backup_root: &Path) -> Result<(), Depl
     }
     fs::copy(&backup, &path).map_err(|e| DeployError::io(&path, e))?;
     fs::remove_file(&backup).map_err(|e| DeployError::io(&backup, e))?;
+    let _ = fs::remove_file(ownership_path(backup_root));
     Ok(())
 }
 

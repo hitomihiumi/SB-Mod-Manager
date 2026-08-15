@@ -146,7 +146,9 @@ impl FileTree {
     /// True when any path contains the given directory name as a full segment.
     pub fn has_segment(&self, segment: &str) -> bool {
         let seg = segment.to_ascii_lowercase();
-        self.entries.iter().any(|e| e.segments().contains(&seg.as_str()))
+        self.entries
+            .iter()
+            .any(|e| e.segments().contains(&seg.as_str()))
     }
 
     /// Entries whose normalized path contains `segment` as a full component.
@@ -173,9 +175,7 @@ impl FileTree {
                 if e.norm == needle {
                     Some(String::new())
                 } else {
-                    e.norm
-                        .strip_suffix(&suffix)
-                        .map(|dir| dir.to_string())
+                    e.norm.strip_suffix(&suffix).map(|dir| dir.to_string())
                 }
             })
             .collect();
@@ -186,7 +186,10 @@ impl FileTree {
 
     /// Entries that live directly at the root of the tree.
     pub fn top_level_files(&self) -> Vec<&TreeEntry> {
-        self.entries.iter().filter(|e| !e.norm.contains('/')).collect()
+        self.entries
+            .iter()
+            .filter(|e| !e.norm.contains('/'))
+            .collect()
     }
 
     /// Entries sitting inside the given normalized directory (at any depth).
@@ -302,7 +305,10 @@ mod tests {
         let tree = FileTree::new(["SB/Content/Movies/intro.mp4"]);
         let sub = tree.subtree("sb");
         assert_eq!(sub.entries()[0].norm, "content/movies/intro.mp4");
-        assert_eq!(sub.entries()[0].rel, PathBuf::from("Content/Movies/intro.mp4"));
+        assert_eq!(
+            sub.entries()[0].rel,
+            PathBuf::from("Content/Movies/intro.mp4")
+        );
         assert_eq!(
             sub.entries()[0].path,
             PathBuf::from("SB/Content/Movies/intro.mp4"),

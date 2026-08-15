@@ -24,6 +24,12 @@ pub enum StoreError {
 
 type Result<T> = std::result::Result<T, StoreError>;
 
+/// One recorded deployed file: `(mod_id, target, backup, size)`.
+pub type DeployedRow = (i64, String, Option<String>, i64);
+
+/// A deployed file without its owning mod: `(target, backup, size)`.
+pub type DeployedFileRow = (String, Option<String>, i64);
+
 /// An installed mod as the UI sees it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -346,11 +352,7 @@ impl Store {
     // -- deployment record -------------------------------------------------
 
     /// Replace the recorded deployment for one mod.
-    pub fn replace_deployment(
-        &mut self,
-        mod_id: i64,
-        files: &[(String, Option<String>, i64)],
-    ) -> Result<()> {
+    pub fn replace_deployment(&mut self, mod_id: i64, files: &[DeployedFileRow]) -> Result<()> {
         let tx = self.conn.transaction()?;
         tx.execute("DELETE FROM deployed_files WHERE mod_id = ?1", [mod_id])?;
         {
@@ -373,7 +375,7 @@ impl Store {
     }
 
     /// Every recorded file, as `(mod_id, target, backup, size)`.
-    pub fn deployed_files(&self) -> Result<Vec<(i64, String, Option<String>, i64)>> {
+    pub fn deployed_files(&self) -> Result<Vec<DeployedRow>> {
         let mut stmt = self
             .conn
             .prepare("SELECT mod_id, target, backup, size FROM deployed_files ORDER BY id")?;
@@ -381,7 +383,7 @@ impl Store {
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 
-    pub fn deployed_files_for(&self, mod_id: i64) -> Result<Vec<(String, Option<String>, i64)>> {
+    pub fn deployed_files_for(&self, mod_id: i64) -> Result<Vec<DeployedFileRow>> {
         let mut stmt = self.conn.prepare(
             "SELECT target, backup, size FROM deployed_files WHERE mod_id = ?1 ORDER BY id",
         )?;
@@ -392,8 +394,7 @@ impl Store {
     pub fn record_created_dirs(&mut self, dirs: &[String]) -> Result<()> {
         let tx = self.conn.transaction()?;
         {
-            let mut stmt =
-                tx.prepare("INSERT OR IGNORE INTO created_dirs (path) VALUES (?1)")?;
+            let mut stmt = tx.prepare("INSERT OR IGNORE INTO created_dirs (path) VALUES (?1)")?;
             for dir in dirs {
                 stmt.execute([dir])?;
             }
@@ -466,7 +467,10 @@ mod tests {
 
         let mods = store.list_mods().unwrap();
         assert_eq!(mods.len(), 2);
-        assert!(mods.iter().all(|m| !m.enabled), "installing must not change what loads");
+        assert!(
+            mods.iter().all(|m| !m.enabled),
+            "installing must not change what loads"
+        );
 
         let alpha = mods.iter().find(|m| m.id == first).unwrap();
         let beta = mods.iter().find(|m| m.id == second).unwrap();
@@ -521,10 +525,7 @@ mod tests {
         let id = store.insert_mod(&sample("A")).unwrap();
 
         store
-            .replace_deployment(
-                id,
-                &[("SB/Content/Paks/~mods/a.pak".into(), None, 12)],
-            )
+            .replace_deployment(id, &[("SB/Content/Paks/~mods/a.pak".into(), None, 12)])
             .unwrap();
         assert_eq!(store.deployed_files_for(id).unwrap().len(), 1);
 
@@ -547,7 +548,9 @@ mod tests {
     #[test]
     fn settings_and_learned_rules_persist() {
         let store = Store::open_in_memory().unwrap();
-        store.set_setting("gameRoot", "C:/Games/StellarBlade").unwrap();
+        store
+            .set_setting("gameRoot", "C:/Games/StellarBlade")
+            .unwrap();
         assert_eq!(
             store.get_setting("gameRoot").unwrap().as_deref(),
             Some("C:/Games/StellarBlade")

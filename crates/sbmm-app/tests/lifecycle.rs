@@ -99,7 +99,10 @@ fn a_mod_is_installed_disabled_and_changes_nothing_until_applied() {
     let snap = fx.app.snapshot().unwrap();
     assert_eq!(snap.mods.len(), 1);
     assert!(!snap.mods[0].enabled, "installing must not enable");
-    assert!(snap.pending.is_empty(), "a disabled new mod is not a pending change");
+    assert!(
+        snap.pending.is_empty(),
+        "a disabled new mod is not a pending change"
+    );
     assert_eq!(fx.game_snapshot(), before);
 }
 
@@ -212,7 +215,10 @@ fn a_ue4ss_lua_mod_is_registered_and_deregistered_in_mods_txt() {
     fx.app.apply().unwrap();
 
     let mods_txt = fx.game.join("SB/Binaries/Win64/ue4ss/Mods/mods.txt");
-    assert_eq!(fs::read_to_string(&mods_txt).unwrap().trim(), "CutsceneSkip : 1");
+    assert_eq!(
+        fs::read_to_string(&mods_txt).unwrap().trim(),
+        "CutsceneSkip : 1"
+    );
     assert!(fx
         .game
         .join("SB/Binaries/Win64/ue4ss/Mods/CutsceneSkip/scripts/main.lua")
@@ -220,10 +226,120 @@ fn a_ue4ss_lua_mod_is_registered_and_deregistered_in_mods_txt() {
 
     fx.app.set_enabled(&[id], false).unwrap();
     fx.app.apply().unwrap();
+    assert!(
+        !mods_txt.exists(),
+        "with no UE4SS mods left, the mods.txt we created must go too"
+    );
+}
+
+#[test]
+fn a_ue4ss_mod_is_switched_off_while_another_stays_on() {
+    let mut fx = Fixture::new();
+    let a = fx.install_folder("Skip", &[("Skip/scripts/main.lua", "-- a")]);
+    let b = fx.install_folder("Zoom", &[("Zoom/scripts/main.lua", "-- b")]);
+
+    fx.app.set_enabled(&[a, b], true).unwrap();
+    fx.app.apply().unwrap();
+
+    let mods_txt = fx.game.join("SB/Binaries/Win64/ue4ss/Mods/mods.txt");
+    let text = fs::read_to_string(&mods_txt).unwrap();
+    assert!(text.contains("Skip : 1") && text.contains("Zoom : 1"));
+
+    fx.app.set_enabled(&[a], false).unwrap();
+    fx.app.apply().unwrap();
+
+    let text = fs::read_to_string(&mods_txt).unwrap();
+    assert!(text.contains("Skip : 0"), "got {text:?}");
+    assert!(text.contains("Zoom : 1"), "the other mod must stay loaded");
+}
+
+#[test]
+fn a_users_own_mods_txt_survives_and_is_restored() {
+    let mut fx = Fixture::new();
+    let mods_txt = fx.game.join("SB/Binaries/Win64/ue4ss/Mods/mods.txt");
+    fs::create_dir_all(mods_txt.parent().unwrap()).unwrap();
+    fs::write(&mods_txt, "HandInstalled : 1\n").unwrap();
+
+    let id = fx.install_folder("Skip", &[("Skip/scripts/main.lua", "-- lua")]);
+    fx.app.set_enabled(&[id], true).unwrap();
+    fx.app.apply().unwrap();
+
+    let text = fs::read_to_string(&mods_txt).unwrap();
+    assert!(
+        text.contains("HandInstalled : 1"),
+        "their entry must survive"
+    );
+    assert!(text.contains("Skip : 1"));
+
+    fx.app.set_enabled(&[id], false).unwrap();
+    fx.app.apply().unwrap();
     assert_eq!(
-        fs::read_to_string(&mods_txt).unwrap().trim(),
-        "CutsceneSkip : 0",
-        "UE4SS must be told to stop loading it"
+        fs::read_to_string(&mods_txt).unwrap(),
+        "HandInstalled : 1\n",
+        "their original file must come back untouched"
+    );
+}
+
+#[test]
+fn disabling_a_ue4ss_mod_leaves_no_trace_in_the_game_folder() {
+    let mut fx = Fixture::new();
+    let before = fx.game_snapshot();
+    let id = fx.install_folder("Skip", &[("Skip/scripts/main.lua", "-- lua")]);
+
+    fx.app.set_enabled(&[id], true).unwrap();
+    fx.app.apply().unwrap();
+    fx.app.set_enabled(&[id], false).unwrap();
+    fx.app.apply().unwrap();
+
+    assert_eq!(
+        fx.game_snapshot(),
+        before,
+        "mods.txt and the ue4ss folders it lived in must all be gone"
+    );
+}
+
+#[test]
+fn our_own_mods_txt_is_not_mistaken_for_the_users_on_a_later_run() {
+    // Regression: ownership used to be inferred from whether a backup existed,
+    // so a second session would back up the file we wrote ourselves and then
+    // restore it forever instead of removing it.
+    let dir = tempfile::tempdir().unwrap();
+    let game = dir.path().join("game");
+    let data = dir.path().join("data");
+    let source = dir.path().join("source");
+    fs::create_dir_all(game.join("SB/Content/Paks")).unwrap();
+    fs::create_dir_all(game.join("SB/Binaries/Win64")).unwrap();
+    fs::write(game.join("SB/Binaries/Win64/SB-Win64-Shipping.exe"), "").unwrap();
+    let folder = source.join("Skip/Skip/scripts");
+    fs::create_dir_all(&folder).unwrap();
+    fs::write(folder.join("main.lua"), "-- lua").unwrap();
+
+    let before = snapshot(&game);
+    let mods_txt = game.join("SB/Binaries/Win64/ue4ss/Mods/mods.txt");
+
+    // First session: install and enable.
+    let id = {
+        let mut app = App::new(&data).unwrap();
+        app.set_game_root(&game).unwrap();
+        let staged = app.stage_folder(source.join("Skip")).unwrap();
+        let id = app
+            .confirm_install(&staged.staging_id, "Skip", None)
+            .unwrap();
+        app.set_enabled(&[id], true).unwrap();
+        app.apply().unwrap();
+        assert!(mods_txt.exists());
+        id
+    };
+
+    // Second session against the same data directory.
+    let mut app = App::new(&data).unwrap();
+    app.set_enabled(&[id], false).unwrap();
+    app.apply().unwrap();
+
+    assert_eq!(
+        snapshot(&game),
+        before,
+        "the file we created in an earlier session must still be removable"
     );
 }
 
@@ -314,7 +430,10 @@ fn a_zip_archive_installs_end_to_end() {
     fx.app.set_enabled(&[id], true).unwrap();
     fx.app.apply().unwrap();
 
-    assert!(fx.game.join("SB/Content/Paks/~mods/0010_Outfit_P.pak").exists());
+    assert!(fx
+        .game
+        .join("SB/Content/Paks/~mods/0010_Outfit_P.pak")
+        .exists());
 }
 
 #[test]

@@ -287,10 +287,7 @@ impl App {
                 size_bytes: record.size_bytes,
                 source: record.source.clone(),
                 installed_at: record.installed_at.clone(),
-                warnings: components
-                    .iter()
-                    .flat_map(|c| c.warnings.clone())
-                    .collect(),
+                warnings: components.iter().flat_map(|c| c.warnings.clone()).collect(),
             });
         }
 
@@ -420,9 +417,7 @@ impl App {
             };
 
             let outcome = match kind {
-                ChangeKind::Disable => self
-                    .undeploy_mod(record.id)
-                    .map(|_| Outcome::Removed),
+                ChangeKind::Disable => self.undeploy_mod(record.id).map(|_| Outcome::Removed),
                 ChangeKind::Enable => self
                     .deploy_mod(&ctx, record.id, &planned)
                     .map(|_| Outcome::Deployed),
@@ -562,9 +557,37 @@ impl App {
             }
         }
 
-        if any {
-            ue4ss::sync_mods_txt(&ctx.game_root, &ctx.backup_root, &states)?;
+        if !any {
+            return Ok(());
         }
+
+        if states.values().any(|enabled| *enabled) {
+            ue4ss::sync_mods_txt(&ctx.game_root, &ctx.backup_root, &states)?;
+        } else {
+            // Nothing left for UE4SS to load: take our mods.txt back out and
+            // let the folders it lived in go with it.
+            ue4ss::clear_registrations(&ctx.game_root, &ctx.backup_root)?;
+            self.prune_empty_dirs(ctx)?;
+        }
+        Ok(())
+    }
+
+    /// Drop any directory we created that is now empty, and stop tracking it.
+    fn prune_empty_dirs(&self, ctx: &DeployContext) -> Result<()> {
+        let dirs: Vec<PathBuf> = self
+            .store
+            .created_dirs()?
+            .into_iter()
+            .map(PathBuf::from)
+            .collect();
+        sbmm_deploy::prune_dirs(&ctx.game_root, &dirs);
+
+        let gone: Vec<String> = dirs
+            .iter()
+            .filter(|d| !ctx.game_root.join(d).exists())
+            .map(|d| d.to_string_lossy().into_owned())
+            .collect();
+        self.store.forget_created_dirs(&gone)?;
         Ok(())
     }
 
@@ -587,7 +610,7 @@ fn change_kind(
     enabled: bool,
     deployed: bool,
     planned: &DeployPlan,
-    recorded: &[(String, Option<String>, i64)],
+    recorded: &[sbmm_store::DeployedFileRow],
 ) -> Option<ChangeKind> {
     match (enabled, deployed) {
         (true, false) if !planned.is_empty() => Some(ChangeKind::Enable),

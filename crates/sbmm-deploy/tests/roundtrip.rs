@@ -84,11 +84,19 @@ fn walk(root: &Path, dir: &Path, out: &mut BTreeMap<String, Vec<u8>>) {
         let path = entry.path();
         if path.is_dir() {
             // Record directories too, so a stray empty folder is caught.
-            let rel = path.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/");
+            let rel = path
+                .strip_prefix(root)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/");
             out.insert(format!("{rel}/"), Vec::new());
             walk(root, &path, out);
         } else {
-            let rel = path.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/");
+            let rel = path
+                .strip_prefix(root)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/");
             out.insert(rel, fs::read(&path).unwrap());
         }
     }
@@ -103,10 +111,16 @@ fn deploy_then_undeploy_restores_the_game_folder_exactly() {
     let before = snapshot(&fx.game);
 
     let backend = HardlinkBackend;
-    let plan = fx.plan(1, &[("Outfit_P.pak", "SB/Content/Paks/~mods/0100_Outfit_P.pak")]);
+    let plan = fx.plan(
+        1,
+        &[("Outfit_P.pak", "SB/Content/Paks/~mods/0100_Outfit_P.pak")],
+    );
     let manifest = backend.deploy(&fx.ctx(), &plan).unwrap();
 
-    assert!(fx.game.join("SB/Content/Paks/~mods/0100_Outfit_P.pak").exists());
+    assert!(fx
+        .game
+        .join("SB/Content/Paks/~mods/0100_Outfit_P.pak")
+        .exists());
     assert_ne!(snapshot(&fx.game), before);
 
     backend.undeploy(&fx.ctx(), &manifest).unwrap();
@@ -129,11 +143,20 @@ fn a_displaced_game_file_is_backed_up_and_restored() {
     let plan = fx.plan(1, &[("Intro.mp4", target)]);
 
     let manifest = backend.deploy(&fx.ctx(), &plan).unwrap();
-    assert_eq!(fs::read_to_string(fx.game.join(target)).unwrap(), "modded movie");
-    assert!(manifest.files[0].backup.is_some(), "the original must be preserved");
+    assert_eq!(
+        fs::read_to_string(fx.game.join(target)).unwrap(),
+        "modded movie"
+    );
+    assert!(
+        manifest.files[0].backup.is_some(),
+        "the original must be preserved"
+    );
 
     backend.undeploy(&fx.ctx(), &manifest).unwrap();
-    assert_eq!(fs::read_to_string(fx.game.join(target)).unwrap(), "original movie");
+    assert_eq!(
+        fs::read_to_string(fx.game.join(target)).unwrap(),
+        "original movie"
+    );
     assert_eq!(snapshot(&fx.game), before);
 }
 
@@ -174,12 +197,18 @@ fn several_mods_can_be_removed_independently() {
     let mut global = sbmm_deploy::Manifest::default();
     global.merge(
         backend
-            .deploy(&fx.ctx(), &fx.plan(1, &[("a.pak", "SB/Content/Paks/~mods/a.pak")]))
+            .deploy(
+                &fx.ctx(),
+                &fx.plan(1, &[("a.pak", "SB/Content/Paks/~mods/a.pak")]),
+            )
             .unwrap(),
     );
     global.merge(
         backend
-            .deploy(&fx.ctx(), &fx.plan(2, &[("b.pak", "SB/Content/Paks/~mods/b.pak")]))
+            .deploy(
+                &fx.ctx(),
+                &fx.plan(2, &[("b.pak", "SB/Content/Paks/~mods/b.pak")]),
+            )
             .unwrap(),
     );
 
@@ -208,7 +237,10 @@ fn verify_reports_outside_changes() {
     fx.write_staged("a.pak", "a");
     let backend = HardlinkBackend;
     let manifest = backend
-        .deploy(&fx.ctx(), &fx.plan(1, &[("a.pak", "SB/Content/Paks/~mods/a.pak")]))
+        .deploy(
+            &fx.ctx(),
+            &fx.plan(1, &[("a.pak", "SB/Content/Paks/~mods/a.pak")]),
+        )
         .unwrap();
 
     assert!(backend.verify(&fx.ctx(), &manifest).unwrap().is_empty());

@@ -50,7 +50,11 @@ pub fn apply_load_order(files: &mut [ComponentFile], pak_sets: &[PakSet], priori
             let new_name = format!("{new_base}.{ext}");
             for file in files.iter_mut() {
                 if &file.source == source {
-                    let dir = file.target.parent().map(Path::to_path_buf).unwrap_or_default();
+                    let dir = file
+                        .target
+                        .parent()
+                        .map(Path::to_path_buf)
+                        .unwrap_or_default();
                     file.target = dir.join(&new_name);
                 }
             }
@@ -102,7 +106,11 @@ mod tests {
             .collect();
         assert_eq!(
             names,
-            vec!["0100_CoolMod_P.pak", "0100_CoolMod_P.utoc", "0100_CoolMod_P.ucas"]
+            vec![
+                "0100_CoolMod_P.pak",
+                "0100_CoolMod_P.utoc",
+                "0100_CoolMod_P.ucas"
+            ]
         );
     }
 

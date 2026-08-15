@@ -148,7 +148,9 @@ fn extract_rar(archive: &Path, dest: &Path) -> Result<(), ArchiveError> {
                 .extract_with_base(dest)
                 .map_err(|e| ArchiveError::Rar(e.to_string()))?;
         } else {
-            open = header.skip().map_err(|e| ArchiveError::Rar(e.to_string()))?;
+            open = header
+                .skip()
+                .map_err(|e| ArchiveError::Rar(e.to_string()))?;
         }
     }
     ensure_contained(dest)?;
@@ -167,9 +169,7 @@ fn is_safe_relative(path: &Path) -> bool {
 /// Belt-and-braces check that nothing landed outside `dest`, for the formats
 /// where extraction is delegated to a third-party crate.
 fn ensure_contained(dest: &Path) -> Result<(), ArchiveError> {
-    let root = dest
-        .canonicalize()
-        .map_err(|e| ArchiveError::io(dest, e))?;
+    let root = dest.canonicalize().map_err(|e| ArchiveError::io(dest, e))?;
     for entry in walkdir::WalkDir::new(dest).into_iter().flatten() {
         if let Ok(resolved) = entry.path().canonicalize() {
             if !resolved.starts_with(&root) {
@@ -228,10 +228,7 @@ mod tests {
         let archive = dir.path().join("mod.zip");
         make_zip(
             &archive,
-            &[
-                ("Outfit_P.pak", b"pak"),
-                ("nested/readme.txt", b"hello"),
-            ],
+            &[("Outfit_P.pak", b"pak"), ("nested/readme.txt", b"hello")],
         );
 
         let dest = dir.path().join("out");

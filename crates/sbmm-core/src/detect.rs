@@ -86,9 +86,10 @@ fn detect_game_relative(entries: &[TreeEntry]) -> Vec<DetectedComponent> {
                     target: e.rel.clone(),
                 })
                 .collect();
-            let (pak_sets, mut warnings) = build_pak_sets(&entries);
+            let (pak_sets, warnings) = build_pak_sets(&entries);
+            let mut notes = Vec::new();
             if mod_type == ModType::GameRootOverlay {
-                warnings.push(
+                notes.push(
                     "Ships explicit game paths and will be laid down directly onto the game folder."
                         .to_string(),
                 );
@@ -101,6 +102,7 @@ fn detect_game_relative(entries: &[TreeEntry]) -> Vec<DetectedComponent> {
                 ue4ss_mod_name: ue4ss_name,
                 pak_sets,
                 warnings,
+                notes,
             }
         })
         .collect()
@@ -179,10 +181,7 @@ fn claim_ue4ss_framework(
     claimed: &mut HashSet<String>,
     out: &mut Vec<DetectedComponent>,
 ) {
-    let has_core = tree
-        .entries()
-        .iter()
-        .any(|e| e.file_name() == "ue4ss.dll");
+    let has_core = tree.entries().iter().any(|e| e.file_name() == "ue4ss.dll");
     if !has_core {
         return;
     }
@@ -208,7 +207,8 @@ fn claim_ue4ss_framework(
         target_subdir: PathBuf::from(paths::BINARIES_WIN64),
         ue4ss_mod_name: None,
         pak_sets: Vec::new(),
-        warnings: vec![
+        warnings: Vec::new(),
+        notes: vec![
             "Installs the UE4SS runtime. Required by Lua, C++ and Blueprint logic mods."
                 .to_string(),
         ],
@@ -241,6 +241,7 @@ fn claim_logic_mods(
         ue4ss_mod_name: None,
         pak_sets,
         warnings,
+        notes: Vec::new(),
     });
 }
 
@@ -271,9 +272,7 @@ fn claim_ue4ss_mods(
         }
 
         // A folder carrying both markers is still one mod; Lua takes the label.
-        let is_lua = entries
-            .iter()
-            .any(|e| e.norm.ends_with("scripts/main.lua"));
+        let is_lua = entries.iter().any(|e| e.norm.ends_with("scripts/main.lua"));
         let mod_type = if is_lua {
             ModType::Ue4ssLua
         } else {
@@ -298,9 +297,9 @@ fn claim_ue4ss_mods(
         let files = map_preserving(&entries, &target_root, depth);
         mark_claimed(&entries, claimed);
 
-        let mut warnings = vec![
-            "Will be registered in UE4SS mods.txt so the loader picks it up.".to_string(),
-        ];
+        let notes =
+            vec!["Will be registered in UE4SS mods.txt so the loader picks it up.".to_string()];
+        let mut warnings = Vec::new();
         if name.is_none() {
             warnings.push(
                 "The archive has no mod folder; the mod name will be used as the folder name."
@@ -316,6 +315,7 @@ fn claim_ue4ss_mods(
             ue4ss_mod_name: name,
             pak_sets: Vec::new(),
             warnings,
+            notes,
         });
     }
 }
@@ -346,7 +346,8 @@ fn claim_movies(tree: &FileTree, claimed: &mut HashSet<String>, out: &mut Vec<De
         target_subdir: PathBuf::from(paths::CONTENT_MOVIES),
         ue4ss_mod_name: None,
         pak_sets: Vec::new(),
-        warnings: vec!["Replaces a game movie file of the same name.".to_string()],
+        warnings: Vec::new(),
+        notes: vec!["Replaces a game movie file of the same name.".to_string()],
     });
 }
 
@@ -394,7 +395,8 @@ fn claim_root_binaries(
         target_subdir: PathBuf::from(paths::BINARIES_WIN64),
         ue4ss_mod_name: None,
         pak_sets: Vec::new(),
-        warnings: vec![
+        warnings: Vec::new(),
+        notes: vec![
             "Installs next to the game executable. Only one proxy DLL of a given name can be active."
                 .to_string(),
         ],
@@ -431,6 +433,7 @@ fn claim_generic_paks(
         ue4ss_mod_name: None,
         pak_sets,
         warnings,
+        notes: Vec::new(),
     });
 }
 
@@ -449,6 +452,7 @@ fn unknown_component(entries: &[TreeEntry]) -> DetectedComponent {
         ue4ss_mod_name: None,
         pak_sets: Vec::new(),
         warnings: vec!["Could not determine where these files belong.".to_string()],
+        notes: Vec::new(),
     }
 }
 
@@ -465,7 +469,9 @@ pub fn build_pak_sets(entries: &[TreeEntry]) -> (Vec<PakSet>, Vec<String>) {
     let mut by_stem: BTreeMap<String, Vec<&TreeEntry>> = BTreeMap::new();
 
     for entry in entries {
-        let Some(ext) = entry.extension() else { continue };
+        let Some(ext) = entry.extension() else {
+            continue;
+        };
         if !matches!(ext, "pak" | "utoc" | "ucas") {
             continue;
         }
@@ -560,13 +566,16 @@ fn map_flat(entries: &[TreeEntry], target_dir: &str) -> Vec<ComponentFile> {
 
 /// Route files under a destination directory, keeping their structure below
 /// `strip_depth` leading components.
-fn map_preserving(entries: &[TreeEntry], target_dir: &str, strip_depth: usize) -> Vec<ComponentFile> {
+fn map_preserving(
+    entries: &[TreeEntry],
+    target_dir: &str,
+    strip_depth: usize,
+) -> Vec<ComponentFile> {
     entries
         .iter()
         .map(|e| {
-            let rel = strip_leading(&e.rel, strip_depth).unwrap_or_else(|| {
-                PathBuf::from(e.rel.file_name().unwrap_or(e.rel.as_os_str()))
-            });
+            let rel = strip_leading(&e.rel, strip_depth)
+                .unwrap_or_else(|| PathBuf::from(e.rel.file_name().unwrap_or(e.rel.as_os_str())));
             ComponentFile {
                 source: e.path.clone(),
                 target: Path::new(target_dir).join(rel),

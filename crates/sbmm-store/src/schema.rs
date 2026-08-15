@@ -85,15 +85,16 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
 
-    let version: i64 =
-        conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
 
     for (index, sql) in MIGRATIONS.iter().enumerate() {
         let target = index as i64 + 1;
         if version >= target {
             continue;
         }
-        conn.execute_batch(&format!("BEGIN; {sql} PRAGMA user_version = {target}; COMMIT;"))?;
+        conn.execute_batch(&format!(
+            "BEGIN; {sql} PRAGMA user_version = {target}; COMMIT;"
+        ))?;
     }
     Ok(())
 }
