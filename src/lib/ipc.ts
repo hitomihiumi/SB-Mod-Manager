@@ -66,6 +66,21 @@ export interface AppSnapshot {
   autoApply: boolean;
   /** Null until an API key has been validated. */
   nexus: NexusAccount | null;
+  updateChannel: UpdateChannel;
+}
+
+export type UpdateChannel = "stable" | "nightly";
+
+export interface AvailableUpdate {
+  version: string;
+  notes: string | null;
+  date: string | null;
+}
+
+export interface UpdateInfo {
+  currentVersion: string;
+  available: AvailableUpdate | null;
+  channel: UpdateChannel;
 }
 
 export interface ComponentFile {
@@ -161,6 +176,11 @@ export const ipc = {
 
   setNexusKey: (apiKey: string) => invoke<NexusAccount | null>("set_nexus_key", { apiKey }),
   nexusRateLimit: () => invoke<RateLimit>("nexus_rate_limit"),
+
+  checkForUpdate: () => invoke<UpdateInfo>("check_for_update"),
+  installUpdate: () => invoke<void>("install_update"),
+  setUpdateChannel: (channel: UpdateChannel) =>
+    invoke<void>("set_update_channel", { channel }),
 };
 
 /** Display names and accent colours for each payload type. */

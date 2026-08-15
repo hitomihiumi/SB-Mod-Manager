@@ -1,5 +1,6 @@
 *.local
 .DS_Store
+/.tauri/updater.key
 /dist
 /node_modules
 /src-tauri/gen

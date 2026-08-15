@@ -4,7 +4,7 @@ on:
   push:
     tags: ["v*"]
   schedule:
-    # 03:00 UTC. Skipped when nothing was pushed in the previous day.
+    # 03:00 UTC, from the default branch. Skipped when nothing landed that day.
     - cron: "0 3 * * *"
   workflow_dispatch:
     inputs:
@@ -37,7 +37,7 @@ jobs:
         shell: bash
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
-            echo "build=true"   >> "$GITHUB_OUTPUT"
+            echo "build=true"    >> "$GITHUB_OUTPUT"
             echo "nightly=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -48,10 +48,14 @@ jobs:
             exit 0
           fi
 
-          # Scheduled run: only worth it if something landed in the last day.
+          # Scheduled: only worth it if something landed in the last day.
           recent=$(git log --since="24 hours ago" --oneline | wc -l)
           echo "commits in the last 24h: $recent"
-          [ "$recent" -gt 0 ] && echo "build=true" >> "$GITHUB_OUTPUT" || echo "build=false" >> "$GITHUB_OUTPUT"
+          if [ "$recent" -gt 0 ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          fi
           echo "nightly=true" >> "$GITHUB_OUTPUT"
 
   build:
@@ -61,6 +65,11 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          # Nightlies always come off the default branch, whatever triggered them.
+          ref: ${{ needs.decide.outputs.nightly == 'true' && github.event.repository.default_branch || github.ref }}
+          fetch-depth: 0
+
       - uses: dtolnay/rust-toolchain@stable
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
@@ -73,8 +82,8 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # Moving the nightly tag keeps a single rolling prerelease rather than
-      # accumulating one per night.
+      # Moving the tag keeps one rolling prerelease instead of accumulating a
+      # release per night.
       - name: Point the nightly tag at this commit
         if: needs.decide.outputs.nightly == 'true'
         shell: bash
@@ -85,10 +94,19 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Without these the build produces no signature and the in-app
+          # updater refuses the download, so a missing secret should be loud.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ needs.decide.outputs.nightly == 'true' && 'nightly' || github.ref_name }}
           releaseName: ${{ needs.decide.outputs.nightly == 'true' && 'Nightly build' || github.ref_name }}
-          releaseBody: ${{ needs.decide.outputs.nightly == 'true' && 'Built automatically from the latest commit. Expect rough edges.' || '' }}
+          releaseBody: ${{ needs.decide.outputs.nightly == 'true' && 'Built automatically from the latest commit on the default branch. Expect rough edges.' || '' }}
           releaseDraft: false
           prerelease: ${{ needs.decide.outputs.nightly == 'true' }}
+          # Tagged releases get notes generated from the commits since the last
+          # tag; the nightly body is fixed, so it does not need them.
           generateReleaseNotes: ${{ needs.decide.outputs.nightly != 'true' }}
+          # Publishes latest.json next to the installer, which is what the
+          # in-app updater reads.
+          includeUpdaterJson: true
