@@ -130,7 +130,8 @@ async fn install_finished(app: &tauri::AppHandle, finished: &Finished) -> bool {
                 let Ok(mut guard) = state.0.lock() else {
                     return;
                 };
-                let origin = Origin::nexus(item.mod_id as i64, item.file_id as i64);
+                let origin = Origin::nexus(item.mod_id as i64, item.file_id as i64)
+                    .with_version(item.version.clone());
                 guard.install_download(&path, &item.name, origin)
             };
 

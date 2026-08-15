@@ -398,7 +398,8 @@ impl App {
         self.commit_install(&staged.staging_id, &name, None, origin)
     }
 
-    fn commit_install(
+    /// Commit a staged install, recording where the files came from.
+    pub fn commit_install(
         &mut self,
         staging_id: &str,
         name: &str,
@@ -519,6 +520,8 @@ impl App {
                 source: record.source.clone(),
                 installed_at: record.installed_at.clone(),
                 warnings: components.iter().flat_map(|c| c.warnings.clone()).collect(),
+                latest_version: newer_version(&record.version, &record.latest_version),
+                nexus_mod_id: record.nexus_mod_id,
             });
         }
 
@@ -824,6 +827,31 @@ impl App {
         Ok(())
     }
 
+    // -- update checks -----------------------------------------------------
+
+    /// Every installed mod that came from Nexus, so its page can be queried.
+    pub fn nexus_mods(&self) -> Result<Vec<NexusModRef>> {
+        Ok(self
+            .store
+            .list_mods()?
+            .into_iter()
+            .filter_map(|m| {
+                Some(NexusModRef {
+                    id: m.id,
+                    nexus_mod_id: m.nexus_mod_id?,
+                    version: m.version,
+                    latest_version: m.latest_version,
+                })
+            })
+            .collect())
+    }
+
+    /// Remember what Nexus said the newest version is.
+    pub fn record_update_check(&self, mod_id: i64, latest: Option<&str>) -> Result<()> {
+        self.store.record_update_check(mod_id, latest)?;
+        Ok(())
+    }
+
     fn record(&self, mod_id: i64) -> Result<ModRecord> {
         self.store
             .list_mods()?
@@ -836,6 +864,46 @@ impl App {
 enum Outcome {
     Deployed,
     Removed,
+}
+
+/// An installed mod that can be looked up on Nexus.
+#[derive(Debug, Clone)]
+pub struct NexusModRef {
+    /// The row id in our database, not the Nexus one.
+    pub id: i64,
+    pub nexus_mod_id: i64,
+    pub version: Option<String>,
+    /// What the last update check found, if there has been one.
+    pub latest_version: Option<String>,
+}
+
+impl NexusModRef {
+    /// Whether this mod is currently showing an update.
+    pub fn is_outdated(&self) -> bool {
+        newer_version(&self.version, &self.latest_version).is_some()
+    }
+}
+
+/// The version to show as available, or nothing.
+///
+/// Version strings on Nexus are free text, so no ordering is inferred: an
+/// update is reported only when both versions are known and differ, which is
+/// the same rule other managers use. Guessing which of `1.0a` and `1.1-beta`
+/// is newer would produce confident wrong answers.
+pub fn newer_version(installed: &Option<String>, latest: &Option<String>) -> Option<String> {
+    let installed = installed.as_deref()?;
+    let latest = latest.as_deref()?;
+    if normalise_version(installed) == normalise_version(latest) {
+        return None;
+    }
+    Some(latest.to_string())
+}
+
+fn normalise_version(version: &str) -> String {
+    version
+        .trim()
+        .trim_start_matches(['v', 'V'])
+        .to_ascii_lowercase()
 }
 
 /// What, if anything, needs to happen to bring this mod in line.
@@ -916,4 +984,29 @@ fn copy_tree(from: &Path, to: &Path) -> Result<()> {
         std::fs::copy(&src, &dst).map_err(|e| AppError::io(&dst, e))?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn some(value: &str) -> Option<String> {
+        Some(value.to_string())
+    }
+
+    #[test]
+    fn an_update_is_reported_only_when_both_versions_are_known_and_differ() {
+        assert_eq!(newer_version(&some("1.2"), &some("1.4")), some("1.4"));
+        assert_eq!(newer_version(&some("1.2"), &some("1.2")), None);
+        // Nothing to compare against is not the same as being up to date.
+        assert_eq!(newer_version(&None, &some("1.4")), None);
+        assert_eq!(newer_version(&some("1.2"), &None), None);
+    }
+
+    #[test]
+    fn cosmetic_differences_do_not_count_as_an_update() {
+        assert_eq!(newer_version(&some("v1.2"), &some("1.2")), None);
+        assert_eq!(newer_version(&some(" 1.2 "), &some("1.2")), None);
+        assert_eq!(newer_version(&some("1.2B"), &some("1.2b")), None);
+    }
 }

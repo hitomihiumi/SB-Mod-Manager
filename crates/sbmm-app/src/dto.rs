@@ -40,6 +40,9 @@ pub struct ModView {
     pub source: String,
     pub installed_at: String,
     pub warnings: Vec<String>,
+    /// Set only when Nexus reports a version different from the installed one.
+    pub latest_version: Option<String>,
+    pub nexus_mod_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

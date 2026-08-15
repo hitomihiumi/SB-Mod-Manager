@@ -81,6 +81,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ids.push(app.confirm_install(&staged.staging_id, name, None)?);
     }
 
+    // One mod pretends to have come from Nexus and to be a version behind, so
+    // the update badge can be seen without an API key.
+    {
+        let folder = source.join("Nano Suit");
+        fs::create_dir_all(&folder)?;
+        fs::write(folder.join("NanoSuit_P.pak"), vec![b'x'; 5_600_000])?;
+        let staged = app.stage_folder(&folder)?;
+        let id = app.commit_install(
+            &staged.staging_id,
+            "Nano Suit",
+            None,
+            sbmm_app::Origin::nexus(9001, 40100).with_version(Some("1.2".into())),
+        )?;
+        app.record_update_check(id, Some("1.4"))?;
+        ids.push(id);
+    }
+
     let outfits = app.create_group("Outfits", Some("#d946a6"))?;
     let gameplay = app.create_group("Gameplay", Some("#7c7ff5"))?;
     app.assign_group(&ids[0..2], Some(outfits))?;

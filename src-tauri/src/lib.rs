@@ -227,8 +227,14 @@ const USER_AGENT: &str = concat!("SBModManager/", env!("CARGO_PKG_VERSION"));
 async fn accept_nxm(app: &tauri::AppHandle, url: &str) -> Result<(), String> {
     match nxm::parse(url, sbmm_game::NEXUS_DOMAIN).map_err(fail)? {
         NxmLink::File(link) => {
-            let (name, file_name) = describe(app, link.mod_id, link.file_id).await;
-            let mut item = QueueItem::new(link.mod_id, link.file_id, name, file_name);
+            let described = describe(app, link.mod_id, link.file_id).await;
+            let mut item = QueueItem::new(
+                link.mod_id,
+                link.file_id,
+                described.name,
+                described.file_name,
+            )
+            .with_version(described.version);
             if let (Some(key), Some(expires)) = (link.key.clone(), link.expires) {
                 item = item.with_credentials(key, expires);
             }
@@ -245,43 +251,59 @@ async fn accept_nxm(app: &tauri::AppHandle, url: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// What the API can tell us about a file before it is downloaded.
+struct Described {
+    name: String,
+    file_name: String,
+    version: Option<String>,
+}
+
 /// Ask Nexus what this file is called, falling back to the ids.
 ///
 /// Names are cosmetic, so a failure here must not stop the download: without a
-/// key, or with the API unreachable, the queue still works.
-async fn describe(app: &tauri::AppHandle, mod_id: u64, file_id: u64) -> (String, String) {
-    let fallback = (format!("Mod {mod_id}"), format!("{mod_id}-{file_id}.zip"));
+/// key, or with the API unreachable, the queue still works — the mod just
+/// carries no version and so cannot be checked for updates later.
+async fn describe(app: &tauri::AppHandle, mod_id: u64, file_id: u64) -> Described {
+    let fallback = || Described {
+        name: format!("Mod {mod_id}"),
+        file_name: format!("{mod_id}-{file_id}.zip"),
+        version: None,
+    };
 
     let key = {
         let state = app.state::<AppState>();
         let Ok(guard) = state.0.lock() else {
-            return fallback;
+            return fallback();
         };
         guard.nexus_api_key().ok().flatten().unwrap_or_default()
     };
     if key.is_empty() {
-        return fallback;
+        return fallback();
     }
 
     let Ok(transport) = ReqwestTransport::new(USER_AGENT) else {
-        return fallback;
+        return fallback();
     };
     let client = NexusClient::new(transport, key, sbmm_game::NEXUS_DOMAIN);
 
-    let name = match client.mod_info(mod_id).await {
-        Ok(info) => info.name.unwrap_or(fallback.0.clone()),
-        Err(_) => fallback.0.clone(),
-    };
-    let file_name = match client.mod_files(mod_id).await {
-        Ok(files) => files
-            .iter()
-            .find(|f| f.file_id == file_id)
-            .map(|f| safe_file_name(&f.file_name))
-            .unwrap_or(fallback.1.clone()),
-        Err(_) => fallback.1.clone(),
-    };
-
-    (name, file_name)
+    let mut described = fallback();
+    if let Ok(info) = client.mod_info(mod_id).await {
+        if let Some(name) = info.name {
+            described.name = name;
+        }
+        described.version = info.version;
+    }
+    if let Ok(files) = client.mod_files(mod_id).await {
+        if let Some(file) = files.iter().find(|f| f.file_id == file_id) {
+            described.file_name = safe_file_name(&file.file_name);
+            // The file's own version is the more precise of the two: a mod page
+            // can offer an older file alongside the current one.
+            if file.version.is_some() {
+                described.version = file.version.clone();
+            }
+        }
+    }
+    described
 }
 
 /// Keep only the final component, so a name from the API cannot write outside
@@ -298,6 +320,70 @@ fn safe_file_name(name: &str) -> String {
 #[tauri::command]
 async fn add_nxm_link(app: tauri::AppHandle, url: String) -> Result<(), String> {
     accept_nxm(&app, url.trim()).await
+}
+
+// -- update checks ----------------------------------------------------------
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateCheckReport {
+    /// How many mod pages were actually queried this time.
+    checked: usize,
+    /// How many installed mods are showing an update, including ones found by
+    /// an earlier check.
+    outdated: usize,
+}
+
+/// Ask Nexus which installed mods have moved on.
+///
+/// `updated.json` is one request that names every mod in the game that changed
+/// in the period, so it is used to narrow the list first; without it, checking
+/// forty installed mods would cost forty requests every time.
+#[tauri::command]
+async fn check_mod_updates(state: tauri::State<'_, AppState>) -> Result<UpdateCheckReport, String> {
+    let key = with_app!(state, |app| app.nexus_api_key())?.unwrap_or_default();
+    if key.is_empty() {
+        return Err("add your Nexus API key first".into());
+    }
+    let installed = with_app!(state, |app| app.nexus_mods())?;
+    if installed.is_empty() {
+        return Ok(UpdateCheckReport {
+            checked: 0,
+            outdated: 0,
+        });
+    }
+
+    let transport = ReqwestTransport::new(USER_AGENT).map_err(fail)?;
+    let client = NexusClient::new(transport, key, sbmm_game::NEXUS_DOMAIN);
+
+    // A month covers the gap between reasonable check intervals; anything
+    // older than that was already caught by an earlier check.
+    let recently_changed = client.updated("1m").await.map_err(fail)?;
+    let changed: std::collections::HashSet<u64> =
+        recently_changed.iter().map(|m| m.mod_id).collect();
+
+    let mut checked = 0;
+    for entry in installed {
+        let nexus_id = entry.nexus_mod_id as u64;
+        if !changed.contains(&nexus_id) {
+            continue;
+        }
+        let Ok(info) = client.mod_info(nexus_id).await else {
+            continue;
+        };
+        checked += 1;
+        with_app!(state, |app| app
+            .record_update_check(entry.id, info.version.as_deref()))?;
+    }
+
+    // Counted from the stored result rather than this pass, so a mod found
+    // outdated last week still counts even though it was not re-queried.
+    let outdated = with_app!(state, |app| app.nexus_mods())?
+        .iter()
+        .filter(|m| m.is_outdated())
+        .count();
+
+    Ok(UpdateCheckReport { checked, outdated })
 }
 
 #[tauri::command]
@@ -517,6 +603,7 @@ pub fn run() {
             install_update,
             set_update_channel,
             add_nxm_link,
+            check_mod_updates,
             download_queue,
             cancel_download,
             clear_finished_downloads,

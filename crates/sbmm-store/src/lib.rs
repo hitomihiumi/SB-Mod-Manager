@@ -49,6 +49,9 @@ pub struct ModRecord {
     pub installed_at: String,
     pub enabled: bool,
     pub priority: i64,
+    /// The newest version Nexus reported, from the last update check.
+    pub latest_version: Option<String>,
+    pub update_checked_at: Option<String>,
 }
 
 /// A new mod being registered after a successful install.
@@ -173,7 +176,8 @@ impl Store {
             "SELECT m.id, m.name, m.staging_folder, m.version, m.source,
                     m.nexus_mod_id, m.nexus_file_id, m.group_id, m.primary_type,
                     m.size_bytes, m.image_path, m.notes, m.installed_at,
-                    COALESCE(pm.enabled, 0), COALESCE(pm.priority, 0)
+                    COALESCE(pm.enabled, 0), COALESCE(pm.priority, 0),
+                    m.latest_version, m.update_checked_at
              FROM mods m
              LEFT JOIN profile_mods pm
                     ON pm.mod_id = m.id AND pm.profile_id = ?1
@@ -196,9 +200,26 @@ impl Store {
                 installed_at: row.get(12)?,
                 enabled: row.get::<_, i64>(13)? != 0,
                 priority: row.get(14)?,
+                latest_version: row.get(15)?,
+                update_checked_at: row.get(16)?,
             })
         })?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// Record what a Nexus update check found for one mod.
+    ///
+    /// The timestamp is written even when the version is unchanged, so a mod
+    /// that has simply not been looked at yet is distinguishable from one that
+    /// is known to be current.
+    pub fn record_update_check(&self, mod_id: i64, latest_version: Option<&str>) -> Result<()> {
+        self.conn.execute(
+            "UPDATE mods
+                SET latest_version = ?2, update_checked_at = datetime('now')
+              WHERE id = ?1",
+            params![mod_id, latest_version],
+        )?;
+        Ok(())
     }
 
     pub fn components_for(&self, mod_id: i64) -> Result<Vec<DetectedComponent>> {

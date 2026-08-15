@@ -41,6 +41,14 @@ export interface ModView {
   source: string;
   installedAt: string;
   warnings: string[];
+  /** Set only when Nexus reports a version different from the installed one. */
+  latestVersion: string | null;
+  nexusModId: number | null;
+}
+
+export interface UpdateCheckReport {
+  checked: number;
+  outdated: number;
 }
 
 export interface GroupView {
@@ -200,6 +208,7 @@ export const ipc = {
   nexusRateLimit: () => invoke<RateLimit>("nexus_rate_limit"),
 
   addNxmLink: (url: string) => invoke<void>("add_nxm_link", { url }),
+  checkModUpdates: () => invoke<UpdateCheckReport>("check_mod_updates"),
   downloadQueue: () => invoke<QueueItem[]>("download_queue"),
   cancelDownload: (id: number) => invoke<void>("cancel_download", { id }),
   clearFinishedDownloads: () => invoke<void>("clear_finished_downloads"),
@@ -209,6 +218,13 @@ export const ipc = {
   setUpdateChannel: (channel: UpdateChannel) =>
     invoke<void>("set_update_channel", { channel }),
 };
+
+/** The game's Nexus domain, mirroring `NEXUS_DOMAIN` in `sbmm-game`. */
+const NEXUS_DOMAIN = "stellarblade";
+
+export function modPageUrl(nexusModId: number): string {
+  return `https://www.nexusmods.com/${NEXUS_DOMAIN}/mods/${nexusModId}?tab=files`;
+}
 
 /** Display names and accent colours for each payload type. */
 export const MOD_TYPE_META: Record<ModTypeId, { label: string; hint: string }> = {

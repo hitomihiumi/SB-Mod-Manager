@@ -43,6 +43,9 @@ pub struct QueueItem {
     pub name: String,
     /// What to call it on disk.
     pub file_name: String,
+    /// The file's version, when the API could be asked. Recorded on the
+    /// installed mod so a later update check has something to compare against.
+    pub version: Option<String>,
     pub state: DownloadState,
     pub bytes_done: u64,
     pub bytes_total: Option<u64>,
@@ -63,6 +66,7 @@ impl QueueItem {
             file_id,
             name: name.into(),
             file_name: file_name.into(),
+            version: None,
             state: DownloadState::Queued,
             bytes_done: 0,
             bytes_total: None,
@@ -76,6 +80,11 @@ impl QueueItem {
     /// Attach the short-lived credentials from an `nxm://` link.
     pub fn with_credentials(mut self, key: impl Into<String>, expires: u64) -> Self {
         self.credentials = Some((key.into(), expires));
+        self
+    }
+
+    pub fn with_version(mut self, version: Option<String>) -> Self {
+        self.version = version;
         self
     }
 

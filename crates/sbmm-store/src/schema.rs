@@ -79,6 +79,15 @@ const MIGRATIONS: &[&str] = &[
 
     INSERT INTO profiles (name, active) VALUES ('Default', 1);
     "#,
+    // v2 — what a Nexus update check leaves behind.
+    //
+    // The version a mod is *at* is already in `mods.version`; these record
+    // what Nexus last said was available, so the badge survives a restart
+    // without re-spending the API allowance.
+    r#"
+    ALTER TABLE mods ADD COLUMN latest_version TEXT;
+    ALTER TABLE mods ADD COLUMN update_checked_at TEXT;
+    "#,
 ];
 
 pub fn migrate(conn: &Connection) -> Result<()> {
@@ -97,4 +106,56 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         ))?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Existing installs are at v1, so the upgrade has to land on a database
+    /// that already holds mods — and leave them alone.
+    #[test]
+    fn a_v1_database_upgrades_without_losing_anything() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(&format!(
+            "BEGIN; {} PRAGMA user_version = 1; COMMIT;",
+            MIGRATIONS[0]
+        ))
+        .unwrap();
+        conn.execute(
+            "INSERT INTO mods (name, staging_folder, version) VALUES ('Old Mod', 'old-mod', '1.0')",
+            [],
+        )
+        .unwrap();
+
+        migrate(&conn).unwrap();
+
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, MIGRATIONS.len() as i64);
+
+        let (name, latest): (String, Option<String>) = conn
+            .query_row(
+                "SELECT name, latest_version FROM mods WHERE staging_folder = 'old-mod'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(name, "Old Mod");
+        assert_eq!(latest, None, "nothing has been checked yet");
+    }
+
+    /// Running it twice must be a no-op, since it runs on every start.
+    #[test]
+    fn migrating_an_up_to_date_database_changes_nothing() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        migrate(&conn).unwrap();
+
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, MIGRATIONS.len() as i64);
+    }
 }
