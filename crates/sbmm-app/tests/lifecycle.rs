@@ -448,3 +448,98 @@ fn drift_is_reported_when_a_deployed_file_disappears() {
     fs::remove_file(fx.game.join("SB/Content/Paks/~mods/0010_Outfit_P.pak")).unwrap();
     assert_eq!(fx.app.snapshot().unwrap().drift.len(), 1);
 }
+
+// -- library relocation -----------------------------------------------------
+
+#[test]
+fn the_library_can_be_moved_while_mods_are_enabled() {
+    let mut fx = Fixture::new();
+    let pristine = fx.game_snapshot();
+    let id = fx.install_folder("Cool Outfit", &[("Outfit_P.pak", "payload")]);
+
+    fx.app.set_enabled(&[id], true).unwrap();
+    fx.app.apply().unwrap();
+    let deployed = fx.game.join("SB/Content/Paks/~mods/0010_Outfit_P.pak");
+    assert!(deployed.exists());
+
+    let new_root = fx._dir.path().join("elsewhere");
+    let report = fx.app.set_library_root(&new_root).unwrap();
+
+    assert!(
+        report.redeployed.failed.is_empty(),
+        "{:?}",
+        report.redeployed
+    );
+    assert_eq!(report.folders.library, new_root.to_string_lossy());
+
+    // The staged copy followed the library, and the mod is still deployed.
+    assert!(new_root.join("mods/Cool Outfit/Outfit_P.pak").exists());
+    assert_eq!(fs::read_to_string(&deployed).unwrap(), "payload");
+
+    // And the guarantee still holds from the new location.
+    fx.app.set_enabled(&[id], false).unwrap();
+    fx.app.apply().unwrap();
+    assert_eq!(fx.game_snapshot(), pristine);
+}
+
+#[test]
+fn moving_the_library_leaves_nothing_at_the_old_location() {
+    let mut fx = Fixture::new();
+    let old_root = fx.app.library_root();
+    let id = fx.install_folder("Cool Outfit", &[("Outfit_P.pak", "payload")]);
+    fx.app.set_enabled(&[id], true).unwrap();
+    fx.app.apply().unwrap();
+
+    fx.app
+        .set_library_root(fx._dir.path().join("elsewhere"))
+        .unwrap();
+
+    assert!(
+        !old_root.join("mods").exists(),
+        "the old mods folder must not be left behind"
+    );
+}
+
+#[test]
+fn the_library_cannot_be_put_inside_the_game_folder() {
+    let mut fx = Fixture::new();
+    let err = fx
+        .app
+        .set_library_root(fx.game.join("SB/library"))
+        .unwrap_err();
+    assert!(
+        matches!(err, sbmm_app::AppError::BadLibraryRoot(_)),
+        "got {err:?}"
+    );
+}
+
+#[test]
+fn a_folder_that_already_holds_a_library_is_refused() {
+    let mut fx = Fixture::new();
+    let occupied = fx._dir.path().join("occupied");
+    fs::create_dir_all(occupied.join("mods/Something")).unwrap();
+    fs::write(occupied.join("mods/Something/a.pak"), b"x").unwrap();
+
+    assert!(fx.app.set_library_root(&occupied).is_err());
+}
+
+#[test]
+fn a_new_library_location_survives_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let game = dir.path().join("game");
+    let data = dir.path().join("data");
+    let library = dir.path().join("library");
+    fs::create_dir_all(game.join("SB/Content/Paks")).unwrap();
+    fs::create_dir_all(game.join("SB/Binaries/Win64")).unwrap();
+    fs::write(game.join("SB/Binaries/Win64/SB-Win64-Shipping.exe"), "").unwrap();
+
+    {
+        let mut app = App::new(&data).unwrap();
+        app.set_game_root(&game).unwrap();
+        app.set_library_root(&library).unwrap();
+    }
+
+    let app = App::new(&data).unwrap();
+    assert_eq!(app.library_root(), library);
+    assert_eq!(app.mods_dir(), library.join("mods"));
+}

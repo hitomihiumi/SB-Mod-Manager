@@ -6,7 +6,7 @@
 
 use std::sync::Mutex;
 
-use sbmm_app::dto::{AppSnapshot, ApplyReport, StagedInstall};
+use sbmm_app::dto::{AppSnapshot, ApplyReport, FoldersView, LibraryMoveReport, StagedInstall};
 use sbmm_app::App;
 use sbmm_core::model::ModType;
 use sbmm_game::GameInstall;
@@ -147,19 +147,18 @@ fn set_auto_apply(state: tauri::State<'_, AppState>, enabled: bool) -> Result<()
     with_app!(state, |app| app.set_auto_apply(enabled))
 }
 
-/// Absolute paths the UI offers to open in the file manager.
+/// Where the library lives, and whether hard links to the game will work.
 #[tauri::command]
-fn folders(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
-    let guard = state
-        .0
-        .lock()
-        .map_err(|_| "app state is poisoned".to_string())?;
-    let game = guard.game().map_err(fail)?.map(|g| g.root);
-    Ok(serde_json::json!({
-        "mods": guard.mods_dir(),
-        "backups": guard.backup_dir(),
-        "game": game,
-    }))
+fn folders(state: tauri::State<'_, AppState>) -> Result<FoldersView, String> {
+    with_app!(state, |app| app.folders())
+}
+
+#[tauri::command]
+fn set_library_root(
+    state: tauri::State<'_, AppState>,
+    path: String,
+) -> Result<LibraryMoveReport, String> {
+    with_app!(state, |app| app.set_library_root(path))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -192,6 +191,7 @@ pub fn run() {
             assign_group,
             set_auto_apply,
             folders,
+            set_library_root,
         ])
         .run(tauri::generate_context!())
         .expect("failed to start SB Mod Manager");

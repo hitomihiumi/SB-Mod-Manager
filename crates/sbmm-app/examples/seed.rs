@@ -26,6 +26,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut app = App::new(&data_dir)?;
     app.set_game_root(game)?;
 
+    // Optional third argument relocates the library first, so the UI can be
+    // exercised with mods stored away from the app data directory.
+    if let Some(library) = args.next() {
+        app.set_library_root(&library)?;
+        println!("library root set to {library}");
+    }
+
     let source = Path::new(&data_dir).join("_seed_sources");
     let mods: &[(&str, &[(&str, usize)])] = &[
         (

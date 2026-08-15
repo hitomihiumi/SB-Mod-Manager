@@ -3,6 +3,7 @@ import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { FolderOpen } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { formatBytes } from "../lib/format";
 import { ipc, type Folders } from "../lib/ipc";
 import { useApp } from "../store/useApp";
 import { Button } from "./ui";
@@ -11,13 +12,49 @@ export function SettingsView() {
   const snapshot = useApp((s) => s.snapshot);
   const chooseGame = useApp((s) => s.chooseGame);
   const refresh = useApp((s) => s.refresh);
+  const toast = useApp((s) => s.toast);
   const [folders, setFolders] = useState<Folders | null>(null);
+  const [moving, setMoving] = useState(false);
 
   useEffect(() => {
-    void ipc.folders().then(setFolders).catch(() => setFolders(null));
+    void ipc
+      .folders()
+      .then(setFolders)
+      .catch(() => setFolders(null));
   }, [snapshot?.game?.root]);
 
   const game = snapshot?.game ?? null;
+
+  /// Moving the library takes every enabled mod out of the game folder and puts
+  /// it back afterwards, so it can take a while on a large collection.
+  async function moveLibrary() {
+    const picked = await open({
+      directory: true,
+      title: "Choose a folder for the mod library",
+    });
+    if (typeof picked !== "string") return;
+
+    setMoving(true);
+    try {
+      const report = await ipc.setLibraryRoot(picked);
+      setFolders(report.folders);
+      await refresh();
+
+      if (report.redeployed.failed.length > 0) {
+        toast(
+          "error",
+          `Moved, but ${report.redeployed.failed.length} mod(s) could not be re-enabled: ` +
+            report.redeployed.failed.map((f) => `${f.name} — ${f.reason}`).join("; "),
+        );
+      } else {
+        toast("success", `Library moved to ${picked}.`);
+      }
+    } catch (error) {
+      toast("error", String(error));
+    } finally {
+      setMoving(false);
+    }
+  }
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
@@ -67,10 +104,34 @@ export function SettingsView() {
         </Section>
 
         <Section
-          title="Folders"
-          hint="Mods are kept unpacked outside the game folder and hard-linked in when enabled."
+          title="Mod library"
+          hint="Mods are kept unpacked here, outside the game folder, and hard-linked in when enabled. Move it to another drive to keep it off the system disk."
         >
-          <div className="space-y-1.5">
+          <div className="flex items-center gap-2">
+            <code className="min-w-0 flex-1 truncate rounded-md border border-line bg-base px-2.5 py-2 font-mono text-[12px] text-ink-soft">
+              {folders?.library ?? "—"}
+            </code>
+            <Button variant="outline" disabled={moving} onClick={moveLibrary}>
+              {moving ? "Moving…" : "Move…"}
+            </Button>
+          </div>
+
+          {folders && (
+            <p className="mt-2 text-[11px] text-ink-muted">
+              {formatBytes(folders.libraryBytes)} in use
+            </p>
+          )}
+
+          {folders && !folders.sameVolumeAsGame && (
+            <p className="mt-2 rounded-md border border-warn/40 bg-warn/10 px-2.5 py-2 text-[11px] leading-relaxed text-warn">
+              The library is on a different drive from the game, so hard links are not
+              possible. Enabled mods are copied instead, which stores every one of them
+              twice and makes applying changes slower. Put the library on the same drive
+              as the game to avoid that.
+            </p>
+          )}
+
+          <div className="mt-3 space-y-1.5 border-t border-line pt-3">
             <PathRow label="Staged mods" path={folders?.mods} />
             <PathRow label="Backups of replaced game files" path={folders?.backups} />
           </div>

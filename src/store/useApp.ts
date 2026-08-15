@@ -16,14 +16,22 @@ interface Toast {
   message: string;
 }
 
+/** Progress of a batch install, so the status bar can say "3 of 12". */
+export interface Busy {
+  label: string;
+  done: number;
+  total: number;
+}
+
 interface AppStore {
   ready: boolean;
   view: View;
   snapshot: AppSnapshot | null;
   selection: number[];
   search: string;
-  busy: string | null;
-  staged: StagedInstall | null;
+  busy: Busy | null;
+  /** Archives the detector could not classify, waiting to be asked about. */
+  queue: StagedInstall[];
   toasts: Toast[];
 
   init: () => Promise<void>;
@@ -40,6 +48,7 @@ interface AppStore {
   stagePaths: (paths: string[]) => Promise<void>;
   confirmInstall: (name: string, typeOverride?: ModTypeId) => Promise<void>;
   cancelInstall: () => Promise<void>;
+  skipRemaining: () => Promise<void>;
 
   chooseGame: (path: string) => Promise<void>;
   toast: (kind: Toast["kind"], message: string) => void;
@@ -55,7 +64,7 @@ export const useApp = create<AppStore>((set, get) => ({
   selection: [],
   search: "",
   busy: null,
-  staged: null,
+  queue: [],
   toasts: [],
 
   async init() {
@@ -109,7 +118,7 @@ export const useApp = create<AppStore>((set, get) => ({
       get().toast("error", "Select the Stellar Blade folder first.");
       return;
     }
-    set({ busy: "Applying changes…" });
+    set({ busy: { label: "Applying changes", done: 0, total: 1 } });
     try {
       const report = await ipc.apply();
       const changed = report.deployed.length + report.removed.length;
@@ -132,7 +141,7 @@ export const useApp = create<AppStore>((set, get) => ({
   },
 
   async uninstall(id) {
-    set({ busy: "Removing…" });
+    set({ busy: { label: "Removing", done: 0, total: 1 } });
     try {
       await ipc.uninstall(id);
       await get().refresh();
@@ -144,36 +153,52 @@ export const useApp = create<AppStore>((set, get) => ({
   },
 
   async stagePaths(paths) {
-    for (const path of paths) {
-      set({ busy: `Reading ${basename(path)}…` });
+    // Every path is taken to completion. A single unrecognised archive used to
+    // abandon the rest of the batch; now it joins a queue and the others carry
+    // on installing.
+    const pending: StagedInstall[] = [];
+    let installed = 0;
+    let failed = 0;
+
+    for (const [index, path] of paths.entries()) {
+      set({ busy: { label: basename(path), done: index, total: paths.length } });
       try {
         const staged = looksLikeArchive(path)
           ? await ipc.stageArchive(path)
           : await ipc.stageFolder(path);
 
-        // Only stop and ask when the detector genuinely could not tell.
         if (staged.needsConfirmation) {
-          set({ staged, busy: null });
-          return;
+          pending.push(staged);
+          continue;
         }
         await ipc.confirmInstall(staged.stagingId, staged.suggestedName);
-        await get().refresh();
-        get().toast("success", `Installed ${staged.suggestedName}.`);
+        installed += 1;
       } catch (error) {
+        failed += 1;
         get().toast("error", `${basename(path)}: ${error}`);
-      } finally {
-        set({ busy: null });
       }
+    }
+
+    set((state) => ({ busy: null, queue: [...state.queue, ...pending] }));
+    await get().refresh();
+
+    if (installed > 0) {
+      const waiting = pending.length > 0 ? `, ${pending.length} need a type` : "";
+      const broke = failed > 0 ? `, ${failed} failed` : "";
+      get().toast(
+        "success",
+        `Installed ${installed} mod${installed === 1 ? "" : "s"}${waiting}${broke}.`,
+      );
     }
   },
 
   async confirmInstall(name, typeOverride) {
-    const staged = get().staged;
+    const staged = get().queue[0];
     if (!staged) return;
-    set({ busy: "Installing…" });
+    set({ busy: { label: name, done: 0, total: 1 } });
     try {
       await ipc.confirmInstall(staged.stagingId, name, typeOverride);
-      set({ staged: null });
+      set((state) => ({ queue: state.queue.slice(1) }));
       await get().refresh();
       get().toast("success", `Installed ${name}.`);
     } catch (error) {
@@ -184,15 +209,16 @@ export const useApp = create<AppStore>((set, get) => ({
   },
 
   async cancelInstall() {
-    const staged = get().staged;
-    set({ staged: null });
-    if (staged) {
-      try {
-        await ipc.cancelInstall(staged.stagingId);
-      } catch {
-        // The staged copy is disposable; a failure here is not worth a toast.
-      }
-    }
+    const staged = get().queue[0];
+    set((state) => ({ queue: state.queue.slice(1) }));
+    if (staged) await discard(staged);
+  },
+
+  /** Drop every archive still waiting to be asked about. */
+  async skipRemaining() {
+    const remaining = get().queue;
+    set({ queue: [] });
+    await Promise.all(remaining.map(discard));
   },
 
   async chooseGame(path) {
@@ -217,6 +243,15 @@ export const useApp = create<AppStore>((set, get) => ({
     set((state) => ({ toasts: state.toasts.filter((t) => t.id !== id) }));
   },
 }));
+
+/** Throw away an extracted-but-uncommitted archive. */
+async function discard(staged: StagedInstall): Promise<void> {
+  try {
+    await ipc.cancelInstall(staged.stagingId);
+  } catch {
+    // The staged copy is disposable; a failure here is not worth a toast.
+  }
+}
 
 function basename(path: string): string {
   const parts = path.split(/[\\/]/);

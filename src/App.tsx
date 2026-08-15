@@ -126,7 +126,12 @@ export default function App() {
       {busy && (
         <div className="fixed inset-x-0 bottom-0 z-40 flex items-center gap-2 border-t border-line bg-surface px-4 py-2 text-[12px] text-ink-soft">
           <Loader2 size={13} className="animate-spin" />
-          {busy}
+          <span className="truncate">{busy.label}</span>
+          {busy.total > 1 && (
+            <span className="ml-auto shrink-0 tabular-nums text-ink-muted">
+              {busy.done + 1} of {busy.total}
+            </span>
+          )}
         </div>
       )}
 

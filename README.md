@@ -30,6 +30,13 @@ wrong is the usual reason a mod "doesn't work".
   UE4SS resolves those itself.
 - **Enable and disable one mod, a group, or everything**, with the game folder
   reconciled in a single pass.
+- **Installs a batch in one go.** Drop or pick any number of archives; the ones
+  it recognises install themselves and the rest queue up to be asked about, so
+  nothing in the batch is lost.
+- **Keeps the library where you want it.** Mods and backups can live on another
+  drive; only the small database stays in the app data folder. If the library
+  ends up on a different drive from the game, the app says so, because hard
+  links stop working there and every enabled mod is then stored twice.
 - **Leaves nothing behind.** Every file written and every original displaced is
   recorded, so disabling everything restores the folder byte for byte —
   including removing directories and the `mods.txt` it created, while never
@@ -55,6 +62,11 @@ pnpm tauri dev      # run it
 pnpm tauri build    # produce an installer
 ```
 
+Releases are automated: pushing a `v*` tag builds the Windows installer and
+publishes a GitHub Release, and a nightly prerelease is refreshed whenever
+something landed in the previous day. The app version comes from
+`package.json` alone — `tauri.conf.json` points at it.
+
 ## Architecture
 
 The manager is a Rust workspace of platform-free library crates plus a thin
@@ -71,10 +83,12 @@ runs on any machine — `src-tauri` is only command wrappers.
 | `sbmm-app` | The application service the UI drives |
 | `src-tauri` | Tauri commands, window, bundling |
 
-Mods are kept unpacked in the app's data directory and hard-linked into the
-game when enabled. Links cost no extra disk space and are indistinguishable
-from real files to the game, and the game folder holds nothing while a mod is
-disabled.
+Mods are kept unpacked in the library folder and hard-linked into the game when
+enabled. Links cost no extra disk space and are indistinguishable from real
+files to the game, and the game folder holds nothing while a mod is disabled.
+The library defaults to the app data directory and can be moved anywhere; only
+`sbmm.db` stays behind, because it has to be found before any setting can be
+read.
 
 `src-tauri` is deliberately its own Cargo workspace: it needs WebView2/WebKit
 system libraries, and keeping it separate lets `cargo test --workspace` run the
@@ -102,8 +116,9 @@ cargo test --workspace          # domain crates
 cargo clippy --workspace --all-targets
 pnpm typecheck
 
-# Populate a fake install to exercise the UI without owning the game
-cargo run -p sbmm-app --example seed -- <data-dir> <game-root>
+# Populate a fake install to exercise the UI without owning the game.
+# An optional third argument relocates the mod library first.
+cargo run -p sbmm-app --example seed -- <data-dir> <game-root> [library-root]
 
 # Regenerate the icon set (no image dependencies needed)
 python3 scripts/make-icons.py

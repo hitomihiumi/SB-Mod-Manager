@@ -10,9 +10,12 @@ import { Badge, Button, Dialog } from "./ui";
  * installs without interrupting the user.
  */
 export function InstallDialog() {
-  const staged = useApp((s) => s.staged);
+  const queue = useApp((s) => s.queue);
   const confirmInstall = useApp((s) => s.confirmInstall);
   const cancelInstall = useApp((s) => s.cancelInstall);
+  const skipRemaining = useApp((s) => s.skipRemaining);
+
+  const staged = queue[0] ?? null;
 
   const [name, setName] = useState("");
   const [type, setType] = useState<ModTypeId>("genericPak");
@@ -34,12 +37,22 @@ export function InstallDialog() {
   return (
     <Dialog
       open
-      title="Where do these files belong?"
+      title={
+        queue.length > 1
+          ? `Where do these files belong? (1 of ${queue.length})`
+          : "Where do these files belong?"
+      }
       onClose={() => void cancelInstall()}
       footer={
         <>
+          {queue.length > 1 && (
+            <Button variant="ghost" onClick={() => void skipRemaining()}>
+              Skip all {queue.length}
+            </Button>
+          )}
+          <div className="flex-1" />
           <Button variant="ghost" onClick={() => void cancelInstall()}>
-            Cancel
+            Skip
           </Button>
           <Button
             variant="primary"

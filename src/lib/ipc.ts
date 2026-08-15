@@ -97,9 +97,19 @@ export interface ApplyReport {
 }
 
 export interface Folders {
+  library: string;
   mods: string;
   backups: string;
   game: string | null;
+  /** False when the library is on a different drive from the game, which
+      means mods are copied instead of hard-linked and stored twice. */
+  sameVolumeAsGame: boolean;
+  libraryBytes: number;
+}
+
+export interface LibraryMoveReport {
+  folders: Folders;
+  redeployed: ApplyReport;
 }
 
 export const ipc = {
@@ -130,6 +140,7 @@ export const ipc = {
 
   setAutoApply: (enabled: boolean) => invoke<void>("set_auto_apply", { enabled }),
   folders: () => invoke<Folders>("folders"),
+  setLibraryRoot: (path: string) => invoke<LibraryMoveReport>("set_library_root", { path }),
 };
 
 /** Display names and accent colours for each payload type. */

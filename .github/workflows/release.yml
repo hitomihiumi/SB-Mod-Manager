@@ -1,0 +1,94 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  schedule:
+    # 03:00 UTC. Skipped when nothing was pushed in the previous day.
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+    inputs:
+      nightly:
+        description: "Publish as the rolling nightly prerelease instead of a tagged release"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # A nightly build of unchanged code is pure waste, so check first.
+  decide:
+    name: Decide whether to build
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.check.outputs.build }}
+      nightly: ${{ steps.check.outputs.nightly }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - id: check
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "build=true"   >> "$GITHUB_OUTPUT"
+            echo "nightly=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "nightly=${{ inputs.nightly }}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Scheduled run: only worth it if something landed in the last day.
+          recent=$(git log --since="24 hours ago" --oneline | wc -l)
+          echo "commits in the last 24h: $recent"
+          [ "$recent" -gt 0 ] && echo "build=true" >> "$GITHUB_OUTPUT" || echo "build=false" >> "$GITHUB_OUTPUT"
+          echo "nightly=true" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Windows installer
+    needs: decide
+    if: needs.decide.outputs.build == 'true'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: pnpm install --frozen-lockfile
+
+      # Moving the nightly tag keeps a single rolling prerelease rather than
+      # accumulating one per night.
+      - name: Point the nightly tag at this commit
+        if: needs.decide.outputs.nightly == 'true'
+        shell: bash
+        run: |
+          git tag -f nightly
+          git push -f origin nightly
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ needs.decide.outputs.nightly == 'true' && 'nightly' || github.ref_name }}
+          releaseName: ${{ needs.decide.outputs.nightly == 'true' && 'Nightly build' || github.ref_name }}
+          releaseBody: ${{ needs.decide.outputs.nightly == 'true' && 'Built automatically from the latest commit. Expect rough edges.' || '' }}
+          releaseDraft: false
+          prerelease: ${{ needs.decide.outputs.nightly == 'true' }}
+          generateReleaseNotes: ${{ needs.decide.outputs.nightly != 'true' }}

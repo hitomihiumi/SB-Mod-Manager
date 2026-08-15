@@ -5,6 +5,7 @@
 //! a set of thin command wrappers around this type.
 
 pub mod dto;
+pub mod library;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -39,6 +40,8 @@ pub enum AppError {
     NoGame,
     #[error("no staged install called {0}")]
     UnknownStaging(String),
+    #[error("{0}")]
+    BadLibraryRoot(String),
 }
 
 impl AppError {
@@ -54,6 +57,7 @@ type Result<T> = std::result::Result<T, AppError>;
 
 const SETTING_GAME_ROOT: &str = "gameRoot";
 const SETTING_AUTO_APPLY: &str = "autoApply";
+const SETTING_LIBRARY_ROOT: &str = "libraryRoot";
 
 pub struct App {
     store: Store,
@@ -65,22 +69,100 @@ impl App {
     pub fn new(data_dir: impl Into<PathBuf>) -> Result<Self> {
         let data_dir = data_dir.into();
         std::fs::create_dir_all(&data_dir).map_err(|e| AppError::io(&data_dir, e))?;
+        // The database has to be found before any setting can be read, so it
+        // always lives here even when the library itself is on another drive.
         let store = Store::open(data_dir.join("sbmm.db"))?;
-        std::fs::create_dir_all(data_dir.join("mods"))
-            .map_err(|e| AppError::io(data_dir.join("mods"), e))?;
-        Ok(Self {
+        let app = Self {
             store,
             data_dir,
             backend: HardlinkBackend,
-        })
+        };
+        std::fs::create_dir_all(app.mods_dir()).map_err(|e| AppError::io(app.mods_dir(), e))?;
+        Ok(app)
+    }
+
+    /// Where mods and backups are kept. Defaults to the app data directory.
+    pub fn library_root(&self) -> PathBuf {
+        self.store
+            .get_setting(SETTING_LIBRARY_ROOT)
+            .ok()
+            .flatten()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| self.data_dir.clone())
     }
 
     pub fn mods_dir(&self) -> PathBuf {
-        self.data_dir.join("mods")
+        self.library_root().join("mods")
     }
 
     pub fn backup_dir(&self) -> PathBuf {
-        self.data_dir.join("backups")
+        self.library_root().join("backups")
+    }
+
+    /// Where the library sits, and whether hard links to the game will work.
+    pub fn folders(&self) -> Result<FoldersView> {
+        let game = self.game()?.map(|g| g.root);
+        let library = self.library_root();
+        Ok(FoldersView {
+            same_volume_as_game: game
+                .as_ref()
+                .map(|g| library::same_volume(&library, g))
+                .unwrap_or(true),
+            game: game.map(path_string),
+            mods: path_string(self.mods_dir()),
+            backups: path_string(self.backup_dir()),
+            library_bytes: library::size_of(&library) as i64,
+            library: path_string(library),
+        })
+    }
+
+    /// Relocate the library, carrying its contents across.
+    ///
+    /// Enabled mods are taken out of the game folder before the move and put
+    /// back afterwards. Doing it in that order matters: a hard link left in
+    /// place would still point at the old location, and moving its target
+    /// across volumes would quietly turn it into an orphaned copy.
+    pub fn set_library_root(&mut self, path: impl AsRef<Path>) -> Result<LibraryMoveReport> {
+        let new_root = path.as_ref().to_path_buf();
+        let old_root = self.library_root();
+
+        if new_root == old_root {
+            return Ok(LibraryMoveReport {
+                folders: self.folders()?,
+                redeployed: ApplyReport::default(),
+            });
+        }
+
+        let game = self.game()?.map(|g| g.root);
+        library::validate_root(&new_root, game.as_deref())?;
+
+        // Reuse the normal reconciliation path so mods.txt and created
+        // directories are handled exactly as they are for any other change.
+        let enabled = self.store.enabled_mod_ids()?;
+        let restore = game.is_some() && !enabled.is_empty();
+        if restore {
+            self.store.set_enabled(&enabled, false)?;
+            self.apply()?;
+        }
+
+        library::move_tree(&old_root.join("mods"), &new_root.join("mods"))?;
+        library::move_tree(&old_root.join("backups"), &new_root.join("backups"))?;
+
+        self.store
+            .set_setting(SETTING_LIBRARY_ROOT, &new_root.to_string_lossy())?;
+        std::fs::create_dir_all(self.mods_dir()).map_err(|e| AppError::io(self.mods_dir(), e))?;
+
+        let redeployed = if restore {
+            self.store.set_enabled(&enabled, true)?;
+            self.apply()?
+        } else {
+            ApplyReport::default()
+        };
+
+        Ok(LibraryMoveReport {
+            folders: self.folders()?,
+            redeployed,
+        })
     }
 
     fn staging_path(&self, folder: &str) -> PathBuf {
@@ -666,6 +748,11 @@ fn archive_display_name(archive: &Path) -> String {
         stem
     };
     trimmed.trim().to_string()
+}
+
+/// Paths cross to the UI as strings, so lossy conversion happens in one place.
+fn path_string(path: impl AsRef<Path>) -> String {
+    path.as_ref().to_string_lossy().into_owned()
 }
 
 fn copy_tree(from: &Path, to: &Path) -> Result<()> {

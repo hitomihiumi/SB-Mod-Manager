@@ -93,3 +93,27 @@ pub struct ApplyFailure {
     pub name: String,
     pub reason: String,
 }
+
+/// Where everything lives, for the settings screen.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FoldersView {
+    /// The relocatable library root.
+    pub library: String,
+    pub mods: String,
+    pub backups: String,
+    pub game: Option<String>,
+    /// False when the library is on a different drive from the game, which
+    /// means deployment falls back to copying and every enabled mod is stored
+    /// twice.
+    pub same_volume_as_game: bool,
+    pub library_bytes: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryMoveReport {
+    pub folders: FoldersView,
+    /// The result of putting previously enabled mods back after the move.
+    pub redeployed: ApplyReport,
+}
