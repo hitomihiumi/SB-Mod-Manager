@@ -1,0 +1,22 @@
+[package]
+name = "sbmm-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+sbmm-core = { workspace = true }
+sbmm-archive = { workspace = true }
+sbmm-game = { workspace = true }
+sbmm-deploy = { workspace = true }
+sbmm-store = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+sbmm-archive.workspace = true
+tempfile = { workspace = true }
+zip = "4.2.0"

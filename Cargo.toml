@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/sbmm-core",
+    "crates/sbmm-app",
     "crates/sbmm-archive",
     "crates/sbmm-game",
     "crates/sbmm-deploy",
@@ -17,6 +18,7 @@ repository = "https://github.com/hitomihiumi/sb-mod-manager"
 
 [workspace.dependencies]
 sbmm-core = { path = "crates/sbmm-core" }
+sbmm-app = { path = "crates/sbmm-app" }
 sbmm-archive = { path = "crates/sbmm-archive" }
 sbmm-game = { path = "crates/sbmm-game" }
 sbmm-deploy = { path = "crates/sbmm-deploy" }

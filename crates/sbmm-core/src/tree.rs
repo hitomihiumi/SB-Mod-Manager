@@ -5,12 +5,15 @@ use crate::paths;
 /// One file inside an extracted archive.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TreeEntry {
-    /// Path relative to the extraction root, with original casing preserved
-    /// because that is what actually gets copied.
+    /// Where the file actually lives, relative to the extraction root. This is
+    /// what gets read during deployment, so wrapper stripping never touches it.
     pub path: PathBuf,
-    /// Lowercased, forward-slash-separated form used for all matching. Mod
+    /// The path after redundant wrapper folders have been removed, with the
+    /// original casing kept. Destinations are computed from this.
+    pub rel: PathBuf,
+    /// Lowercased, forward-slash form of `rel`, used for all matching. Mod
     /// archives are wildly inconsistent about casing, so nothing compares
-    /// against `path` directly.
+    /// against the raw paths directly.
     pub norm: String,
 }
 
@@ -51,10 +54,25 @@ impl FileTree {
                 if norm.is_empty() {
                     None
                 } else {
-                    Some(TreeEntry { path, norm })
+                    Some(TreeEntry {
+                        rel: path.clone(),
+                        path,
+                        norm,
+                    })
                 }
             })
             .collect();
+        entries.sort_by(|a, b| a.norm.cmp(&b.norm));
+        entries.dedup_by(|a, b| a.norm == b.norm);
+        Self { entries }
+    }
+
+    /// Build a tree from entries that already carry both path forms.
+    ///
+    /// Used to split a tree without losing the distinction between where a
+    /// file lives and where wrapper stripping decided it logically sits.
+    pub fn from_entries(entries: Vec<TreeEntry>) -> Self {
+        let mut entries = entries;
         entries.sort_by(|a, b| a.norm.cmp(&b.norm));
         entries.dedup_by(|a, b| a.norm == b.norm);
         Self { entries }
@@ -112,9 +130,10 @@ impl FileTree {
                 .iter()
                 .filter_map(|e| {
                     let rest_norm = e.norm.split_once('/').map(|(_, r)| r.to_string())?;
-                    let rest_path = strip_first_component(&e.path)?;
+                    let rest_rel = strip_first_component(&e.rel)?;
                     Some(TreeEntry {
-                        path: rest_path,
+                        path: e.path.clone(),
+                        rel: rest_rel,
                         norm: rest_norm,
                     })
                 })
@@ -195,8 +214,12 @@ impl FileTree {
             .filter(|e| e.norm.starts_with(&prefix))
             .filter_map(|e| {
                 let norm = e.norm[prefix.len()..].to_string();
-                let path = strip_components(&e.path, depth)?;
-                Some(TreeEntry { path, norm })
+                let rel = strip_components(&e.rel, depth)?;
+                Some(TreeEntry {
+                    path: e.path.clone(),
+                    rel,
+                    norm,
+                })
             })
             .collect();
         FileTree { entries }
@@ -239,6 +262,11 @@ mod tests {
         let stripped = tree.stripped();
         let names: Vec<_> = stripped.entries().iter().map(|e| e.norm.as_str()).collect();
         assert_eq!(names, vec!["foo_p.pak", "foo_p.utoc"]);
+        assert_eq!(
+            stripped.entries()[0].path,
+            PathBuf::from("Cool Mod v1.2/foo_P.pak"),
+            "stripping is a matching concern; the file is still where it was"
+        );
     }
 
     #[test]
@@ -274,6 +302,11 @@ mod tests {
         let tree = FileTree::new(["SB/Content/Movies/intro.mp4"]);
         let sub = tree.subtree("sb");
         assert_eq!(sub.entries()[0].norm, "content/movies/intro.mp4");
-        assert_eq!(sub.entries()[0].path, PathBuf::from("Content/Movies/intro.mp4"));
+        assert_eq!(sub.entries()[0].rel, PathBuf::from("Content/Movies/intro.mp4"));
+        assert_eq!(
+            sub.entries()[0].path,
+            PathBuf::from("SB/Content/Movies/intro.mp4"),
+            "the on-disk path must survive rebasing"
+        );
     }
 }

@@ -128,6 +128,7 @@ pub fn retarget(component: &DetectedComponent, new_type: ModType, mod_name: &str
         .iter()
         .map(|f| crate::tree::TreeEntry {
             norm: f.source.to_string_lossy().to_ascii_lowercase().replace('\\', "/"),
+            rel: f.source.clone(),
             path: f.source.clone(),
         })
         .collect();

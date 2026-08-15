@@ -44,7 +44,7 @@ pub fn detect_components(tree: &FileTree) -> Vec<DetectedComponent> {
         components.extend(detect_game_relative(&sb_entries));
     }
     if !other_entries.is_empty() {
-        let rest = FileTree::new(other_entries.iter().map(|e| e.path.clone()));
+        let rest = FileTree::from_entries(other_entries);
         components.extend(detect_heuristic(&rest));
     }
 
@@ -83,7 +83,7 @@ fn detect_game_relative(entries: &[TreeEntry]) -> Vec<DetectedComponent> {
                 .iter()
                 .map(|e| ComponentFile {
                     source: e.path.clone(),
-                    target: e.path.clone(),
+                    target: e.rel.clone(),
                 })
                 .collect();
             let (pak_sets, mut warnings) = build_pak_sets(&entries);
@@ -126,7 +126,7 @@ fn classify_game_relative(rel: &str, entry: &TreeEntry) -> (ModType, Option<Stri
                 ModType::Ue4ssLua
             };
             // Recover the original casing of the folder name for the filesystem.
-            let original = nth_component(&entry.path, 5).unwrap_or_else(|| name.to_string());
+            let original = nth_component(&entry.rel, 5).unwrap_or_else(|| name.to_string());
             return (mod_type, Some(original));
         }
         // A bare `mods.txt` and similar belong to the framework.
@@ -288,7 +288,7 @@ fn claim_ue4ss_mods(
         let name = if dir.is_empty() {
             None
         } else {
-            nth_component(&entries[0].path, depth - 1)
+            nth_component(&entries[0].rel, depth - 1)
         };
 
         let target_root = match &name {
@@ -442,7 +442,7 @@ fn unknown_component(entries: &[TreeEntry]) -> DetectedComponent {
             .iter()
             .map(|e| ComponentFile {
                 source: e.path.clone(),
-                target: e.path.clone(),
+                target: e.rel.clone(),
             })
             .collect(),
         target_subdir: PathBuf::new(),
@@ -546,10 +546,10 @@ fn map_flat(entries: &[TreeEntry], target_dir: &str) -> Vec<ComponentFile> {
         .iter()
         .map(|e| {
             let name = e
-                .path
+                .rel
                 .file_name()
                 .map(PathBuf::from)
-                .unwrap_or_else(|| e.path.clone());
+                .unwrap_or_else(|| e.rel.clone());
             ComponentFile {
                 source: e.path.clone(),
                 target: Path::new(target_dir).join(name),
@@ -564,8 +564,8 @@ fn map_preserving(entries: &[TreeEntry], target_dir: &str, strip_depth: usize) -
     entries
         .iter()
         .map(|e| {
-            let rel = strip_leading(&e.path, strip_depth).unwrap_or_else(|| {
-                PathBuf::from(e.path.file_name().unwrap_or(e.path.as_os_str()))
+            let rel = strip_leading(&e.rel, strip_depth).unwrap_or_else(|| {
+                PathBuf::from(e.rel.file_name().unwrap_or(e.rel.as_os_str()))
             });
             ComponentFile {
                 source: e.path.clone(),
