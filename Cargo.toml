@@ -1,0 +1,38 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/sbmm-core",
+    "crates/sbmm-archive",
+    "crates/sbmm-game",
+    "crates/sbmm-deploy",
+    "crates/sbmm-store",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+license = "MIT"
+repository = "https://github.com/hitomihiumi/sb-mod-manager"
+
+[workspace.dependencies]
+sbmm-core = { path = "crates/sbmm-core" }
+sbmm-archive = { path = "crates/sbmm-archive" }
+sbmm-game = { path = "crates/sbmm-game" }
+sbmm-deploy = { path = "crates/sbmm-deploy" }
+sbmm-store = { path = "crates/sbmm-store" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+tempfile = "3"
+
+# Keep the shipped binary small: optimize for size, strip everything we can.
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+incremental = false
