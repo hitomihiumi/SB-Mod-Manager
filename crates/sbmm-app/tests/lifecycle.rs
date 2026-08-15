@@ -622,6 +622,71 @@ fn downloads_live_in_the_library_and_move_with_it() {
     );
 }
 
+/// A download goes through the same pipeline as a dropped archive, but the mod
+/// has to remember it came from Nexus — that is what a later update check has
+/// to work from.
+#[test]
+fn a_nexus_download_is_installed_and_keeps_its_origin() {
+    let mut fx = Fixture::new();
+    let archive = fx.source.join("440-1899.zip");
+    {
+        let file = fs::File::create(&archive).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options: zip::write::FileOptions<'_, ()> = zip::write::FileOptions::default();
+        zip.start_file("Outfit_P.pak", options).unwrap();
+        zip.write_all(b"payload").unwrap();
+        zip.finish().unwrap();
+    }
+
+    let id = fx
+        .app
+        .install_download(
+            &archive,
+            "Nice Outfit",
+            sbmm_app::Origin::nexus(440, 1899).with_version(Some("1.2".into())),
+        )
+        .unwrap();
+
+    let snapshot = fx.app.snapshot().unwrap();
+    let installed = snapshot.mods.iter().find(|m| m.id == id).unwrap();
+    assert_eq!(installed.name, "Nice Outfit");
+    assert_eq!(installed.source, "nexus");
+    assert_eq!(installed.version.as_deref(), Some("1.2"));
+
+    // And it still deploys like any other pak.
+    fx.app.set_enabled(&[id], true).unwrap();
+    fx.app.apply().unwrap();
+    assert!(fx
+        .game
+        .join("SB/Content/Paks/~mods/0010_Outfit_P.pak")
+        .exists());
+}
+
+/// An empty name falls back to the archive's, so a download that arrived
+/// before the API could be asked still gets a sensible label.
+#[test]
+fn a_download_without_a_name_uses_the_archive_name() {
+    let mut fx = Fixture::new();
+    let archive = fx.source.join("Cutscene Skip-77-1-0-1699999999.zip");
+    {
+        let file = fs::File::create(&archive).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options: zip::write::FileOptions<'_, ()> = zip::write::FileOptions::default();
+        zip.start_file("Skip_P.pak", options).unwrap();
+        zip.write_all(b"payload").unwrap();
+        zip.finish().unwrap();
+    }
+
+    let id = fx
+        .app
+        .install_download(&archive, "", sbmm_app::Origin::nexus(77, 1))
+        .unwrap();
+
+    let snapshot = fx.app.snapshot().unwrap();
+    let installed = snapshot.mods.iter().find(|m| m.id == id).unwrap();
+    assert_eq!(installed.name, "Cutscene Skip");
+}
+
 /// Naive substring search over the raw database bytes.
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {
     haystack.windows(needle.len()).any(|w| w == needle)

@@ -60,6 +60,42 @@ impl AppError {
 
 type Result<T> = std::result::Result<T, AppError>;
 
+/// Where an installed mod came from.
+///
+/// Only mods that carry a Nexus id can be checked for updates later, so the
+/// origin is recorded at install time rather than guessed afterwards.
+#[derive(Debug, Clone, Default)]
+pub struct Origin {
+    pub source: String,
+    pub nexus_mod_id: Option<i64>,
+    pub nexus_file_id: Option<i64>,
+    pub version: Option<String>,
+}
+
+impl Origin {
+    /// An archive the user dropped in themselves.
+    pub fn manual() -> Self {
+        Self {
+            source: "manual".into(),
+            ..Self::default()
+        }
+    }
+
+    pub fn nexus(mod_id: i64, file_id: i64) -> Self {
+        Self {
+            source: "nexus".into(),
+            nexus_mod_id: Some(mod_id),
+            nexus_file_id: Some(file_id),
+            version: None,
+        }
+    }
+
+    pub fn with_version(mut self, version: Option<String>) -> Self {
+        self.version = version;
+        self
+    }
+}
+
 const SETTING_GAME_ROOT: &str = "gameRoot";
 const SETTING_AUTO_APPLY: &str = "autoApply";
 const SETTING_LIBRARY_ROOT: &str = "libraryRoot";
@@ -340,6 +376,35 @@ impl App {
         name: &str,
         type_override: Option<ModType>,
     ) -> Result<i64> {
+        self.commit_install(staging_id, name, type_override, Origin::manual())
+    }
+
+    /// Install a file the download queue fetched from Nexus.
+    ///
+    /// Same pipeline as a hand-dropped archive, except the mod remembers where
+    /// it came from, which is what later lets it be checked for updates.
+    pub fn install_download(
+        &mut self,
+        archive: impl AsRef<Path>,
+        name: &str,
+        origin: Origin,
+    ) -> Result<i64> {
+        let staged = self.stage_archive(archive)?;
+        let name = if name.trim().is_empty() {
+            staged.suggested_name.clone()
+        } else {
+            name.to_string()
+        };
+        self.commit_install(&staged.staging_id, &name, None, origin)
+    }
+
+    fn commit_install(
+        &mut self,
+        staging_id: &str,
+        name: &str,
+        type_override: Option<ModType>,
+        origin: Origin,
+    ) -> Result<i64> {
         let dest = self.staging_path(staging_id);
         if !dest.is_dir() {
             return Err(AppError::UnknownStaging(staging_id.to_string()));
@@ -368,10 +433,10 @@ impl App {
         let id = self.store.insert_mod(&NewMod {
             name: name.to_string(),
             staging_folder: staging_id.to_string(),
-            version: None,
-            source: "manual".into(),
-            nexus_mod_id: None,
-            nexus_file_id: None,
+            version: origin.version,
+            source: origin.source,
+            nexus_mod_id: origin.nexus_mod_id,
+            nexus_file_id: origin.nexus_file_id,
             primary_type,
             components,
             size_bytes: sbmm_archive::directory_size(&dest) as i64,

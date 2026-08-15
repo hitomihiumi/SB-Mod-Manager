@@ -5,10 +5,11 @@ import {
   type AppSnapshot,
   type ModTypeId,
   type ModView,
+  type QueueItem,
   type StagedInstall,
 } from "../lib/ipc";
 
-export type View = "mods" | "order" | "settings";
+export type View = "mods" | "order" | "downloads" | "settings";
 
 interface Toast {
   id: number;
@@ -32,10 +33,18 @@ interface AppStore {
   busy: Busy | null;
   /** Archives the detector could not classify, waiting to be asked about. */
   queue: StagedInstall[];
+  /** Nexus downloads, in whatever state the backend last reported. */
+  downloads: QueueItem[];
   toasts: Toast[];
 
   init: () => Promise<void>;
   refresh: () => Promise<void>;
+  refreshDownloads: () => Promise<void>;
+  /** Apply a progress event without a round trip to the backend. */
+  patchDownload: (item: QueueItem) => void;
+  addNxmLink: (url: string) => Promise<void>;
+  cancelDownload: (id: number) => Promise<void>;
+  clearFinishedDownloads: () => Promise<void>;
   setView: (view: View) => void;
   setSearch: (search: string) => void;
   setSelection: (ids: number[]) => void;
@@ -65,10 +74,12 @@ export const useApp = create<AppStore>((set, get) => ({
   search: "",
   busy: null,
   queue: [],
+  downloads: [],
   toasts: [],
 
   async init() {
     await get().refresh();
+    await get().refreshDownloads();
     set({ ready: true });
   },
 
@@ -82,6 +93,49 @@ export const useApp = create<AppStore>((set, get) => ({
           snapshot.mods.some((m) => m.id === id),
         ),
       }));
+    } catch (error) {
+      get().toast("error", String(error));
+    }
+  },
+
+  async refreshDownloads() {
+    try {
+      set({ downloads: await ipc.downloadQueue() });
+    } catch (error) {
+      get().toast("error", String(error));
+    }
+  },
+
+  patchDownload(item) {
+    set((state) => ({
+      downloads: state.downloads.some((d) => d.id === item.id)
+        ? state.downloads.map((d) => (d.id === item.id ? item : d))
+        : [...state.downloads, item],
+    }));
+  },
+
+  async addNxmLink(url) {
+    try {
+      await ipc.addNxmLink(url);
+      await get().refreshDownloads();
+    } catch (error) {
+      get().toast("error", String(error));
+    }
+  },
+
+  async cancelDownload(id) {
+    try {
+      await ipc.cancelDownload(id);
+      await get().refreshDownloads();
+    } catch (error) {
+      get().toast("error", String(error));
+    }
+  },
+
+  async clearFinishedDownloads() {
+    try {
+      await ipc.clearFinishedDownloads();
+      await get().refreshDownloads();
     } catch (error) {
       get().toast("error", String(error));
     }

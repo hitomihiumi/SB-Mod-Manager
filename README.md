@@ -33,6 +33,12 @@ wrong is the usual reason a mod "doesn't work".
 - **Installs a batch in one go.** Drop or pick any number of archives; the ones
   it recognises install themselves and the rest queue up to be asked about, so
   nothing in the batch is lost.
+- **Downloads from Nexus Mods.** Pressing *Mod Manager Download* on a mod page
+  hands the file to the manager, which fetches it, works out what it is and
+  installs it without another click. Nexus only gives direct links to Premium
+  accounts, and that gate is respected rather than worked around: on a free
+  account the manager opens each mod page for you and picks the link up from
+  the button, which is one click per mod and nothing else.
 - **Keeps the library where you want it.** Mods and backups can live on another
   drive; only the small database stays in the app data folder. If the library
   ends up on a different drive from the game, the app says so, because hard
@@ -47,10 +53,14 @@ wrong is the usual reason a mod "doesn't work".
 
 ## Status
 
-The MVP core is complete and covered by tests. Not yet built:
+The MVP core and single-mod Nexus downloads are complete and covered by tests.
+Not yet built:
 
-- Nexus Mods downloads — `nxm://` handling, the download queue, collections
-  (the API client and key storage are in place)
+- Collections (the manifest parser and the GraphQL client are in place; the
+  install flow is not)
+- Update checks and the "update available" badge
+- Restoring the download queue after a restart — it currently lives in memory,
+  so a queue is lost if the manager is closed mid-download
 - ProjFS virtual filesystem as an alternative to hard-linking
 - Profiles (the schema already stores state per profile)
 - Asset-level conflict detection by reading `.pak` and `.utoc` indexes
@@ -106,6 +116,7 @@ runs on any machine — `src-tauri` is only command wrappers.
 | `sbmm-game` | Steam and Epic install discovery, including a small KeyValues parser |
 | `sbmm-archive` | zip/7z/rar extraction with path-traversal protection |
 | `sbmm-store` | SQLite persistence: mods, groups, per-profile state, deployment record |
+| `sbmm-nexus` | Nexus REST/GraphQL client, `nxm://` parsing, rate limits, the download queue |
 | `sbmm-app` | The application service the UI drives |
 | `src-tauri` | Tauri commands, window, bundling |
 

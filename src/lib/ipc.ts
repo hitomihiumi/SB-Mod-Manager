@@ -127,6 +127,28 @@ export interface RateLimit {
   resetAfterSecs: number | null;
 }
 
+export type DownloadState =
+  | "queued"
+  | "running"
+  | "done"
+  | "failed"
+  | "cancelled"
+  /** A free account has to press "Mod Manager Download" on the mod page. */
+  | "needsUserAction";
+
+export interface QueueItem {
+  id: number;
+  modId: number;
+  fileId: number;
+  name: string;
+  fileName: string;
+  state: DownloadState;
+  bytesDone: number;
+  bytesTotal: number | null;
+  error: string | null;
+  collection: string | null;
+}
+
 export interface Folders {
   library: string;
   mods: string;
@@ -176,6 +198,11 @@ export const ipc = {
 
   setNexusKey: (apiKey: string) => invoke<NexusAccount | null>("set_nexus_key", { apiKey }),
   nexusRateLimit: () => invoke<RateLimit>("nexus_rate_limit"),
+
+  addNxmLink: (url: string) => invoke<void>("add_nxm_link", { url }),
+  downloadQueue: () => invoke<QueueItem[]>("download_queue"),
+  cancelDownload: (id: number) => invoke<void>("cancel_download", { id }),
+  clearFinishedDownloads: () => invoke<void>("clear_finished_downloads"),
 
   checkForUpdate: () => invoke<UpdateInfo>("check_for_update"),
   installUpdate: () => invoke<void>("install_update"),
