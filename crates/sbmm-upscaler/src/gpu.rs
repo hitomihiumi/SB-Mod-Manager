@@ -164,7 +164,7 @@ pub fn adapters() -> Vec<Adapter> {
 
     // A laptop reports the integrated chip too; the one with the most video
     // memory is the one the game will be using.
-    found.sort_by(|a, b| b.memory_bytes.cmp(&a.memory_bytes));
+    found.sort_by_key(|adapter| std::cmp::Reverse(adapter.memory_bytes));
     found
 }
 
