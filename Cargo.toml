@@ -8,6 +8,7 @@ members = [
     "crates/sbmm-nexus",
     "crates/sbmm-deploy",
     "crates/sbmm-store",
+    "crates/sbmm-upscaler",
 ]
 
 [workspace.package]
@@ -25,6 +26,7 @@ sbmm-game = { path = "crates/sbmm-game" }
 sbmm-nexus = { path = "crates/sbmm-nexus" }
 sbmm-deploy = { path = "crates/sbmm-deploy" }
 sbmm-store = { path = "crates/sbmm-store" }
+sbmm-upscaler = { path = "crates/sbmm-upscaler" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -62,6 +62,11 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # The Linux job cannot see anything behind `cfg(windows)` — the DXGI
+      # adapter lookup and the credential store both live there.
+      - name: Lints for the Windows-only code
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
       - name: Build installer
         run: pnpm tauri build
 

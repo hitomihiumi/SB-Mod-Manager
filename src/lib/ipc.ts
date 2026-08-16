@@ -157,6 +157,45 @@ export interface QueueItem {
   collection: string | null;
 }
 
+export type UpscalerComponent =
+  | "dlssSuperResolution"
+  | "dlssFrameGeneration"
+  | "dlssRayReconstruction"
+  | "fsrDx12"
+  | "fsrVulkan";
+
+export interface UpscalerFile {
+  component: UpscalerComponent;
+  /** Relative to the game root. */
+  path: string;
+  version: string | null;
+}
+
+export interface UpscalerEntry {
+  component: UpscalerComponent;
+  label: string;
+  installed: UpscalerFile[];
+  installedVersion: string | null;
+  latestVersion: string | null;
+  /** False when the graphics card cannot run this DLL at all. */
+  supported: boolean;
+  blockedReason: string | null;
+  /** Set when the manager put the current file there. */
+  managedVersion: string | null;
+  note: string | null;
+}
+
+export interface Adapter {
+  name: string;
+  vendor: "nvidia" | "amd" | "intel" | "other";
+  memoryBytes: number;
+}
+
+export interface UpscalerStatus {
+  adapter: Adapter | null;
+  entries: UpscalerEntry[];
+}
+
 export interface Folders {
   library: string;
   mods: string;
@@ -212,6 +251,12 @@ export const ipc = {
   downloadQueue: () => invoke<QueueItem[]>("download_queue"),
   cancelDownload: (id: number) => invoke<void>("cancel_download", { id }),
   clearFinishedDownloads: () => invoke<void>("clear_finished_downloads"),
+
+  upscalerStatus: () => invoke<UpscalerStatus>("upscaler_status"),
+  updateUpscaler: (component: UpscalerComponent) =>
+    invoke<string>("update_upscaler", { component }),
+  restoreUpscaler: (component: UpscalerComponent) =>
+    invoke<boolean>("restore_upscaler", { component }),
 
   checkForUpdate: () => invoke<UpdateInfo>("check_for_update"),
   installUpdate: () => invoke<void>("install_update"),

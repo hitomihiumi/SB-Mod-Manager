@@ -43,6 +43,13 @@ wrong is the usual reason a mod "doesn't work".
   drive; only the small database stays in the app data folder. If the library
   ends up on a different drive from the game, the app says so, because hard
   links stop working there and every enabled mod is then stored twice.
+- **Updates DLSS and FSR.** Both ship as plain DLLs with a stable ABI within a
+  release line, so a newer one can be dropped in without waiting for a game
+  patch. Files come from the vendors' own repositories — `NVIDIA/DLSS` and the
+  FidelityFX SDK — and the offer is narrowed by what the card can actually run
+  and by which line the game is built against, so nothing is installed that the
+  game would ignore or the hardware could never load. The swap goes through the
+  same deployment record as a mod, so it undoes exactly.
 - **Updates itself** from GitHub releases, on either the stable or the nightly
   channel, with the download checked against a signature before anything is
   replaced.
@@ -117,6 +124,7 @@ runs on any machine — `src-tauri` is only command wrappers.
 | `sbmm-archive` | zip/7z/rar extraction with path-traversal protection |
 | `sbmm-store` | SQLite persistence: mods, groups, per-profile state, deployment record |
 | `sbmm-nexus` | Nexus REST/GraphQL client, `nxm://` parsing, rate limits, the download queue |
+| `sbmm-upscaler` | Finding DLSS/FSR DLLs, reading their PE version, GPU capability rules, vendor release catalogue |
 | `sbmm-app` | The application service the UI drives |
 | `src-tauri` | Tauri commands, window, bundling |
 

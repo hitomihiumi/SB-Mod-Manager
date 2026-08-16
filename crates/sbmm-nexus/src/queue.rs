@@ -59,7 +59,12 @@ pub struct QueueItem {
 }
 
 impl QueueItem {
-    pub fn new(mod_id: u64, file_id: u64, name: impl Into<String>, file_name: impl Into<String>) -> Self {
+    pub fn new(
+        mod_id: u64,
+        file_id: u64,
+        name: impl Into<String>,
+        file_name: impl Into<String>,
+    ) -> Self {
         Self {
             id: 0,
             mod_id,
@@ -362,7 +367,11 @@ mod tests {
         async fn get(&self, _url: &str, _h: &[(&str, &str)]) -> Result<HttpResponse, NexusError> {
             let n = self.calls.fetch_add(1, Ordering::SeqCst);
             // A throttled first call, then success, exercises the retry path.
-            let status = if self.status == 429 && n > 0 { 200 } else { self.status };
+            let status = if self.status == 429 && n > 0 {
+                200
+            } else {
+                self.status
+            };
             Ok(HttpResponse {
                 status,
                 headers: vec![],
@@ -457,7 +466,11 @@ mod tests {
         let sink = Recorder::default();
         let id = queue.push(QueueItem::new(1, 2, "Cool Outfit", "outfit.zip"));
 
-        assert!(queue.step(&client(200), &fetcher(false), &sink, dir.path()).await);
+        assert!(
+            queue
+                .step(&client(200), &fetcher(false), &sink, dir.path())
+                .await
+        );
 
         let completed = sink.completed.lock().unwrap();
         assert_eq!(completed.len(), 1);
@@ -472,7 +485,12 @@ mod tests {
         let queue = Queue::new("stellarblade");
         assert!(
             !queue
-                .step(&client(200), &fetcher(false), &Recorder::default(), dir.path())
+                .step(
+                    &client(200),
+                    &fetcher(false),
+                    &Recorder::default(),
+                    dir.path()
+                )
                 .await
         );
     }
@@ -485,7 +503,9 @@ mod tests {
         queue.push(QueueItem::new(42, 7, "Cool Outfit", "outfit.zip"));
 
         // 403 with no credentials means Premium is required.
-        queue.step(&client(403), &fetcher(false), &sink, dir.path()).await;
+        queue
+            .step(&client(403), &fetcher(false), &sink, dir.path())
+            .await;
 
         assert_eq!(queue.items()[0].state, DownloadState::NeedsUserAction);
         let prompted = sink.prompted.lock().unwrap();
@@ -503,18 +523,23 @@ mod tests {
         let queue = Queue::new("stellarblade");
         let sink = Recorder::default();
         let first = queue.push(QueueItem::new(42, 7, "Cool Outfit", "outfit.zip"));
-        queue.step(&client(403), &fetcher(false), &sink, dir.path()).await;
+        queue
+            .step(&client(403), &fetcher(false), &sink, dir.path())
+            .await;
 
         // The user presses Mod Manager Download; the link carries credentials.
-        let second = queue.push(
-            QueueItem::new(42, 7, "Cool Outfit", "outfit.zip").with_credentials("abc", 1700),
-        );
+        let second = queue
+            .push(QueueItem::new(42, 7, "Cool Outfit", "outfit.zip").with_credentials("abc", 1700));
 
         assert_eq!(second, first, "the same item must be reused");
         assert_eq!(queue.items().len(), 1);
         assert_eq!(queue.items()[0].state, DownloadState::Queued);
 
-        assert!(queue.step(&client(200), &fetcher(false), &sink, dir.path()).await);
+        assert!(
+            queue
+                .step(&client(200), &fetcher(false), &sink, dir.path())
+                .await
+        );
         assert_eq!(queue.items()[0].state, DownloadState::Done);
     }
 
@@ -525,7 +550,9 @@ mod tests {
         let sink = Recorder::default();
         queue.push(QueueItem::new(1, 2, "Cool Outfit", "outfit.zip"));
 
-        queue.step(&client(200), &fetcher(true), &sink, dir.path()).await;
+        queue
+            .step(&client(200), &fetcher(true), &sink, dir.path())
+            .await;
 
         assert_eq!(
             queue.items()[0].state,
@@ -541,7 +568,9 @@ mod tests {
         let sink = Recorder::default();
         queue.push(QueueItem::new(1, 2, "Cool Outfit", "outfit.zip"));
 
-        queue.step(&client(200), &fetcher(false), &sink, dir.path()).await;
+        queue
+            .step(&client(200), &fetcher(false), &sink, dir.path())
+            .await;
 
         assert!(sink.progress.load(Ordering::SeqCst) > 0);
         let item = &queue.items()[0];
@@ -558,7 +587,11 @@ mod tests {
         queue.cancel(id);
 
         // Cancelling takes it out of the queued set entirely.
-        assert!(!queue.step(&client(200), &fetcher(false), &sink, dir.path()).await);
+        assert!(
+            !queue
+                .step(&client(200), &fetcher(false), &sink, dir.path())
+                .await
+        );
         assert_eq!(queue.items()[0].state, DownloadState::Cancelled);
         assert!(sink.completed.lock().unwrap().is_empty());
     }
@@ -571,7 +604,12 @@ mod tests {
         queue.push(QueueItem::new(3, 4, "Waiting", "b.zip"));
 
         queue
-            .step(&client(200), &fetcher(false), &Recorder::default(), dir.path())
+            .step(
+                &client(200),
+                &fetcher(false),
+                &Recorder::default(),
+                dir.path(),
+            )
             .await;
         queue.clear_finished();
 

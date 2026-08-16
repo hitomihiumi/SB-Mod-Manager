@@ -153,6 +153,25 @@ export function Dialog({
   );
 }
 
+/** One block of the settings screen. */
+export function Section({
+  title,
+  hint,
+  children,
+}: {
+  title: string;
+  hint: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="rounded-lg border border-line bg-surface p-4">
+      <h3 className="text-[13px] font-semibold">{title}</h3>
+      {hint && <p className="mt-0.5 mb-3 text-[12px] text-ink-muted">{hint}</p>}
+      {children}
+    </section>
+  );
+}
+
 export function Empty({
   icon,
   title,

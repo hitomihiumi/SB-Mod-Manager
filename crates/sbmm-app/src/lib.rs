@@ -398,6 +398,142 @@ impl App {
         self.commit_install(&staged.staging_id, &name, None, origin)
     }
 
+    // -- upscalers ---------------------------------------------------------
+
+    /// Which upscaler DLLs the game currently has, and their versions.
+    pub fn upscalers(&self) -> Result<Vec<sbmm_upscaler::InstalledFile>> {
+        let Some(game) = self.game()? else {
+            return Ok(Vec::new());
+        };
+        Ok(sbmm_upscaler::scan(&game.root))
+    }
+
+    /// The upscaler swaps the manager itself has made, and their versions.
+    pub fn managed_upscalers(&self) -> Result<Vec<(sbmm_upscaler::Component, String)>> {
+        let mut out = Vec::new();
+        for record in self.store.list_mods()? {
+            let Some(component) = sbmm_upscaler::Component::all()
+                .iter()
+                .copied()
+                .find(|c| upscaler_staging_id(*c) == record.staging_folder)
+            else {
+                continue;
+            };
+            out.push((component, record.version.unwrap_or_default()));
+        }
+        Ok(out)
+    }
+
+    /// Undo a swap, putting the game's own DLL back.
+    ///
+    /// Doing nothing when there is no swap is the right answer, not an error:
+    /// the game's file is then already what is on disk.
+    pub fn restore_upscaler(&mut self, component: sbmm_upscaler::Component) -> Result<bool> {
+        let staging_id = upscaler_staging_id(component);
+        let Some(installed) = self
+            .store
+            .list_mods()?
+            .into_iter()
+            .find(|m| m.staging_folder == staging_id)
+        else {
+            return Ok(false);
+        };
+        self.uninstall(installed.id)?;
+        Ok(true)
+    }
+
+    /// Put a newer upscaler DLL in place of the game's own.
+    ///
+    /// Registered as an ordinary mod so the swap goes through the same
+    /// deployment record as everything else: the displaced original is backed
+    /// up, and removing the entry puts it back byte for byte. `files` pairs a
+    /// downloaded DLL with the game-relative path it replaces — one entry per
+    /// copy found, because the game may ship the same DLL twice and only one
+    /// of them is the one the loader reaches.
+    ///
+    /// Installing over a previous swap removes it first, so the file that
+    /// eventually gets restored is the game's, never one of ours.
+    pub fn install_upscaler(
+        &mut self,
+        component: sbmm_upscaler::Component,
+        version: &str,
+        files: &[(PathBuf, PathBuf)],
+    ) -> Result<i64> {
+        if files.is_empty() {
+            return Err(AppError::BadLibraryRoot(format!(
+                "{} was not found in the game folder",
+                component.label()
+            )));
+        }
+
+        let staging_id = upscaler_staging_id(component);
+        if let Some(previous) = self
+            .store
+            .list_mods()?
+            .into_iter()
+            .find(|m| m.staging_folder == staging_id)
+        {
+            self.uninstall(previous.id)?;
+        }
+
+        // The staging tree mirrors the game tree, which keeps two copies of
+        // the same DLL from colliding on one file name.
+        let staging_root = self.staging_path(&staging_id);
+        let mut component_files = Vec::with_capacity(files.len());
+        for (downloaded, target) in files {
+            let staged = staging_root.join(target);
+            if let Some(parent) = staged.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
+            }
+            std::fs::copy(downloaded, &staged).map_err(|e| AppError::io(&staged, e))?;
+            component_files.push(sbmm_core::model::ComponentFile {
+                source: target.clone(),
+                target: target.clone(),
+            });
+        }
+
+        let detected = DetectedComponent {
+            mod_type: ModType::GameRootOverlay,
+            confidence: Confidence::High,
+            files: component_files,
+            target_subdir: PathBuf::new(),
+            ue4ss_mod_name: None,
+            pak_sets: Vec::new(),
+            warnings: Vec::new(),
+            notes: vec![format!(
+                "Replaces the game's {} in place; disabling this puts the original back.",
+                component.file_name()
+            )],
+        };
+
+        let name = format!("{} {version}", component.label());
+        let id = self.store.insert_mod(&NewMod {
+            name,
+            staging_folder: staging_id,
+            version: Some(version.to_string()),
+            source: "upscaler".into(),
+            nexus_mod_id: None,
+            nexus_file_id: None,
+            primary_type: ModType::GameRootOverlay.as_str().to_string(),
+            components: vec![detected],
+            size_bytes: sbmm_archive::directory_size(&staging_root) as i64,
+            image_path: None,
+        })?;
+
+        // A staged upscaler does nothing at all, so it goes into the game
+        // folder now rather than sitting in the pending list where "I updated
+        // DLSS" and "DLSS is updated" would quietly disagree. Only this mod is
+        // deployed; anything else the user has staged stays staged.
+        self.set_enabled(&[id], true)?;
+        let ctx = self.deploy_context()?;
+        let record = self.record(id)?;
+        let components = self.store.components_for(id)?;
+        let plan = self.plan_for(&record, &components);
+        self.deploy_mod(&ctx, id, &plan)?;
+
+        Ok(id)
+    }
+
     /// Commit a staged install, recording where the files came from.
     pub fn commit_install(
         &mut self,
@@ -970,6 +1106,12 @@ fn archive_display_name(archive: &Path) -> String {
 }
 
 /// Paths cross to the UI as strings, so lossy conversion happens in one place.
+/// One staging folder per upscaler component, so installing a newer version
+/// replaces the previous swap instead of stacking on top of it.
+fn upscaler_staging_id(component: sbmm_upscaler::Component) -> String {
+    format!("upscaler-{}", component.file_name().replace(".dll", ""))
+}
+
 fn path_string(path: impl AsRef<Path>) -> String {
     path.as_ref().to_string_lossy().into_owned()
 }

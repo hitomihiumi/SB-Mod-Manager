@@ -5,6 +5,7 @@
 //! behaviour worth testing lives in `sbmm-app`.
 
 mod downloads;
+mod upscaler;
 
 use std::sync::Mutex;
 
@@ -26,11 +27,12 @@ use downloads::Downloads;
 struct AppState(Mutex<App>);
 
 /// Errors reach the UI as plain strings; the frontend renders them in a toast.
-fn fail<E: std::fmt::Display>(error: E) -> String {
+pub(crate) fn fail<E: std::fmt::Display>(error: E) -> String {
     error.to_string()
 }
 
 /// Run `body` against the locked service.
+#[macro_export]
 macro_rules! with_app {
     ($state:expr, |$app:ident| $body:expr) => {{
         let mut guard = $state
@@ -607,6 +609,9 @@ pub fn run() {
             download_queue,
             cancel_download,
             clear_finished_downloads,
+            upscaler::upscaler_status,
+            upscaler::update_upscaler,
+            upscaler::restore_upscaler,
         ])
         .run(tauri::generate_context!())
         .expect("failed to start SB Mod Manager");

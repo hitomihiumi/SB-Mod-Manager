@@ -11,6 +11,7 @@ sbmm-archive = { workspace = true }
 sbmm-game = { workspace = true }
 sbmm-deploy = { workspace = true }
 sbmm-store = { workspace = true }
+sbmm-upscaler = { workspace = true }
 sbmm-nexus = { workspace = true }
 
 # The API key goes to the OS credential store rather than the database.
@@ -25,5 +26,6 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 sbmm-archive.workspace = true
+sbmm-upscaler.workspace = true
 tempfile = { workspace = true }
 zip = "4.2.0"

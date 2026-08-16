@@ -687,6 +687,104 @@ fn a_download_without_a_name_uses_the_archive_name() {
     assert_eq!(installed.name, "Cutscene Skip");
 }
 
+/// Swapping an upscaler DLL has to be as reversible as any other change: the
+/// game's own file is displaced, not destroyed.
+#[test]
+fn a_newer_upscaler_replaces_the_games_dll_and_gives_it_back_afterwards() {
+    let mut fx = Fixture::new();
+    let dll = fx.game.join("SB/Binaries/Win64/nvngx_dlss.dll");
+    fs::write(&dll, b"the version that shipped with the game").unwrap();
+    let before = fx.game_snapshot();
+
+    let downloaded = fx.source.join("nvngx_dlss.dll");
+    fs::write(&downloaded, b"a much newer dlss").unwrap();
+
+    let id = fx
+        .app
+        .install_upscaler(
+            sbmm_upscaler::Component::DlssSuperResolution,
+            "310.7.0",
+            &[(
+                downloaded.clone(),
+                PathBuf::from("SB/Binaries/Win64/nvngx_dlss.dll"),
+            )],
+        )
+        .unwrap();
+
+    assert_eq!(
+        fs::read(&dll).unwrap(),
+        b"a much newer dlss",
+        "a swap has to take effect immediately; staging it would be a lie"
+    );
+
+    fx.app.uninstall(id).unwrap();
+    assert_eq!(
+        fx.game_snapshot(),
+        before,
+        "removing the swap has to restore the game's own DLL exactly"
+    );
+}
+
+/// Updating twice must not leave our own previous DLL behind as the "original".
+#[test]
+fn updating_an_upscaler_again_still_restores_the_games_file() {
+    let mut fx = Fixture::new();
+    let dll = fx.game.join("SB/Binaries/Win64/nvngx_dlss.dll");
+    fs::write(&dll, b"the version that shipped with the game").unwrap();
+    let before = fx.game_snapshot();
+
+    let target = PathBuf::from("SB/Binaries/Win64/nvngx_dlss.dll");
+    for (version, contents) in [
+        ("310.5.0", &b"dlss 310.5"[..]),
+        ("310.7.0", &b"dlss 310.7"[..]),
+    ] {
+        let downloaded = fx.source.join(format!("nvngx_dlss-{version}.dll"));
+        fs::write(&downloaded, contents).unwrap();
+        fx.app
+            .install_upscaler(
+                sbmm_upscaler::Component::DlssSuperResolution,
+                version,
+                &[(downloaded, target.clone())],
+            )
+            .unwrap();
+        assert_eq!(fs::read(&dll).unwrap(), contents);
+    }
+
+    let installed: Vec<_> = fx
+        .app
+        .snapshot()
+        .unwrap()
+        .mods
+        .into_iter()
+        .filter(|m| m.source == "upscaler")
+        .collect();
+    assert_eq!(
+        installed.len(),
+        1,
+        "the older swap should have been replaced"
+    );
+
+    fx.app.uninstall(installed[0].id).unwrap();
+    assert_eq!(
+        fx.game_snapshot(),
+        before,
+        "the file restored has to be the game's, not our first replacement"
+    );
+}
+
+/// A DLL the game does not have cannot be updated, and saying so beats
+/// installing one into a folder the loader never looks at.
+#[test]
+fn an_upscaler_the_game_does_not_ship_is_refused() {
+    let mut fx = Fixture::new();
+    let result = fx.app.install_upscaler(
+        sbmm_upscaler::Component::DlssFrameGeneration,
+        "310.7.0",
+        &[],
+    );
+    assert!(result.is_err());
+}
+
 /// Naive substring search over the raw database bytes.
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {
     haystack.windows(needle.len()).any(|w| w == needle)
