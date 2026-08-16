@@ -14,6 +14,7 @@ struct Fixture {
     app: App,
     game: PathBuf,
     source: PathBuf,
+    data: PathBuf,
 }
 
 impl Fixture {
@@ -41,7 +42,14 @@ impl Fixture {
             app,
             game,
             source,
+            data,
         }
+    }
+
+    /// A second connection to the same database, for asserting on rows the
+    /// service has no reason to expose.
+    fn store(&self) -> sbmm_store::Store {
+        sbmm_store::Store::open(self.data.join("sbmm.db")).unwrap()
     }
 
     /// Build a loose mod folder and register it.
@@ -846,6 +854,236 @@ fn a_saved_queue_never_holds_the_download_credentials() {
 
     let restored = App::new(&data).unwrap().restore_download_queue().unwrap();
     assert!(!restored[0].has_credentials());
+}
+
+/// Build a v11 pak whose index names `assets`, so a mod can be given real
+/// contents to be read rather than a stub.
+fn pak_with(assets: &[&str]) -> Vec<u8> {
+    fn string(out: &mut Vec<u8>, value: &str) {
+        out.extend_from_slice(&(value.len() as u32 + 1).to_le_bytes());
+        out.extend_from_slice(value.as_bytes());
+        out.push(0);
+    }
+
+    // Each asset becomes its own directory entry, which keeps the builder
+    // trivial and is a shape UnrealPak itself produces.
+    let mut directory = Vec::new();
+    directory.extend_from_slice(&(assets.len() as u32).to_le_bytes());
+    for (index, asset) in assets.iter().enumerate() {
+        let (dir, file) = asset.rsplit_once('/').unwrap_or(("", asset));
+        string(&mut directory, &format!("{dir}/"));
+        directory.extend_from_slice(&1u32.to_le_bytes());
+        string(&mut directory, file);
+        directory.extend_from_slice(&(index as u32).to_le_bytes());
+    }
+
+    let mut file = vec![0u8; 32];
+    let directory_offset = file.len() as u64;
+    file.extend_from_slice(&directory);
+
+    let index_offset = file.len() as u64;
+    let mut index = Vec::new();
+    string(&mut index, "../../../");
+    index.extend_from_slice(&(assets.len() as u32).to_le_bytes());
+    index.extend_from_slice(&0u64.to_le_bytes());
+    index.extend_from_slice(&0u32.to_le_bytes()); // no path hash index
+    index.extend_from_slice(&1u32.to_le_bytes()); // a directory index follows
+    index.extend_from_slice(&directory_offset.to_le_bytes());
+    index.extend_from_slice(&(directory.len() as u64).to_le_bytes());
+    index.extend_from_slice(&[0u8; 20]);
+    let index_size = index.len() as u64;
+    file.extend_from_slice(&index);
+
+    file.extend_from_slice(&[0u8; 16]);
+    file.push(0);
+    file.extend_from_slice(&0x5A6F_12E1u32.to_le_bytes());
+    file.extend_from_slice(&11u32.to_le_bytes());
+    file.extend_from_slice(&index_offset.to_le_bytes());
+    file.extend_from_slice(&index_size.to_le_bytes());
+    file.extend_from_slice(&[0u8; 20]);
+    file.extend_from_slice(&[0u8; 32 * 5]);
+    file
+}
+
+impl Fixture {
+    /// Install a pak mod whose index names `assets`.
+    fn install_pak(&mut self, name: &str, assets: &[&str]) -> i64 {
+        let folder = self.source.join(name);
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(folder.join(format!("{name}_P.pak")), pak_with(assets)).unwrap();
+
+        let staged = self.app.stage_folder(&folder).unwrap();
+        self.app
+            .confirm_install(&staged.staging_id, name, None)
+            .unwrap()
+    }
+}
+
+/// Two mods replacing the same asset is the case the whole feature exists for:
+/// both look installed, both are enabled, and only one of them is doing
+/// anything.
+#[test]
+fn two_mods_replacing_one_asset_are_reported_with_the_winner_named() {
+    let mut fx = Fixture::new();
+    let shared = "SB/Content/Characters/Eve/Body.uasset";
+
+    let first = fx.install_pak("Aurora", &[shared, "SB/Content/Only/Aurora.uasset"]);
+    let second = fx.install_pak("Nova", &[shared]);
+    fx.app.set_enabled(&[first, second], true).unwrap();
+
+    let report = fx.app.conflicts().unwrap();
+    assert_eq!(
+        report.conflicts.len(),
+        1,
+        "only the shared asset is contested"
+    );
+
+    let conflict = &report.conflicts[0];
+    assert_eq!(conflict.asset, "sb/content/characters/eve/body.uasset");
+    assert!(conflict.named);
+    assert_eq!(conflict.claimants.len(), 2);
+
+    // Nova installed later, so it sits further down the load order and mounts
+    // last, which is what the game actually loads.
+    let winner = conflict.claimants.iter().find(|c| c.wins).unwrap();
+    assert_eq!(winner.mod_id, second);
+    assert_eq!(
+        conflict.claimants.iter().filter(|c| c.wins).count(),
+        1,
+        "exactly one mod can win an asset"
+    );
+}
+
+/// Moving a mod up the load order has to change who wins, or the conflict
+/// screen is decoration rather than a tool.
+#[test]
+fn reordering_hands_the_asset_to_the_other_mod() {
+    let mut fx = Fixture::new();
+    let shared = "SB/Content/Characters/Eve/Body.uasset";
+
+    let first = fx.install_pak("Aurora", &[shared]);
+    let second = fx.install_pak("Nova", &[shared]);
+    fx.app.set_enabled(&[first, second], true).unwrap();
+
+    let before = fx.app.conflicts().unwrap();
+    assert!(before.conflicts[0]
+        .claimants
+        .iter()
+        .any(|c| c.mod_id == second && c.wins));
+
+    fx.app.set_order(&[second, first]).unwrap();
+
+    let after = fx.app.conflicts().unwrap();
+    assert!(
+        after.conflicts[0]
+            .claimants
+            .iter()
+            .any(|c| c.mod_id == first && c.wins),
+        "the mod moved to the end of the order should now win"
+    );
+}
+
+/// A disabled mod is not in the game folder, so it cannot be overriding
+/// anything and must not be reported as doing so.
+#[test]
+fn a_disabled_mod_is_not_part_of_a_conflict() {
+    let mut fx = Fixture::new();
+    let shared = "SB/Content/Characters/Eve/Body.uasset";
+
+    let first = fx.install_pak("Aurora", &[shared]);
+    let second = fx.install_pak("Nova", &[shared]);
+
+    fx.app.set_enabled(&[first], true).unwrap();
+    assert!(
+        fx.app.conflicts().unwrap().conflicts.is_empty(),
+        "one enabled mod cannot conflict with a disabled one"
+    );
+
+    fx.app.set_enabled(&[second], true).unwrap();
+    assert_eq!(fx.app.conflicts().unwrap().conflicts.len(), 1);
+}
+
+/// The badge the mod list shows: how much of a mod is actually reaching the
+/// game, and how much of it another mod has taken over.
+#[test]
+fn each_mod_is_counted_for_what_it_wins_and_loses() {
+    let mut fx = Fixture::new();
+    let a = "SB/Content/A.uasset";
+    let b = "SB/Content/B.uasset";
+
+    let first = fx.install_pak("Aurora", &[a, b]);
+    let second = fx.install_pak("Nova", &[a, b]);
+    fx.app.set_enabled(&[first, second], true).unwrap();
+
+    let report = fx.app.conflicts().unwrap();
+    let loser = report
+        .overridden
+        .iter()
+        .find(|c| c.mod_id == first)
+        .unwrap();
+    let winner = report
+        .overridden
+        .iter()
+        .find(|c| c.mod_id == second)
+        .unwrap();
+
+    assert_eq!(loser.losing, 2, "both of Aurora's assets are overridden");
+    assert_eq!(loser.winning, 0);
+    assert_eq!(winner.winning, 2);
+    assert_eq!(winner.losing, 0);
+}
+
+/// Mods that touch different things must not be dragged into the list.
+#[test]
+fn mods_that_replace_different_assets_do_not_conflict() {
+    let mut fx = Fixture::new();
+    let first = fx.install_pak("Aurora", &["SB/Content/A.uasset"]);
+    let second = fx.install_pak("Nova", &["SB/Content/B.uasset"]);
+    fx.app.set_enabled(&[first, second], true).unwrap();
+
+    assert!(fx.app.conflicts().unwrap().conflicts.is_empty());
+}
+
+/// A mod whose containers could not be read has an unknown asset list, and
+/// saying nothing about it would read as "this mod conflicts with nothing".
+#[test]
+fn a_mod_whose_containers_could_not_be_read_is_named_as_unknown() {
+    let mut fx = Fixture::new();
+    let folder = fx.source.join("Mystery");
+    fs::create_dir_all(&folder).unwrap();
+    fs::write(folder.join("Mystery_P.pak"), b"this is not a pak at all").unwrap();
+
+    let staged = fx.app.stage_folder(&folder).unwrap();
+    let id = fx
+        .app
+        .confirm_install(&staged.staging_id, "Mystery", None)
+        .unwrap();
+    fx.app.set_enabled(&[id], true).unwrap();
+
+    let report = fx.app.conflicts().unwrap();
+    assert_eq!(
+        report.unreadable,
+        vec!["Mystery"],
+        "an unreadable mod is listed rather than treated as empty"
+    );
+}
+
+/// Mods installed before the index existed have to be caught up, or the
+/// feature only works for things installed after the update.
+#[test]
+fn mods_installed_before_the_index_existed_are_caught_up() {
+    let mut fx = Fixture::new();
+    let id = fx.install_pak("Aurora", &["SB/Content/A.uasset"]);
+
+    // Undo the indexing the install did, which is the state a database
+    // upgraded from before the feature is in.
+    {
+        let mut store = fx.store();
+        store.replace_mod_assets(id, &[], false).unwrap();
+    }
+
+    assert_eq!(fx.app.index_missing_assets().unwrap(), 1);
+    assert_eq!(fx.store().asset_count(id).unwrap(), 1);
 }
 
 /// Naive substring search over the raw database bytes.

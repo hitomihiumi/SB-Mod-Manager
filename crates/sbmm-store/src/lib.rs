@@ -52,6 +52,19 @@ pub struct ModRecord {
     /// The newest version Nexus reported, from the last update check.
     pub latest_version: Option<String>,
     pub update_checked_at: Option<String>,
+    /// Set once the mod's containers have been read for their asset list.
+    pub assets_indexed_at: Option<String>,
+}
+
+/// An asset more than one mod provides.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContestedAsset {
+    pub asset: String,
+    /// False when this is a chunk id rather than a path, because the mod's
+    /// container was built without a directory index.
+    pub named: bool,
+    /// Every mod providing it, in install order.
+    pub mod_ids: Vec<i64>,
 }
 
 /// One entry of the download queue, as it survives a restart.
@@ -198,7 +211,7 @@ impl Store {
                     m.nexus_mod_id, m.nexus_file_id, m.group_id, m.primary_type,
                     m.size_bytes, m.image_path, m.notes, m.installed_at,
                     COALESCE(pm.enabled, 0), COALESCE(pm.priority, 0),
-                    m.latest_version, m.update_checked_at
+                    m.latest_version, m.update_checked_at, m.assets_indexed_at
              FROM mods m
              LEFT JOIN profile_mods pm
                     ON pm.mod_id = m.id AND pm.profile_id = ?1
@@ -223,6 +236,7 @@ impl Store {
                 priority: row.get(14)?,
                 latest_version: row.get(15)?,
                 update_checked_at: row.get(16)?,
+                assets_indexed_at: row.get(17)?,
             })
         })?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
@@ -301,6 +315,95 @@ impl Store {
         }
         tx.commit()?;
         Ok(())
+    }
+
+    // -- what each mod replaces --------------------------------------------
+
+    /// Record the assets a mod provides, replacing whatever was there.
+    ///
+    /// `complete` says whether every container was read. Only a complete pass
+    /// stamps the mod as indexed, so a mod whose pak could not be opened stays
+    /// in [`Self::mods_without_assets`] and gets another go — and a caller can
+    /// tell "replaces nothing" apart from "could not be read", which look
+    /// identical in a conflict list and mean opposite things.
+    pub fn replace_mod_assets(
+        &mut self,
+        mod_id: i64,
+        assets: &[(String, bool)],
+        complete: bool,
+    ) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        tx.execute("DELETE FROM mod_assets WHERE mod_id = ?1", [mod_id])?;
+        {
+            let mut insert = tx.prepare(
+                "INSERT OR IGNORE INTO mod_assets (mod_id, asset, named) VALUES (?1, ?2, ?3)",
+            )?;
+            for (asset, named) in assets {
+                insert.execute(params![mod_id, asset, *named as i64])?;
+            }
+        }
+        tx.execute(
+            "UPDATE mods
+                SET assets_indexed_at = CASE WHEN ?2 THEN datetime('now') ELSE NULL END
+              WHERE id = ?1",
+            params![mod_id, complete],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Mods with no complete asset index, so they can be caught up.
+    pub fn mods_without_assets(&self) -> Result<Vec<i64>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id FROM mods WHERE assets_indexed_at IS NULL ORDER BY id")?;
+        let rows = stmt.query_map([], |row| row.get(0))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// Every asset more than one mod provides, with the mods that provide it.
+    ///
+    /// Grouped in SQL rather than by comparing mods pairwise: with a hundred
+    /// mods the pairwise version is ten thousand set intersections, while this
+    /// is one index scan.
+    pub fn contested_assets(&self) -> Result<Vec<ContestedAsset>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT a.asset, a.named, a.mod_id
+               FROM mod_assets a
+               JOIN (SELECT asset FROM mod_assets GROUP BY asset HAVING COUNT(*) > 1) c
+                 ON c.asset = a.asset
+              ORDER BY a.asset, a.mod_id",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)? != 0,
+                row.get::<_, i64>(2)?,
+            ))
+        })?;
+
+        let mut out: Vec<ContestedAsset> = Vec::new();
+        for row in rows {
+            let (asset, named, mod_id) = row?;
+            match out.last_mut() {
+                Some(last) if last.asset == asset => last.mod_ids.push(mod_id),
+                _ => out.push(ContestedAsset {
+                    asset,
+                    named,
+                    mod_ids: vec![mod_id],
+                }),
+            }
+        }
+        Ok(out)
+    }
+
+    /// How many assets one mod provides.
+    pub fn asset_count(&self, mod_id: i64) -> Result<i64> {
+        Ok(self.conn.query_row(
+            "SELECT COUNT(*) FROM mod_assets WHERE mod_id = ?1",
+            [mod_id],
+            |row| row.get(0),
+        )?)
     }
 
     pub fn components_for(&self, mod_id: i64) -> Result<Vec<DetectedComponent>> {

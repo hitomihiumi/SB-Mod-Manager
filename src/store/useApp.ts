@@ -5,11 +5,18 @@ import {
   type AppSnapshot,
   type ModTypeId,
   type ModView,
+  type ConflictReport,
   type QueueItem,
   type StagedInstall,
 } from "../lib/ipc";
 
-export type View = "mods" | "order" | "downloads" | "collections" | "settings";
+export type View =
+  | "mods"
+  | "order"
+  | "conflicts"
+  | "downloads"
+  | "collections"
+  | "settings";
 
 interface Toast {
   id: number;
@@ -37,6 +44,8 @@ interface AppStore {
   downloads: QueueItem[];
   /** A collection link that arrived from the browser, waiting to be looked up. */
   pendingCollection: string | null;
+  /** Which enabled mods replace the same assets. Null until first read. */
+  conflicts: ConflictReport | null;
   toasts: Toast[];
 
   init: () => Promise<void>;
@@ -48,6 +57,8 @@ interface AppStore {
   cancelDownload: (id: number) => Promise<void>;
   clearFinishedDownloads: () => Promise<void>;
   setPendingCollection: (slug: string | null) => void;
+  refreshConflicts: () => Promise<void>;
+  reindexAssets: () => Promise<void>;
   setView: (view: View) => void;
   setSearch: (search: string) => void;
   setSelection: (ids: number[]) => void;
@@ -79,6 +90,7 @@ export const useApp = create<AppStore>((set, get) => ({
   queue: [],
   downloads: [],
   pendingCollection: null,
+  conflicts: null,
   toasts: [],
 
   async init() {
@@ -90,6 +102,9 @@ export const useApp = create<AppStore>((set, get) => ({
   async refresh() {
     try {
       const snapshot = await ipc.snapshot();
+      // The conflict picture is a function of what is enabled and in what
+      // order, so it is re-read whenever either could have changed.
+      void ipc.conflicts().then((conflicts) => set({ conflicts })).catch(() => {});
       set((state) => ({
         snapshot,
         // Drop selections whose mods no longer exist.
@@ -146,6 +161,33 @@ export const useApp = create<AppStore>((set, get) => ({
   },
 
   setPendingCollection: (pendingCollection) => set({ pendingCollection }),
+
+  async refreshConflicts() {
+    try {
+      set({ conflicts: await ipc.conflicts() });
+    } catch (error) {
+      get().toast("error", String(error));
+    }
+  },
+
+  /// Read the containers of mods that have no complete asset list yet.
+  async reindexAssets() {
+    set({ busy: { label: "Reading mod contents", done: 0, total: 1 } });
+    try {
+      const looked = await ipc.indexModAssets();
+      await get().refreshConflicts();
+      get().toast(
+        "success",
+        looked === 0
+          ? "Every mod has already been read."
+          : `Read ${looked} mod${looked === 1 ? "" : "s"}.`,
+      );
+    } catch (error) {
+      get().toast("error", String(error));
+    } finally {
+      set({ busy: null });
+    }
+  },
 
   setView: (view) => set({ view }),
   setSearch: (search) => set({ search }),

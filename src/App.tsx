@@ -11,11 +11,13 @@ import {
   ListOrdered,
   Loader2,
   Settings,
+  Swords,
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { CollectionsView } from "./components/CollectionsView";
+import { ConflictsView } from "./components/ConflictsView";
 import { DownloadsView } from "./components/DownloadsView";
 import { InstallDialog } from "./components/InstallDialog";
 import { LoadOrderView } from "./components/LoadOrderView";
@@ -30,6 +32,7 @@ import { useApp, type View } from "./store/useApp";
 const NAV: { id: View; label: string; icon: typeof Layers }[] = [
   { id: "mods", label: "Mods", icon: Layers },
   { id: "order", label: "Load order", icon: ListOrdered },
+  { id: "conflicts", label: "Conflicts", icon: Swords },
   { id: "downloads", label: "Downloads", icon: Download },
   { id: "collections", label: "Collections", icon: Boxes },
   { id: "settings", label: "Settings", icon: Settings },
@@ -165,6 +168,7 @@ export default function App() {
           <main className="flex min-w-0 flex-1 flex-col">
             {view === "mods" && <ModsView onAdd={pickFiles} />}
             {view === "order" && <LoadOrderView />}
+            {view === "conflicts" && <ConflictsView />}
             {view === "downloads" && <DownloadsView />}
             {view === "collections" && <CollectionsView />}
             {view === "settings" && <SettingsView />}

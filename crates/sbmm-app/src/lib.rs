@@ -398,6 +398,152 @@ impl App {
         self.commit_install(&staged.staging_id, &name, None, origin)
     }
 
+    // -- conflicts ---------------------------------------------------------
+
+    /// Read what one mod replaces and record it.
+    ///
+    /// Only the container indexes are read, never the payload, so this costs a
+    /// few kilobytes however large the mod is. A container that cannot be read
+    /// is reported rather than skipped silently: an empty answer and an
+    /// unreadable one look the same in a conflict list, and only one of them
+    /// means "this mod replaces nothing".
+    pub fn index_mod_assets(&mut self, mod_id: i64) -> Result<Vec<String>> {
+        let record = self.record(mod_id)?;
+        let root = self.staging_path(&record.staging_folder);
+
+        let containers: Vec<PathBuf> = self
+            .store
+            .components_for(mod_id)?
+            .iter()
+            .flat_map(|c| c.files.iter())
+            .map(|f| root.join(&f.source))
+            .filter(|p| {
+                matches!(
+                    p.extension()
+                        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+                        .as_deref(),
+                    Some("pak") | Some("utoc")
+                )
+            })
+            .collect();
+
+        let (assets, problems) = sbmm_assets::read_all(containers.iter().map(|p| p.as_path()));
+
+        let rows: Vec<(String, bool)> = assets
+            .into_iter()
+            .map(|asset| (asset.label().to_string(), asset.is_named()))
+            .collect();
+        self.store
+            .replace_mod_assets(mod_id, &rows, problems.is_empty())?;
+
+        Ok(problems.into_iter().map(|e| e.to_string()).collect())
+    }
+
+    /// Index every mod that has not been looked at yet.
+    ///
+    /// Existing installs predate the index, and a mod installed while the
+    /// scan failed should get another chance rather than stay invisible.
+    pub fn index_missing_assets(&mut self) -> Result<usize> {
+        let pending = self.store.mods_without_assets()?;
+        for mod_id in &pending {
+            // One bad mod must not stop the rest from being indexed.
+            let _ = self.index_mod_assets(*mod_id);
+        }
+        Ok(pending.len())
+    }
+
+    /// Which enabled mods are replacing the same assets, and who wins.
+    ///
+    /// `~mods` is mounted alphanumerically and a later `_P` pak overrides an
+    /// earlier one, so the mod furthest down the load order is the one the
+    /// game ends up loading. That is the same ordering the load-order screen
+    /// shows, read the same way.
+    pub fn conflicts(&self) -> Result<ConflictReport> {
+        let records = self.store.list_mods()?;
+        let enabled: BTreeMap<i64, &ModRecord> = records
+            .iter()
+            .filter(|m| m.enabled)
+            .map(|m| (m.id, m))
+            .collect();
+
+        let mut report = ConflictReport {
+            // No complete index means the picture for this mod is missing,
+            // not empty — saying nothing would read as "conflicts with
+            // nothing", which is the opposite of what is known.
+            unreadable: records
+                .iter()
+                .filter(|m| m.enabled && m.assets_indexed_at.is_none())
+                .map(|m| m.name.clone())
+                .collect(),
+            ..Default::default()
+        };
+
+        let mut losing: BTreeMap<i64, i64> = BTreeMap::new();
+        let mut winning: BTreeMap<i64, i64> = BTreeMap::new();
+
+        for contested in self.store.contested_assets()? {
+            // An asset two disabled mods share is not a conflict: neither is
+            // in the game folder.
+            let mut claimants: Vec<&ModRecord> = contested
+                .mod_ids
+                .iter()
+                .filter_map(|id| enabled.get(id).copied())
+                .collect();
+            if claimants.len() < 2 {
+                continue;
+            }
+            claimants.sort_by_key(|m| (m.priority, m.id));
+
+            let winner = claimants.last().map(|m| m.id);
+            for record in &claimants {
+                if Some(record.id) == winner {
+                    *winning.entry(record.id).or_default() += 1;
+                } else {
+                    *losing.entry(record.id).or_default() += 1;
+                }
+            }
+
+            report.conflicts.push(Conflict {
+                asset: contested.asset,
+                named: contested.named,
+                claimants: claimants
+                    .iter()
+                    .map(|m| Claimant {
+                        mod_id: m.id,
+                        name: m.name.clone(),
+                        priority: m.priority,
+                        wins: Some(m.id) == winner,
+                    })
+                    .collect(),
+            });
+        }
+
+        let mut counts: BTreeMap<i64, ModConflictCount> = BTreeMap::new();
+        for (mod_id, count) in losing {
+            counts
+                .entry(mod_id)
+                .or_insert(ModConflictCount {
+                    mod_id,
+                    losing: 0,
+                    winning: 0,
+                })
+                .losing = count;
+        }
+        for (mod_id, count) in winning {
+            counts
+                .entry(mod_id)
+                .or_insert(ModConflictCount {
+                    mod_id,
+                    losing: 0,
+                    winning: 0,
+                })
+                .winning = count;
+        }
+        report.overridden = counts.into_values().collect();
+
+        Ok(report)
+    }
+
     // -- download queue ----------------------------------------------------
 
     /// The queue as the last run left it.
@@ -633,6 +779,13 @@ impl App {
             size_bytes: sbmm_archive::directory_size(&dest) as i64,
             image_path: None,
         })?;
+
+        // Read what it replaces now, while the containers are to hand. A
+        // failure here is not worth failing the install over — the mod is
+        // installed either way, it just has no conflict picture yet, and
+        // `index_missing_assets` will come back to it.
+        let _ = self.index_mod_assets(id);
+
         Ok(id)
     }
 

@@ -157,6 +157,36 @@ export interface QueueItem {
   collection: string | null;
 }
 
+export interface Claimant {
+  modId: number;
+  name: string;
+  priority: number;
+  /** True for the one the game actually loads. */
+  wins: boolean;
+}
+
+export interface Conflict {
+  /** An asset path, or a chunk id when the container had no directory index. */
+  asset: string;
+  named: boolean;
+  claimants: Claimant[];
+}
+
+export interface ModConflictCount {
+  modId: number;
+  /** Assets this mod provides that a later mod replaces. */
+  losing: number;
+  /** Assets this mod takes from an earlier one. */
+  winning: number;
+}
+
+export interface ConflictReport {
+  conflicts: Conflict[];
+  overridden: ModConflictCount[];
+  /** Mods whose containers could not be read, so the picture is incomplete. */
+  unreadable: string[];
+}
+
 export interface PlannedMod {
   modId: number;
   fileId: number;
@@ -283,6 +313,9 @@ export const ipc = {
   downloadQueue: () => invoke<QueueItem[]>("download_queue"),
   cancelDownload: (id: number) => invoke<void>("cancel_download", { id }),
   clearFinishedDownloads: () => invoke<void>("clear_finished_downloads"),
+
+  conflicts: () => invoke<ConflictReport>("conflicts"),
+  indexModAssets: () => invoke<number>("index_mod_assets"),
 
   resolveCollection: (link: string) => invoke<CollectionPlan>("resolve_collection", { link }),
   installCollection: (slug: string, files: QueuedFile[]) =>

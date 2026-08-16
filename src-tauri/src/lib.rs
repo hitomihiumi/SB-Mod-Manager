@@ -11,7 +11,8 @@ mod upscaler;
 use std::sync::Mutex;
 
 use sbmm_app::dto::{
-    AppSnapshot, ApplyReport, FoldersView, LibraryMoveReport, NexusAccount, StagedInstall,
+    AppSnapshot, ApplyReport, ConflictReport, FoldersView, LibraryMoveReport, NexusAccount,
+    StagedInstall,
 };
 use sbmm_app::App;
 use sbmm_core::model::ModType;
@@ -216,6 +217,22 @@ async fn nexus_rate_limit(
     let client = NexusClient::new(transport, key, sbmm_game::NEXUS_DOMAIN);
     client.validate().await.map_err(fail)?;
     Ok(client.rate_limit())
+}
+
+/// Which enabled mods are replacing the same assets, and which one the game
+/// actually loads.
+#[tauri::command]
+fn conflicts(state: tauri::State<'_, AppState>) -> Result<ConflictReport, String> {
+    with_app!(state, |app| app.conflicts())
+}
+
+/// Read the containers of any mod that has no complete asset index yet.
+///
+/// Covers mods installed before the feature existed and any whose scan failed
+/// at install time. Returns how many were looked at.
+#[tauri::command]
+fn index_mod_assets(state: tauri::State<'_, AppState>) -> Result<usize, String> {
+    with_app!(state, |app| app.index_missing_assets())
 }
 
 const USER_AGENT: &str = concat!("SBModManager/", env!("CARGO_PKG_VERSION"));
@@ -600,6 +617,8 @@ pub fn run() {
             assign_group,
             set_auto_apply,
             folders,
+            conflicts,
+            index_mod_assets,
             set_library_root,
             set_nexus_key,
             nexus_rate_limit,

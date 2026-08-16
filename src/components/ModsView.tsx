@@ -346,6 +346,10 @@ function ModRow({
   const toggle = useApp((s) => s.toggle);
   const uninstall = useApp((s) => s.uninstall);
   const refresh = useApp((s) => s.refresh);
+  const setView = useApp((s) => s.setView);
+  const overridden = useApp((s) =>
+    s.conflicts?.overridden.find((c) => c.modId === mod.id),
+  );
 
   return (
     <div
@@ -384,6 +388,20 @@ function ModRow({
         <AlertTriangle size={13} className="shrink-0 text-warn" aria-label="Has warnings">
           <title>{mod.warnings.join("\n")}</title>
         </AlertTriangle>
+      )}
+
+      {/* Enabled, but a mod further down the order replaces some of it. */}
+      {overridden && overridden.losing > 0 && (
+        <button
+          onClick={(event) => {
+            event.stopPropagation();
+            setView("conflicts");
+          }}
+          title={`${overridden.losing} of this mod's assets are replaced by a mod later in the load order.${overridden.winning > 0 ? ` It replaces ${overridden.winning} from earlier mods.` : ""}`}
+          className="shrink-0"
+        >
+          <Badge tone="danger">{overridden.losing} overridden</Badge>
+        </button>
       )}
 
       {mod.latestVersion && (

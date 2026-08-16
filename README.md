@@ -47,6 +47,13 @@ wrong is the usual reason a mod "doesn't work".
   cannot be fetched for you and are listed separately rather than silently
   skipped — a collection that quietly drops them looks installed while the
   game is still missing mods.
+- **Says which mod is actually winning.** Two mods can both be installed, both
+  be enabled, and only one of them be doing anything, because they replace the
+  same asset and the game loads whichever mounts last. The manager reads the
+  `.pak` and `.utoc` indexes — only the indexes, so a scan costs kilobytes
+  however large the mod is — and names the asset, the mods claiming it, and the
+  one that reaches the game. Moving a mod down the load order changes the
+  answer, so the list is something to act on rather than read.
 - **Keeps the library where you want it.** Mods and backups can live on another
   drive; only the small database stays in the app data folder. If the library
   ends up on a different drive from the game, the app says so, because hard
@@ -86,7 +93,6 @@ Not built:
 
 - ProjFS virtual filesystem as an alternative to hard-linking
 - Profiles (the schema already stores state per profile)
-- Asset-level conflict detection by reading `.pak` and `.utoc` indexes
 
 ## Building
 
@@ -138,6 +144,7 @@ runs on any machine — `src-tauri` is only command wrappers.
 | `sbmm-deploy` | `DeployBackend` trait, hard-link backend, the manifest that makes removal exact, UE4SS `mods.txt` syncing |
 | `sbmm-game` | Steam and Epic install discovery, including a small KeyValues parser |
 | `sbmm-archive` | zip/7z/rar extraction with path-traversal protection |
+| `sbmm-assets` | Reading `.pak` and `.utoc` indexes to find out what a mod replaces |
 | `sbmm-store` | SQLite persistence: mods, groups, per-profile state, deployment record |
 | `sbmm-nexus` | Nexus REST/GraphQL client, `nxm://` parsing, rate limits, the download queue |
 | `sbmm-upscaler` | Finding DLSS/FSR DLLs, reading their PE version, GPU capability rules, vendor release catalogue |

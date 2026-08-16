@@ -109,6 +109,26 @@ const MIGRATIONS: &[&str] = &[
         collection  TEXT
     );
     "#,
+    // v4 — what each mod replaces, read out of its pak and utoc indexes.
+    //
+    // Recorded at install time because reading an index needs the container
+    // on disk, and a mod stays installed long after the archive is gone. The
+    // index on `asset` is what makes finding clashes a single grouped query
+    // rather than comparing every mod against every other.
+    r#"
+    CREATE TABLE mod_assets (
+        mod_id INTEGER NOT NULL REFERENCES mods(id) ON DELETE CASCADE,
+        asset  TEXT NOT NULL,
+        -- Whether `asset` is a real path or a chunk id standing in for one.
+        named  INTEGER NOT NULL DEFAULT 1,
+        PRIMARY KEY (mod_id, asset)
+    ) WITHOUT ROWID;
+    CREATE INDEX idx_mod_assets_asset ON mod_assets(asset);
+
+    -- Set once a mod has been looked at, so a mod whose containers could not
+    -- be read is distinguishable from one that genuinely replaces nothing.
+    ALTER TABLE mods ADD COLUMN assets_indexed_at TEXT;
+    "#,
 ];
 
 pub fn migrate(conn: &Connection) -> Result<()> {

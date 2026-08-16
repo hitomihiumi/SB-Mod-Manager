@@ -3638,6 +3638,7 @@ version = "0.1.0"
 dependencies = [
  "keyring",
  "sbmm-archive",
+ "sbmm-assets",
  "sbmm-core",
  "sbmm-deploy",
  "sbmm-game",
@@ -3660,6 +3661,14 @@ dependencies = [
  "unrar",
  "walkdir",
  "zip",
+]
+
+[[package]]
+name = "sbmm-assets"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror 2.0.20",
 ]
 
 [[package]]

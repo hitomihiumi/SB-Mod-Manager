@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 sbmm-core = { workspace = true }
 sbmm-archive = { workspace = true }
+sbmm-assets = { workspace = true }
 sbmm-game = { workspace = true }
 sbmm-deploy = { workspace = true }
 sbmm-store = { workspace = true }
@@ -28,5 +29,6 @@ tracing = { workspace = true }
 sbmm-archive.workspace = true
 sbmm-upscaler.workspace = true
 sbmm-nexus.workspace = true
+sbmm-store.workspace = true
 tempfile = { workspace = true }
 zip = "4.2.0"

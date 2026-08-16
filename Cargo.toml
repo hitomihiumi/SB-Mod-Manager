@@ -4,6 +4,7 @@ members = [
     "crates/sbmm-core",
     "crates/sbmm-app",
     "crates/sbmm-archive",
+    "crates/sbmm-assets",
     "crates/sbmm-game",
     "crates/sbmm-nexus",
     "crates/sbmm-deploy",
@@ -22,6 +23,7 @@ repository = "https://github.com/hitomihiumi/sb-mod-manager"
 sbmm-core = { path = "crates/sbmm-core" }
 sbmm-app = { path = "crates/sbmm-app" }
 sbmm-archive = { path = "crates/sbmm-archive" }
+sbmm-assets = { path = "crates/sbmm-assets" }
 sbmm-game = { path = "crates/sbmm-game" }
 sbmm-nexus = { path = "crates/sbmm-nexus" }
 sbmm-deploy = { path = "crates/sbmm-deploy" }
