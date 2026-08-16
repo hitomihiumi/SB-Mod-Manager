@@ -82,6 +82,24 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # The installer takes its version from package.json, and the in-app
+      # updater compares that against what it is running. A tag that disagrees
+      # with package.json would publish fine and then never be offered as an
+      # update — a release that looks complete and does nothing. Cheaper to
+      # refuse here than to work out later why nobody got it.
+      - name: Check the tag matches the version being built
+        if: needs.decide.outputs.nightly != 'true'
+        shell: bash
+        run: |
+          tag="${{ github.ref_name }}"
+          version=$(node -p "require('./package.json').version")
+          if [ "$tag" != "v$version" ]; then
+            echo "::error::tag $tag does not match package.json version $version."
+            echo "Bump the version in package.json and tag it v$version, or tag this commit v$version."
+            exit 1
+          fi
+          echo "tag $tag matches package.json $version"
+
       # Moving the tag keeps one rolling prerelease instead of accumulating a
       # release per night.
       - name: Point the nightly tag at this commit

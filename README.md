@@ -107,11 +107,35 @@ pnpm tauri dev      # run it
 pnpm tauri build    # produce an installer
 ```
 
-Releases are automated: pushing a `v*` tag builds the Windows installer and
-publishes a GitHub Release with notes generated from the commits since the
-last tag, and a rolling `nightly` prerelease is rebuilt from `master` whenever
-something landed that day. The app version comes from `package.json` alone —
-`tauri.conf.json` points at it.
+### Publishing a release
+
+The version lives in `package.json` and nowhere else — `tauri.conf.json` points
+at it, and the installer, the updater manifest and the in-app version all come
+from there. So a stable release is two steps, in this order:
+
+```sh
+# 1. Bump the version and land it on master.
+npm version 0.2.0 --no-git-tag-version   # edits package.json
+git commit -am "Release 0.2.0" && git push origin master
+
+# 2. Tag that commit and push the tag.
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+Pushing the tag builds the Windows installer and publishes a GitHub Release
+with notes generated from the commits since the last tag. The tag must match
+`package.json` exactly (`v0.2.0` ↔ `0.2.0`); the workflow refuses otherwise,
+because a mismatched release publishes fine and is then never offered as an
+update, which is a failure that looks like a success.
+
+**Nightlies** need no action. At 03:00 UTC the workflow looks at `master`, and
+builds a rolling `nightly` prerelease if anything landed in the last 24 hours —
+so a quiet day publishes nothing, by design. To force one, run the *Release*
+workflow from the Actions tab with `nightly` ticked.
+
+Until the first `v*` tag exists there is no stable release, so the updater's
+stable channel has nothing to point at and reports that it cannot check.
+Nightly works from the first nightly build onwards.
 
 ### Discord presence (optional)
 
