@@ -33,10 +33,38 @@ wrong is the usual reason a mod "doesn't work".
 - **Installs a batch in one go.** Drop or pick any number of archives; the ones
   it recognises install themselves and the rest queue up to be asked about, so
   nothing in the batch is lost.
+- **Downloads from Nexus Mods.** Pressing *Mod Manager Download* on a mod page
+  hands the file to the manager, which fetches it, works out what it is and
+  installs it without another click. Nexus only gives direct links to Premium
+  accounts, and that gate is respected rather than worked around: on a free
+  account the manager opens each mod page for you and picks the link up from
+  the button, which is one click per mod and nothing else. The queue survives
+  a restart, and a part-downloaded file resumes rather than starting over.
+- **Installs collections.** Paste a collection link and it lists what is in
+  there, marks what you already have, and lets you pick the optional entries.
+  Everything selected goes into the same queue, so Premium installs the lot
+  unattended and a free account is one click per mod. Entries hosted off Nexus
+  cannot be fetched for you and are listed separately rather than silently
+  skipped — a collection that quietly drops them looks installed while the
+  game is still missing mods.
+- **Says which mod is actually winning.** Two mods can both be installed, both
+  be enabled, and only one of them be doing anything, because they replace the
+  same asset and the game loads whichever mounts last. The manager reads the
+  `.pak` and `.utoc` indexes — only the indexes, so a scan costs kilobytes
+  however large the mod is — and names the asset, the mods claiming it, and the
+  one that reaches the game. Moving a mod down the load order changes the
+  answer, so the list is something to act on rather than read.
 - **Keeps the library where you want it.** Mods and backups can live on another
   drive; only the small database stays in the app data folder. If the library
   ends up on a different drive from the game, the app says so, because hard
   links stop working there and every enabled mod is then stored twice.
+- **Updates DLSS and FSR.** Both ship as plain DLLs with a stable ABI within a
+  release line, so a newer one can be dropped in without waiting for a game
+  patch. Files come from the vendors' own repositories — `NVIDIA/DLSS` and the
+  FidelityFX SDK — and the offer is narrowed by what the card can actually run
+  and by which line the game is built against, so nothing is installed that the
+  game would ignore or the hardware could never load. The swap goes through the
+  same deployment record as a mod, so it undoes exactly.
 - **Updates itself** from GitHub releases, on either the stable or the nightly
   channel, with the download checked against a signature before anything is
   replaced.
@@ -47,13 +75,24 @@ wrong is the usual reason a mod "doesn't work".
 
 ## Status
 
-The MVP core is complete and covered by tests. Not yet built:
+Everything the plan set out is built and covered by tests. Two things are
+worth knowing before the first real run:
 
-- Nexus Mods downloads — `nxm://` handling, the download queue, collections
-  (the API client and key storage are in place)
+- **The collection lookup has not met the live API.** Nexus does not publish
+  its v2 GraphQL schema and the domain is unreachable from CI, so the query
+  was written from the documented shape and the response is read by walking
+  it for anything carrying a mod and file id rather than by a fixed path.
+  That survives a renamed wrapper, but not a renamed `collectionRevision`
+  itself. The `collection.json` inside the revision archive is the tested
+  path and is preferred whenever the response offers a link to it.
+- **The upscaler check needs GitHub.** Listing releases uses the public
+  GitHub API, which is rate limited for anonymous callers; when it refuses,
+  the screen says it could not check rather than claiming you are up to date.
+
+Not built:
+
 - ProjFS virtual filesystem as an alternative to hard-linking
 - Profiles (the schema already stores state per profile)
-- Asset-level conflict detection by reading `.pak` and `.utoc` indexes
 
 ## Building
 
@@ -105,7 +144,10 @@ runs on any machine — `src-tauri` is only command wrappers.
 | `sbmm-deploy` | `DeployBackend` trait, hard-link backend, the manifest that makes removal exact, UE4SS `mods.txt` syncing |
 | `sbmm-game` | Steam and Epic install discovery, including a small KeyValues parser |
 | `sbmm-archive` | zip/7z/rar extraction with path-traversal protection |
+| `sbmm-assets` | Reading `.pak` and `.utoc` indexes to find out what a mod replaces |
 | `sbmm-store` | SQLite persistence: mods, groups, per-profile state, deployment record |
+| `sbmm-nexus` | Nexus REST/GraphQL client, `nxm://` parsing, rate limits, the download queue |
+| `sbmm-upscaler` | Finding DLSS/FSR DLLs, reading their PE version, GPU capability rules, vendor release catalogue |
 | `sbmm-app` | The application service the UI drives |
 | `src-tauri` | Tauri commands, window, bundling |
 

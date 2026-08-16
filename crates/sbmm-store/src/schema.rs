@@ -79,6 +79,56 @@ const MIGRATIONS: &[&str] = &[
 
     INSERT INTO profiles (name, active) VALUES ('Default', 1);
     "#,
+    // v2 — what a Nexus update check leaves behind.
+    //
+    // The version a mod is *at* is already in `mods.version`; these record
+    // what Nexus last said was available, so the badge survives a restart
+    // without re-spending the API allowance.
+    r#"
+    ALTER TABLE mods ADD COLUMN latest_version TEXT;
+    ALTER TABLE mods ADD COLUMN update_checked_at TEXT;
+    "#,
+    // v3 — the download queue, so closing the manager mid-collection does not
+    // lose forty entries and orphan whatever was half-fetched.
+    //
+    // The `key`/`expires` pair from an nxm:// link is deliberately absent:
+    // it is a short-lived credential that would be stale by the next start,
+    // and it has no business sitting in a file on disk.
+    r#"
+    CREATE TABLE downloads (
+        id          INTEGER PRIMARY KEY,
+        mod_id      INTEGER NOT NULL,
+        file_id     INTEGER NOT NULL,
+        name        TEXT NOT NULL,
+        file_name   TEXT NOT NULL,
+        version     TEXT,
+        state       TEXT NOT NULL,
+        bytes_done  INTEGER NOT NULL DEFAULT 0,
+        bytes_total INTEGER,
+        error       TEXT,
+        collection  TEXT
+    );
+    "#,
+    // v4 — what each mod replaces, read out of its pak and utoc indexes.
+    //
+    // Recorded at install time because reading an index needs the container
+    // on disk, and a mod stays installed long after the archive is gone. The
+    // index on `asset` is what makes finding clashes a single grouped query
+    // rather than comparing every mod against every other.
+    r#"
+    CREATE TABLE mod_assets (
+        mod_id INTEGER NOT NULL REFERENCES mods(id) ON DELETE CASCADE,
+        asset  TEXT NOT NULL,
+        -- Whether `asset` is a real path or a chunk id standing in for one.
+        named  INTEGER NOT NULL DEFAULT 1,
+        PRIMARY KEY (mod_id, asset)
+    ) WITHOUT ROWID;
+    CREATE INDEX idx_mod_assets_asset ON mod_assets(asset);
+
+    -- Set once a mod has been looked at, so a mod whose containers could not
+    -- be read is distinguishable from one that genuinely replaces nothing.
+    ALTER TABLE mods ADD COLUMN assets_indexed_at TEXT;
+    "#,
 ];
 
 pub fn migrate(conn: &Connection) -> Result<()> {
@@ -97,4 +147,56 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         ))?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Existing installs are at v1, so the upgrade has to land on a database
+    /// that already holds mods — and leave them alone.
+    #[test]
+    fn a_v1_database_upgrades_without_losing_anything() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(&format!(
+            "BEGIN; {} PRAGMA user_version = 1; COMMIT;",
+            MIGRATIONS[0]
+        ))
+        .unwrap();
+        conn.execute(
+            "INSERT INTO mods (name, staging_folder, version) VALUES ('Old Mod', 'old-mod', '1.0')",
+            [],
+        )
+        .unwrap();
+
+        migrate(&conn).unwrap();
+
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, MIGRATIONS.len() as i64);
+
+        let (name, latest): (String, Option<String>) = conn
+            .query_row(
+                "SELECT name, latest_version FROM mods WHERE staging_folder = 'old-mod'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(name, "Old Mod");
+        assert_eq!(latest, None, "nothing has been checked yet");
+    }
+
+    /// Running it twice must be a no-op, since it runs on every start.
+    #[test]
+    fn migrating_an_up_to_date_database_changes_nothing() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        migrate(&conn).unwrap();
+
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, MIGRATIONS.len() as i64);
+    }
 }

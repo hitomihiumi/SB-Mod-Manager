@@ -40,6 +40,9 @@ pub struct ModView {
     pub source: String,
     pub installed_at: String,
     pub warnings: Vec<String>,
+    /// Set only when Nexus reports a version different from the installed one.
+    pub latest_version: Option<String>,
+    pub nexus_mod_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,6 +70,55 @@ pub struct PendingChange {
     pub mod_id: i64,
     pub name: String,
     pub kind: ChangeKind,
+}
+
+/// An asset that more than one enabled mod replaces.
+///
+/// Only one of them reaches the game, so the point of reporting these is to
+/// say which — and to let the load order be changed on evidence rather than
+/// on guesswork about what a mod touches.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Conflict {
+    /// The asset path, or a chunk id when the container had no directory
+    /// index and the name is genuinely not recorded anywhere.
+    pub asset: String,
+    pub named: bool,
+    /// Every enabled mod replacing it, in load order.
+    pub claimants: Vec<Claimant>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Claimant {
+    pub mod_id: i64,
+    pub name: String,
+    pub priority: i64,
+    /// True for the one the game actually loads.
+    pub wins: bool,
+}
+
+/// The conflict picture as a whole.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConflictReport {
+    pub conflicts: Vec<Conflict>,
+    /// How many assets each mod loses to a later one, keyed by mod id. What
+    /// the mod list badges.
+    pub overridden: Vec<ModConflictCount>,
+    /// Mods whose containers could not be read, so their part of the picture
+    /// is missing rather than empty.
+    pub unreadable: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModConflictCount {
+    pub mod_id: i64,
+    /// Assets this mod provides that a later mod replaces.
+    pub losing: i64,
+    /// Assets this mod takes from an earlier one.
+    pub winning: i64,
 }
 
 /// An archive that has been extracted and inspected but not yet committed.

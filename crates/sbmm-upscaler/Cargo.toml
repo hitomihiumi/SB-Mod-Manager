@@ -1,0 +1,24 @@
+[package]
+name = "sbmm-upscaler"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+# Enumerating display adapters is the one part that cannot be faked on Linux.
+# DXGI is used rather than WMI so no subprocess is spawned at startup.
+[target.'cfg(windows)'.dependencies.windows]
+version = "0.62"
+features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+]
+
+[dev-dependencies]
+tempfile = { workspace = true }

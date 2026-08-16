@@ -7,7 +7,8 @@ import { useEffect, useState } from "react";
 import { formatBytes } from "../lib/format";
 import { ipc, type Folders, type UpdateChannel, type UpdateInfo } from "../lib/ipc";
 import { useApp } from "../store/useApp";
-import { Button } from "./ui";
+import { Button, Section } from "./ui";
+import { UpscalerSection } from "./UpscalerSection";
 
 export function SettingsView() {
   const snapshot = useApp((s) => s.snapshot);
@@ -105,6 +106,8 @@ export function SettingsView() {
         </Section>
 
         <NexusSection />
+
+        <UpscalerSection />
 
         <UpdateSection />
 
@@ -361,24 +364,6 @@ function UpdateSection() {
         </div>
       )}
     </Section>
-  );
-}
-
-function Section({
-  title,
-  hint,
-  children,
-}: {
-  title: string;
-  hint: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="rounded-lg border border-line bg-surface p-4">
-      <h3 className="text-[13px] font-semibold">{title}</h3>
-      {hint && <p className="mt-0.5 mb-3 text-[12px] text-ink-muted">{hint}</p>}
-      {children}
-    </section>
   );
 }
 

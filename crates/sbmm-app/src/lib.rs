@@ -60,6 +60,42 @@ impl AppError {
 
 type Result<T> = std::result::Result<T, AppError>;
 
+/// Where an installed mod came from.
+///
+/// Only mods that carry a Nexus id can be checked for updates later, so the
+/// origin is recorded at install time rather than guessed afterwards.
+#[derive(Debug, Clone, Default)]
+pub struct Origin {
+    pub source: String,
+    pub nexus_mod_id: Option<i64>,
+    pub nexus_file_id: Option<i64>,
+    pub version: Option<String>,
+}
+
+impl Origin {
+    /// An archive the user dropped in themselves.
+    pub fn manual() -> Self {
+        Self {
+            source: "manual".into(),
+            ..Self::default()
+        }
+    }
+
+    pub fn nexus(mod_id: i64, file_id: i64) -> Self {
+        Self {
+            source: "nexus".into(),
+            nexus_mod_id: Some(mod_id),
+            nexus_file_id: Some(file_id),
+            version: None,
+        }
+    }
+
+    pub fn with_version(mut self, version: Option<String>) -> Self {
+        self.version = version;
+        self
+    }
+}
+
 const SETTING_GAME_ROOT: &str = "gameRoot";
 const SETTING_AUTO_APPLY: &str = "autoApply";
 const SETTING_LIBRARY_ROOT: &str = "libraryRoot";
@@ -340,6 +376,372 @@ impl App {
         name: &str,
         type_override: Option<ModType>,
     ) -> Result<i64> {
+        self.commit_install(staging_id, name, type_override, Origin::manual())
+    }
+
+    /// Install a file the download queue fetched from Nexus.
+    ///
+    /// Same pipeline as a hand-dropped archive, except the mod remembers where
+    /// it came from, which is what later lets it be checked for updates.
+    pub fn install_download(
+        &mut self,
+        archive: impl AsRef<Path>,
+        name: &str,
+        origin: Origin,
+    ) -> Result<i64> {
+        let staged = self.stage_archive(archive)?;
+        let name = if name.trim().is_empty() {
+            staged.suggested_name.clone()
+        } else {
+            name.to_string()
+        };
+        self.commit_install(&staged.staging_id, &name, None, origin)
+    }
+
+    // -- conflicts ---------------------------------------------------------
+
+    /// Read what one mod replaces and record it.
+    ///
+    /// Only the container indexes are read, never the payload, so this costs a
+    /// few kilobytes however large the mod is. A container that cannot be read
+    /// is reported rather than skipped silently: an empty answer and an
+    /// unreadable one look the same in a conflict list, and only one of them
+    /// means "this mod replaces nothing".
+    pub fn index_mod_assets(&mut self, mod_id: i64) -> Result<Vec<String>> {
+        let record = self.record(mod_id)?;
+        let root = self.staging_path(&record.staging_folder);
+
+        let containers: Vec<PathBuf> = self
+            .store
+            .components_for(mod_id)?
+            .iter()
+            .flat_map(|c| c.files.iter())
+            .map(|f| root.join(&f.source))
+            .filter(|p| {
+                matches!(
+                    p.extension()
+                        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+                        .as_deref(),
+                    Some("pak") | Some("utoc")
+                )
+            })
+            .collect();
+
+        let (assets, problems) = sbmm_assets::read_all(containers.iter().map(|p| p.as_path()));
+
+        let rows: Vec<(String, bool)> = assets
+            .into_iter()
+            .map(|asset| (asset.label().to_string(), asset.is_named()))
+            .collect();
+        self.store
+            .replace_mod_assets(mod_id, &rows, problems.is_empty())?;
+
+        Ok(problems.into_iter().map(|e| e.to_string()).collect())
+    }
+
+    /// Index every mod that has not been looked at yet.
+    ///
+    /// Existing installs predate the index, and a mod installed while the
+    /// scan failed should get another chance rather than stay invisible.
+    pub fn index_missing_assets(&mut self) -> Result<usize> {
+        let pending = self.store.mods_without_assets()?;
+        for mod_id in &pending {
+            // One bad mod must not stop the rest from being indexed.
+            let _ = self.index_mod_assets(*mod_id);
+        }
+        Ok(pending.len())
+    }
+
+    /// Which enabled mods are replacing the same assets, and who wins.
+    ///
+    /// `~mods` is mounted alphanumerically and a later `_P` pak overrides an
+    /// earlier one, so the mod furthest down the load order is the one the
+    /// game ends up loading. That is the same ordering the load-order screen
+    /// shows, read the same way.
+    pub fn conflicts(&self) -> Result<ConflictReport> {
+        let records = self.store.list_mods()?;
+        let enabled: BTreeMap<i64, &ModRecord> = records
+            .iter()
+            .filter(|m| m.enabled)
+            .map(|m| (m.id, m))
+            .collect();
+
+        let mut report = ConflictReport {
+            // No complete index means the picture for this mod is missing,
+            // not empty — saying nothing would read as "conflicts with
+            // nothing", which is the opposite of what is known.
+            unreadable: records
+                .iter()
+                .filter(|m| m.enabled && m.assets_indexed_at.is_none())
+                .map(|m| m.name.clone())
+                .collect(),
+            ..Default::default()
+        };
+
+        let mut losing: BTreeMap<i64, i64> = BTreeMap::new();
+        let mut winning: BTreeMap<i64, i64> = BTreeMap::new();
+
+        for contested in self.store.contested_assets()? {
+            // An asset two disabled mods share is not a conflict: neither is
+            // in the game folder.
+            let mut claimants: Vec<&ModRecord> = contested
+                .mod_ids
+                .iter()
+                .filter_map(|id| enabled.get(id).copied())
+                .collect();
+            if claimants.len() < 2 {
+                continue;
+            }
+            claimants.sort_by_key(|m| (m.priority, m.id));
+
+            let winner = claimants.last().map(|m| m.id);
+            for record in &claimants {
+                if Some(record.id) == winner {
+                    *winning.entry(record.id).or_default() += 1;
+                } else {
+                    *losing.entry(record.id).or_default() += 1;
+                }
+            }
+
+            report.conflicts.push(Conflict {
+                asset: contested.asset,
+                named: contested.named,
+                claimants: claimants
+                    .iter()
+                    .map(|m| Claimant {
+                        mod_id: m.id,
+                        name: m.name.clone(),
+                        priority: m.priority,
+                        wins: Some(m.id) == winner,
+                    })
+                    .collect(),
+            });
+        }
+
+        let mut counts: BTreeMap<i64, ModConflictCount> = BTreeMap::new();
+        for (mod_id, count) in losing {
+            counts
+                .entry(mod_id)
+                .or_insert(ModConflictCount {
+                    mod_id,
+                    losing: 0,
+                    winning: 0,
+                })
+                .losing = count;
+        }
+        for (mod_id, count) in winning {
+            counts
+                .entry(mod_id)
+                .or_insert(ModConflictCount {
+                    mod_id,
+                    losing: 0,
+                    winning: 0,
+                })
+                .winning = count;
+        }
+        report.overridden = counts.into_values().collect();
+
+        Ok(report)
+    }
+
+    // -- download queue ----------------------------------------------------
+
+    /// The queue as the last run left it.
+    ///
+    /// Entries that had already finished are dropped: their file is installed
+    /// and the row would only be clutter on the next start.
+    pub fn restore_download_queue(&self) -> Result<Vec<sbmm_nexus::QueueItem>> {
+        Ok(self
+            .store
+            .list_downloads()?
+            .into_iter()
+            .filter_map(|row| {
+                let state = sbmm_nexus::DownloadState::from_str_id(&row.state);
+                if matches!(state, sbmm_nexus::DownloadState::Done) {
+                    return None;
+                }
+                Some(sbmm_nexus::QueueItem::restored(
+                    row.id as u64,
+                    row.mod_id as u64,
+                    row.file_id as u64,
+                    row.name,
+                    row.file_name,
+                    row.version,
+                    state,
+                    row.bytes_total.map(|b| b as u64),
+                    row.error,
+                    row.collection,
+                ))
+            })
+            .collect())
+    }
+
+    /// Write the queue out so closing the manager does not lose it.
+    pub fn save_download_queue(&mut self, items: &[sbmm_nexus::QueueItem]) -> Result<()> {
+        let rows: Vec<sbmm_store::DownloadRecord> = items
+            .iter()
+            .map(|item| sbmm_store::DownloadRecord {
+                id: item.id as i64,
+                mod_id: item.mod_id as i64,
+                file_id: item.file_id as i64,
+                name: item.name.clone(),
+                file_name: item.file_name.clone(),
+                version: item.version.clone(),
+                state: item.state.as_str().to_string(),
+                bytes_done: item.bytes_done as i64,
+                bytes_total: item.bytes_total.map(|b| b as i64),
+                error: item.error.clone(),
+                collection: item.collection.clone(),
+            })
+            .collect();
+        self.store.replace_downloads(&rows)?;
+        Ok(())
+    }
+
+    // -- upscalers ---------------------------------------------------------
+
+    /// Which upscaler DLLs the game currently has, and their versions.
+    pub fn upscalers(&self) -> Result<Vec<sbmm_upscaler::InstalledFile>> {
+        let Some(game) = self.game()? else {
+            return Ok(Vec::new());
+        };
+        Ok(sbmm_upscaler::scan(&game.root))
+    }
+
+    /// The upscaler swaps the manager itself has made, and their versions.
+    pub fn managed_upscalers(&self) -> Result<Vec<(sbmm_upscaler::Component, String)>> {
+        let mut out = Vec::new();
+        for record in self.store.list_mods()? {
+            let Some(component) = sbmm_upscaler::Component::all()
+                .iter()
+                .copied()
+                .find(|c| upscaler_staging_id(*c) == record.staging_folder)
+            else {
+                continue;
+            };
+            out.push((component, record.version.unwrap_or_default()));
+        }
+        Ok(out)
+    }
+
+    /// Undo a swap, putting the game's own DLL back.
+    ///
+    /// Doing nothing when there is no swap is the right answer, not an error:
+    /// the game's file is then already what is on disk.
+    pub fn restore_upscaler(&mut self, component: sbmm_upscaler::Component) -> Result<bool> {
+        let staging_id = upscaler_staging_id(component);
+        let Some(installed) = self
+            .store
+            .list_mods()?
+            .into_iter()
+            .find(|m| m.staging_folder == staging_id)
+        else {
+            return Ok(false);
+        };
+        self.uninstall(installed.id)?;
+        Ok(true)
+    }
+
+    /// Put a newer upscaler DLL in place of the game's own.
+    ///
+    /// Registered as an ordinary mod so the swap goes through the same
+    /// deployment record as everything else: the displaced original is backed
+    /// up, and removing the entry puts it back byte for byte. `files` pairs a
+    /// downloaded DLL with the game-relative path it replaces — one entry per
+    /// copy found, because the game may ship the same DLL twice and only one
+    /// of them is the one the loader reaches.
+    ///
+    /// Installing over a previous swap removes it first, so the file that
+    /// eventually gets restored is the game's, never one of ours.
+    pub fn install_upscaler(
+        &mut self,
+        component: sbmm_upscaler::Component,
+        version: &str,
+        files: &[(PathBuf, PathBuf)],
+    ) -> Result<i64> {
+        if files.is_empty() {
+            return Err(AppError::BadLibraryRoot(format!(
+                "{} was not found in the game folder",
+                component.label()
+            )));
+        }
+
+        let staging_id = upscaler_staging_id(component);
+        if let Some(previous) = self
+            .store
+            .list_mods()?
+            .into_iter()
+            .find(|m| m.staging_folder == staging_id)
+        {
+            self.uninstall(previous.id)?;
+        }
+
+        // The staging tree mirrors the game tree, which keeps two copies of
+        // the same DLL from colliding on one file name.
+        let staging_root = self.staging_path(&staging_id);
+        let mut component_files = Vec::with_capacity(files.len());
+        for (downloaded, target) in files {
+            let staged = staging_root.join(target);
+            if let Some(parent) = staged.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
+            }
+            std::fs::copy(downloaded, &staged).map_err(|e| AppError::io(&staged, e))?;
+            component_files.push(sbmm_core::model::ComponentFile {
+                source: target.clone(),
+                target: target.clone(),
+            });
+        }
+
+        let detected = DetectedComponent {
+            mod_type: ModType::GameRootOverlay,
+            confidence: Confidence::High,
+            files: component_files,
+            target_subdir: PathBuf::new(),
+            ue4ss_mod_name: None,
+            pak_sets: Vec::new(),
+            warnings: Vec::new(),
+            notes: vec![format!(
+                "Replaces the game's {} in place; disabling this puts the original back.",
+                component.file_name()
+            )],
+        };
+
+        let name = format!("{} {version}", component.label());
+        let id = self.store.insert_mod(&NewMod {
+            name,
+            staging_folder: staging_id,
+            version: Some(version.to_string()),
+            source: "upscaler".into(),
+            nexus_mod_id: None,
+            nexus_file_id: None,
+            primary_type: ModType::GameRootOverlay.as_str().to_string(),
+            components: vec![detected],
+            size_bytes: sbmm_archive::directory_size(&staging_root) as i64,
+            image_path: None,
+        })?;
+
+        // A staged upscaler does nothing at all, so it goes into the game
+        // folder now rather than sitting in the pending list where "I updated
+        // DLSS" and "DLSS is updated" would quietly disagree. Only this mod is
+        // deployed; anything else the user has staged stays staged.
+        self.set_enabled(&[id], true)?;
+        let ctx = self.deploy_context()?;
+        let record = self.record(id)?;
+        let components = self.store.components_for(id)?;
+        let plan = self.plan_for(&record, &components);
+        self.deploy_mod(&ctx, id, &plan)?;
+
+        Ok(id)
+    }
+
+    /// Commit a staged install, recording where the files came from.
+    pub fn commit_install(
+        &mut self,
+        staging_id: &str,
+        name: &str,
+        type_override: Option<ModType>,
+        origin: Origin,
+    ) -> Result<i64> {
         let dest = self.staging_path(staging_id);
         if !dest.is_dir() {
             return Err(AppError::UnknownStaging(staging_id.to_string()));
@@ -368,15 +770,22 @@ impl App {
         let id = self.store.insert_mod(&NewMod {
             name: name.to_string(),
             staging_folder: staging_id.to_string(),
-            version: None,
-            source: "manual".into(),
-            nexus_mod_id: None,
-            nexus_file_id: None,
+            version: origin.version,
+            source: origin.source,
+            nexus_mod_id: origin.nexus_mod_id,
+            nexus_file_id: origin.nexus_file_id,
             primary_type,
             components,
             size_bytes: sbmm_archive::directory_size(&dest) as i64,
             image_path: None,
         })?;
+
+        // Read what it replaces now, while the containers are to hand. A
+        // failure here is not worth failing the install over — the mod is
+        // installed either way, it just has no conflict picture yet, and
+        // `index_missing_assets` will come back to it.
+        let _ = self.index_mod_assets(id);
+
         Ok(id)
     }
 
@@ -454,6 +863,8 @@ impl App {
                 source: record.source.clone(),
                 installed_at: record.installed_at.clone(),
                 warnings: components.iter().flat_map(|c| c.warnings.clone()).collect(),
+                latest_version: newer_version(&record.version, &record.latest_version),
+                nexus_mod_id: record.nexus_mod_id,
             });
         }
 
@@ -759,6 +1170,31 @@ impl App {
         Ok(())
     }
 
+    // -- update checks -----------------------------------------------------
+
+    /// Every installed mod that came from Nexus, so its page can be queried.
+    pub fn nexus_mods(&self) -> Result<Vec<NexusModRef>> {
+        Ok(self
+            .store
+            .list_mods()?
+            .into_iter()
+            .filter_map(|m| {
+                Some(NexusModRef {
+                    id: m.id,
+                    nexus_mod_id: m.nexus_mod_id?,
+                    version: m.version,
+                    latest_version: m.latest_version,
+                })
+            })
+            .collect())
+    }
+
+    /// Remember what Nexus said the newest version is.
+    pub fn record_update_check(&self, mod_id: i64, latest: Option<&str>) -> Result<()> {
+        self.store.record_update_check(mod_id, latest)?;
+        Ok(())
+    }
+
     fn record(&self, mod_id: i64) -> Result<ModRecord> {
         self.store
             .list_mods()?
@@ -771,6 +1207,46 @@ impl App {
 enum Outcome {
     Deployed,
     Removed,
+}
+
+/// An installed mod that can be looked up on Nexus.
+#[derive(Debug, Clone)]
+pub struct NexusModRef {
+    /// The row id in our database, not the Nexus one.
+    pub id: i64,
+    pub nexus_mod_id: i64,
+    pub version: Option<String>,
+    /// What the last update check found, if there has been one.
+    pub latest_version: Option<String>,
+}
+
+impl NexusModRef {
+    /// Whether this mod is currently showing an update.
+    pub fn is_outdated(&self) -> bool {
+        newer_version(&self.version, &self.latest_version).is_some()
+    }
+}
+
+/// The version to show as available, or nothing.
+///
+/// Version strings on Nexus are free text, so no ordering is inferred: an
+/// update is reported only when both versions are known and differ, which is
+/// the same rule other managers use. Guessing which of `1.0a` and `1.1-beta`
+/// is newer would produce confident wrong answers.
+pub fn newer_version(installed: &Option<String>, latest: &Option<String>) -> Option<String> {
+    let installed = installed.as_deref()?;
+    let latest = latest.as_deref()?;
+    if normalise_version(installed) == normalise_version(latest) {
+        return None;
+    }
+    Some(latest.to_string())
+}
+
+fn normalise_version(version: &str) -> String {
+    version
+        .trim()
+        .trim_start_matches(['v', 'V'])
+        .to_ascii_lowercase()
 }
 
 /// What, if anything, needs to happen to bring this mod in line.
@@ -837,6 +1313,12 @@ fn archive_display_name(archive: &Path) -> String {
 }
 
 /// Paths cross to the UI as strings, so lossy conversion happens in one place.
+/// One staging folder per upscaler component, so installing a newer version
+/// replaces the previous swap instead of stacking on top of it.
+fn upscaler_staging_id(component: sbmm_upscaler::Component) -> String {
+    format!("upscaler-{}", component.file_name().replace(".dll", ""))
+}
+
 fn path_string(path: impl AsRef<Path>) -> String {
     path.as_ref().to_string_lossy().into_owned()
 }
@@ -851,4 +1333,29 @@ fn copy_tree(from: &Path, to: &Path) -> Result<()> {
         std::fs::copy(&src, &dst).map_err(|e| AppError::io(&dst, e))?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn some(value: &str) -> Option<String> {
+        Some(value.to_string())
+    }
+
+    #[test]
+    fn an_update_is_reported_only_when_both_versions_are_known_and_differ() {
+        assert_eq!(newer_version(&some("1.2"), &some("1.4")), some("1.4"));
+        assert_eq!(newer_version(&some("1.2"), &some("1.2")), None);
+        // Nothing to compare against is not the same as being up to date.
+        assert_eq!(newer_version(&None, &some("1.4")), None);
+        assert_eq!(newer_version(&some("1.2"), &None), None);
+    }
+
+    #[test]
+    fn cosmetic_differences_do_not_count_as_an_update() {
+        assert_eq!(newer_version(&some("v1.2"), &some("1.2")), None);
+        assert_eq!(newer_version(&some(" 1.2 "), &some("1.2")), None);
+        assert_eq!(newer_version(&some("1.2B"), &some("1.2b")), None);
+    }
 }

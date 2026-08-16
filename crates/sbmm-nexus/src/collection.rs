@@ -145,6 +145,122 @@ pub fn parse(json: &str) -> Result<Collection, CollectionError> {
     })
 }
 
+// -- the v2 GraphQL route ---------------------------------------------------
+
+/// Ask for one revision of a collection.
+///
+/// Two things are wanted and either is enough: a link to the revision archive,
+/// whose `collection.json` is the authoritative manifest, and the mod list
+/// inline, which saves a download when it is present.
+pub const REVISION_QUERY: &str = r#"
+query CollectionRevision($slug: String!, $revision: Int!, $domain: String!) {
+  collectionRevision(
+    slug: $slug
+    revisionNumber: $revision
+    domainName: $domain
+    viewAdultContent: true
+  ) {
+    revisionNumber
+    downloadLink
+    collection { name slug }
+    modFiles {
+      optional
+      file { modId fileId name version }
+    }
+  }
+}
+"#;
+
+/// What a revision lookup produced.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Revision {
+    pub name: String,
+    pub revision: u64,
+    /// The collection archive, when the response offered one.
+    pub download_url: Option<String>,
+    pub mods: Vec<CollectionMod>,
+}
+
+/// Read a `collectionRevision` response.
+///
+/// The v2 schema is not published and has changed shape before, so nothing
+/// here depends on the exact nesting: the response is walked for objects that
+/// carry both a mod id and a file id. A field being renamed one level up then
+/// costs nothing, where a path-based reader would return an empty collection
+/// and look like the collection was empty.
+pub fn parse_revision(data: &serde_json::Value) -> Revision {
+    let root = data.get("collectionRevision").unwrap_or(data);
+
+    let mut mods = Vec::new();
+    harvest(root, false, &mut mods);
+    // The same file can appear under more than one key in a response that
+    // nests it; the first mention wins.
+    mods.dedup_by(|a, b| a.mod_id == b.mod_id && a.file_id == b.file_id);
+
+    Revision {
+        name: root
+            .get("collection")
+            .and_then(|c| c.get("name"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("Collection")
+            .to_string(),
+        revision: root
+            .get("revisionNumber")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0),
+        download_url: root
+            .get("downloadLink")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string),
+        mods,
+    }
+}
+
+/// Walk the response for anything that names a downloadable file.
+///
+/// `optional` is carried down because it sits on the wrapper around the file
+/// rather than on the file itself.
+fn harvest(value: &serde_json::Value, optional: bool, out: &mut Vec<CollectionMod>) {
+    match value {
+        serde_json::Value::Array(items) => {
+            for item in items {
+                harvest(item, optional, out);
+            }
+        }
+        serde_json::Value::Object(fields) => {
+            let optional = fields
+                .get("optional")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(optional);
+
+            if let (Some(mod_id), Some(file_id)) = (number(value, "modId"), number(value, "fileId"))
+            {
+                out.push(CollectionMod {
+                    name: fields
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("Unnamed mod")
+                        .to_string(),
+                    mod_id,
+                    file_id,
+                    version: fields
+                        .get("version")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string),
+                    optional,
+                });
+                return;
+            }
+
+            for child in fields.values() {
+                harvest(child, optional, out);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Ids appear as numbers in some manifests and strings in others.
 fn number(value: &serde_json::Value, key: &str) -> Option<u64> {
     let field = value.get(key)?;
@@ -259,5 +375,70 @@ mod tests {
             parse("not json"),
             Err(CollectionError::Invalid(_))
         ));
+    }
+
+    /// The response shape as documented; the happy path.
+    #[test]
+    fn a_revision_response_yields_its_mods_and_archive_link() {
+        let data = serde_json::json!({
+            "collectionRevision": {
+                "revisionNumber": 7,
+                "downloadLink": "https://example.invalid/revision.zip",
+                "collection": { "name": "Essential Stellar Blade", "slug": "abc123" },
+                "modFiles": [
+                    { "optional": false,
+                      "file": { "modId": 123, "fileId": 456, "name": "Aurora Suit", "version": "1.0" } },
+                    { "optional": true,
+                      "file": { "modId": 789, "fileId": 1011, "name": "Optional Extras" } }
+                ]
+            }
+        });
+
+        let revision = parse_revision(&data);
+        assert_eq!(revision.name, "Essential Stellar Blade");
+        assert_eq!(revision.revision, 7);
+        assert_eq!(
+            revision.download_url.as_deref(),
+            Some("https://example.invalid/revision.zip")
+        );
+        assert_eq!(revision.mods.len(), 2);
+        assert_eq!(revision.mods[0].mod_id, 123);
+        assert_eq!(revision.mods[0].file_id, 456);
+        assert!(!revision.mods[0].optional);
+        assert!(
+            revision.mods[1].optional,
+            "the flag sits on the wrapper, not the file"
+        );
+    }
+
+    /// The point of walking the tree: a schema change one level up must not
+    /// turn a full collection into an empty one.
+    #[test]
+    fn mods_are_still_found_when_the_response_is_nested_differently() {
+        let data = serde_json::json!({
+            "collectionRevision": {
+                "collection": { "name": "Renamed Shape" },
+                "someNewWrapper": {
+                    "edges": [
+                        { "node": { "optional": true,
+                                    "modFile": { "modId": "42", "fileId": "99", "name": "Thing" } } }
+                    ]
+                }
+            }
+        });
+
+        let revision = parse_revision(&data);
+        assert_eq!(revision.mods.len(), 1);
+        assert_eq!(revision.mods[0].mod_id, 42, "ids may arrive as strings");
+        assert_eq!(revision.mods[0].file_id, 99);
+        assert!(revision.mods[0].optional);
+    }
+
+    #[test]
+    fn a_response_with_nothing_usable_is_empty_rather_than_an_error() {
+        let revision = parse_revision(&serde_json::json!({ "collectionRevision": null }));
+        assert!(revision.mods.is_empty());
+        assert_eq!(revision.download_url, None);
+        assert_eq!(revision.name, "Collection");
     }
 }

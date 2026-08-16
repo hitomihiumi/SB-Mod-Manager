@@ -1,4 +1,5 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import clsx from "clsx";
 import {
   AlertTriangle,
@@ -7,13 +8,14 @@ import {
   FolderPlus,
   Package,
   Plus,
+  RefreshCw,
   Search,
   Trash2,
 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 
 import { formatBytes } from "../lib/format";
-import { ipc, MOD_TYPE_META, type GroupView, type ModView } from "../lib/ipc";
+import { ipc, modPageUrl, MOD_TYPE_META, type GroupView, type ModView } from "../lib/ipc";
 import { useApp, visibleMods } from "../store/useApp";
 import { Badge, Button, Checkbox, Empty } from "./ui";
 
@@ -228,10 +230,48 @@ function Toolbar({
       )}
 
       <div className="ml-auto" />
+      <CheckUpdatesButton />
       <Button variant="primary" size="sm" onClick={onAdd}>
         <Plus size={13} /> Add mods
       </Button>
     </div>
+  );
+}
+
+/// Only mods installed from Nexus can be checked, so the button says nothing
+/// when there are none rather than failing when pressed.
+function CheckUpdatesButton() {
+  const snapshot = useApp((s) => s.snapshot);
+  const refresh = useApp((s) => s.refresh);
+  const toast = useApp((s) => s.toast);
+  const [checking, setChecking] = useState(false);
+
+  const fromNexus = (snapshot?.mods ?? []).filter((m) => m.nexusModId !== null).length;
+  if (fromNexus === 0) return null;
+
+  async function check() {
+    setChecking(true);
+    try {
+      const report = await ipc.checkModUpdates();
+      await refresh();
+      toast(
+        report.outdated > 0 ? "info" : "success",
+        report.outdated > 0
+          ? `${report.outdated} mod${report.outdated === 1 ? " has" : "s have"} a newer version on Nexus.`
+          : "Everything is up to date.",
+      );
+    } catch (error) {
+      toast("error", String(error));
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  return (
+    <Button size="sm" disabled={checking} onClick={() => void check()} title="Check Nexus for newer versions">
+      <RefreshCw size={13} className={checking ? "animate-spin" : undefined} />
+      {checking ? "Checking…" : "Check updates"}
+    </Button>
   );
 }
 
@@ -306,6 +346,10 @@ function ModRow({
   const toggle = useApp((s) => s.toggle);
   const uninstall = useApp((s) => s.uninstall);
   const refresh = useApp((s) => s.refresh);
+  const setView = useApp((s) => s.setView);
+  const overridden = useApp((s) =>
+    s.conflicts?.overridden.find((c) => c.modId === mod.id),
+  );
 
   return (
     <div
@@ -344,6 +388,33 @@ function ModRow({
         <AlertTriangle size={13} className="shrink-0 text-warn" aria-label="Has warnings">
           <title>{mod.warnings.join("\n")}</title>
         </AlertTriangle>
+      )}
+
+      {/* Enabled, but a mod further down the order replaces some of it. */}
+      {overridden && overridden.losing > 0 && (
+        <button
+          onClick={(event) => {
+            event.stopPropagation();
+            setView("conflicts");
+          }}
+          title={`${overridden.losing} of this mod's assets are replaced by a mod later in the load order.${overridden.winning > 0 ? ` It replaces ${overridden.winning} from earlier mods.` : ""}`}
+          className="shrink-0"
+        >
+          <Badge tone="danger">{overridden.losing} overridden</Badge>
+        </button>
+      )}
+
+      {mod.latestVersion && (
+        <button
+          onClick={(event) => {
+            event.stopPropagation();
+            if (mod.nexusModId !== null) void openUrl(modPageUrl(mod.nexusModId));
+          }}
+          title={`Nexus has ${mod.latestVersion}, you have ${mod.version ?? "an unknown version"}. Opens the mod page.`}
+          className="shrink-0"
+        >
+          <Badge tone="warn">Update</Badge>
+        </button>
       )}
 
       <div className="flex shrink-0 gap-1">

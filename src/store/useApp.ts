@@ -5,10 +5,18 @@ import {
   type AppSnapshot,
   type ModTypeId,
   type ModView,
+  type ConflictReport,
+  type QueueItem,
   type StagedInstall,
 } from "../lib/ipc";
 
-export type View = "mods" | "order" | "settings";
+export type View =
+  | "mods"
+  | "order"
+  | "conflicts"
+  | "downloads"
+  | "collections"
+  | "settings";
 
 interface Toast {
   id: number;
@@ -32,10 +40,25 @@ interface AppStore {
   busy: Busy | null;
   /** Archives the detector could not classify, waiting to be asked about. */
   queue: StagedInstall[];
+  /** Nexus downloads, in whatever state the backend last reported. */
+  downloads: QueueItem[];
+  /** A collection link that arrived from the browser, waiting to be looked up. */
+  pendingCollection: string | null;
+  /** Which enabled mods replace the same assets. Null until first read. */
+  conflicts: ConflictReport | null;
   toasts: Toast[];
 
   init: () => Promise<void>;
   refresh: () => Promise<void>;
+  refreshDownloads: () => Promise<void>;
+  /** Apply a progress event without a round trip to the backend. */
+  patchDownload: (item: QueueItem) => void;
+  addNxmLink: (url: string) => Promise<void>;
+  cancelDownload: (id: number) => Promise<void>;
+  clearFinishedDownloads: () => Promise<void>;
+  setPendingCollection: (slug: string | null) => void;
+  refreshConflicts: () => Promise<void>;
+  reindexAssets: () => Promise<void>;
   setView: (view: View) => void;
   setSearch: (search: string) => void;
   setSelection: (ids: number[]) => void;
@@ -65,16 +88,23 @@ export const useApp = create<AppStore>((set, get) => ({
   search: "",
   busy: null,
   queue: [],
+  downloads: [],
+  pendingCollection: null,
+  conflicts: null,
   toasts: [],
 
   async init() {
     await get().refresh();
+    await get().refreshDownloads();
     set({ ready: true });
   },
 
   async refresh() {
     try {
       const snapshot = await ipc.snapshot();
+      // The conflict picture is a function of what is enabled and in what
+      // order, so it is re-read whenever either could have changed.
+      void ipc.conflicts().then((conflicts) => set({ conflicts })).catch(() => {});
       set((state) => ({
         snapshot,
         // Drop selections whose mods no longer exist.
@@ -84,6 +114,78 @@ export const useApp = create<AppStore>((set, get) => ({
       }));
     } catch (error) {
       get().toast("error", String(error));
+    }
+  },
+
+  async refreshDownloads() {
+    try {
+      set({ downloads: await ipc.downloadQueue() });
+    } catch (error) {
+      get().toast("error", String(error));
+    }
+  },
+
+  patchDownload(item) {
+    set((state) => ({
+      downloads: state.downloads.some((d) => d.id === item.id)
+        ? state.downloads.map((d) => (d.id === item.id ? item : d))
+        : [...state.downloads, item],
+    }));
+  },
+
+  async addNxmLink(url) {
+    try {
+      await ipc.addNxmLink(url);
+      await get().refreshDownloads();
+    } catch (error) {
+      get().toast("error", String(error));
+    }
+  },
+
+  async cancelDownload(id) {
+    try {
+      await ipc.cancelDownload(id);
+      await get().refreshDownloads();
+    } catch (error) {
+      get().toast("error", String(error));
+    }
+  },
+
+  async clearFinishedDownloads() {
+    try {
+      await ipc.clearFinishedDownloads();
+      await get().refreshDownloads();
+    } catch (error) {
+      get().toast("error", String(error));
+    }
+  },
+
+  setPendingCollection: (pendingCollection) => set({ pendingCollection }),
+
+  async refreshConflicts() {
+    try {
+      set({ conflicts: await ipc.conflicts() });
+    } catch (error) {
+      get().toast("error", String(error));
+    }
+  },
+
+  /// Read the containers of mods that have no complete asset list yet.
+  async reindexAssets() {
+    set({ busy: { label: "Reading mod contents", done: 0, total: 1 } });
+    try {
+      const looked = await ipc.indexModAssets();
+      await get().refreshConflicts();
+      get().toast(
+        "success",
+        looked === 0
+          ? "Every mod has already been read."
+          : `Read ${looked} mod${looked === 1 ? "" : "s"}.`,
+      );
+    } catch (error) {
+      get().toast("error", String(error));
+    } finally {
+      set({ busy: null });
     }
   },
 

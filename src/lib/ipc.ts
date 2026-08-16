@@ -41,6 +41,14 @@ export interface ModView {
   source: string;
   installedAt: string;
   warnings: string[];
+  /** Set only when Nexus reports a version different from the installed one. */
+  latestVersion: string | null;
+  nexusModId: number | null;
+}
+
+export interface UpdateCheckReport {
+  checked: number;
+  outdated: number;
 }
 
 export interface GroupView {
@@ -127,6 +135,129 @@ export interface RateLimit {
   resetAfterSecs: number | null;
 }
 
+export type DownloadState =
+  | "queued"
+  | "running"
+  | "done"
+  | "failed"
+  | "cancelled"
+  /** A free account has to press "Mod Manager Download" on the mod page. */
+  | "needsUserAction";
+
+export interface QueueItem {
+  id: number;
+  modId: number;
+  fileId: number;
+  name: string;
+  fileName: string;
+  state: DownloadState;
+  bytesDone: number;
+  bytesTotal: number | null;
+  error: string | null;
+  collection: string | null;
+}
+
+export interface Claimant {
+  modId: number;
+  name: string;
+  priority: number;
+  /** True for the one the game actually loads. */
+  wins: boolean;
+}
+
+export interface Conflict {
+  /** An asset path, or a chunk id when the container had no directory index. */
+  asset: string;
+  named: boolean;
+  claimants: Claimant[];
+}
+
+export interface ModConflictCount {
+  modId: number;
+  /** Assets this mod provides that a later mod replaces. */
+  losing: number;
+  /** Assets this mod takes from an earlier one. */
+  winning: number;
+}
+
+export interface ConflictReport {
+  conflicts: Conflict[];
+  overridden: ModConflictCount[];
+  /** Mods whose containers could not be read, so the picture is incomplete. */
+  unreadable: string[];
+}
+
+export interface PlannedMod {
+  modId: number;
+  fileId: number;
+  name: string;
+  version: string | null;
+  optional: boolean;
+  /** True when this mod is already installed, so it can be skipped. */
+  installed: boolean;
+}
+
+export interface ManualMod {
+  name: string;
+  url: string | null;
+  reason: string;
+}
+
+export interface CollectionPlan {
+  name: string;
+  slug: string;
+  revision: number;
+  mods: PlannedMod[];
+  /** Entries hosted somewhere the API cannot reach. */
+  manual: ManualMod[];
+}
+
+export interface QueuedFile {
+  modId: number;
+  fileId: number;
+  name: string;
+  version: string | null;
+}
+
+export type UpscalerComponent =
+  | "dlssSuperResolution"
+  | "dlssFrameGeneration"
+  | "dlssRayReconstruction"
+  | "fsrDx12"
+  | "fsrVulkan";
+
+export interface UpscalerFile {
+  component: UpscalerComponent;
+  /** Relative to the game root. */
+  path: string;
+  version: string | null;
+}
+
+export interface UpscalerEntry {
+  component: UpscalerComponent;
+  label: string;
+  installed: UpscalerFile[];
+  installedVersion: string | null;
+  latestVersion: string | null;
+  /** False when the graphics card cannot run this DLL at all. */
+  supported: boolean;
+  blockedReason: string | null;
+  /** Set when the manager put the current file there. */
+  managedVersion: string | null;
+  note: string | null;
+}
+
+export interface Adapter {
+  name: string;
+  vendor: "nvidia" | "amd" | "intel" | "other";
+  memoryBytes: number;
+}
+
+export interface UpscalerStatus {
+  adapter: Adapter | null;
+  entries: UpscalerEntry[];
+}
+
 export interface Folders {
   library: string;
   mods: string;
@@ -177,11 +308,37 @@ export const ipc = {
   setNexusKey: (apiKey: string) => invoke<NexusAccount | null>("set_nexus_key", { apiKey }),
   nexusRateLimit: () => invoke<RateLimit>("nexus_rate_limit"),
 
+  addNxmLink: (url: string) => invoke<void>("add_nxm_link", { url }),
+  checkModUpdates: () => invoke<UpdateCheckReport>("check_mod_updates"),
+  downloadQueue: () => invoke<QueueItem[]>("download_queue"),
+  cancelDownload: (id: number) => invoke<void>("cancel_download", { id }),
+  clearFinishedDownloads: () => invoke<void>("clear_finished_downloads"),
+
+  conflicts: () => invoke<ConflictReport>("conflicts"),
+  indexModAssets: () => invoke<number>("index_mod_assets"),
+
+  resolveCollection: (link: string) => invoke<CollectionPlan>("resolve_collection", { link }),
+  installCollection: (slug: string, files: QueuedFile[]) =>
+    invoke<number>("install_collection", { slug, files }),
+
+  upscalerStatus: () => invoke<UpscalerStatus>("upscaler_status"),
+  updateUpscaler: (component: UpscalerComponent) =>
+    invoke<string>("update_upscaler", { component }),
+  restoreUpscaler: (component: UpscalerComponent) =>
+    invoke<boolean>("restore_upscaler", { component }),
+
   checkForUpdate: () => invoke<UpdateInfo>("check_for_update"),
   installUpdate: () => invoke<void>("install_update"),
   setUpdateChannel: (channel: UpdateChannel) =>
     invoke<void>("set_update_channel", { channel }),
 };
+
+/** The game's Nexus domain, mirroring `NEXUS_DOMAIN` in `sbmm-game`. */
+const NEXUS_DOMAIN = "stellarblade";
+
+export function modPageUrl(nexusModId: number): string {
+  return `https://www.nexusmods.com/${NEXUS_DOMAIN}/mods/${nexusModId}?tab=files`;
+}
 
 /** Display names and accent colours for each payload type. */
 export const MOD_TYPE_META: Record<ModTypeId, { label: string; hint: string }> = {
