@@ -9,7 +9,7 @@ import {
   type StagedInstall,
 } from "../lib/ipc";
 
-export type View = "mods" | "order" | "downloads" | "settings";
+export type View = "mods" | "order" | "downloads" | "collections" | "settings";
 
 interface Toast {
   id: number;
@@ -35,6 +35,8 @@ interface AppStore {
   queue: StagedInstall[];
   /** Nexus downloads, in whatever state the backend last reported. */
   downloads: QueueItem[];
+  /** A collection link that arrived from the browser, waiting to be looked up. */
+  pendingCollection: string | null;
   toasts: Toast[];
 
   init: () => Promise<void>;
@@ -45,6 +47,7 @@ interface AppStore {
   addNxmLink: (url: string) => Promise<void>;
   cancelDownload: (id: number) => Promise<void>;
   clearFinishedDownloads: () => Promise<void>;
+  setPendingCollection: (slug: string | null) => void;
   setView: (view: View) => void;
   setSearch: (search: string) => void;
   setSelection: (ids: number[]) => void;
@@ -75,6 +78,7 @@ export const useApp = create<AppStore>((set, get) => ({
   busy: null,
   queue: [],
   downloads: [],
+  pendingCollection: null,
   toasts: [],
 
   async init() {
@@ -140,6 +144,8 @@ export const useApp = create<AppStore>((set, get) => ({
       get().toast("error", String(error));
     }
   },
+
+  setPendingCollection: (pendingCollection) => set({ pendingCollection }),
 
   setView: (view) => set({ view }),
   setSearch: (search) => set({ search }),

@@ -38,7 +38,15 @@ wrong is the usual reason a mod "doesn't work".
   installs it without another click. Nexus only gives direct links to Premium
   accounts, and that gate is respected rather than worked around: on a free
   account the manager opens each mod page for you and picks the link up from
-  the button, which is one click per mod and nothing else.
+  the button, which is one click per mod and nothing else. The queue survives
+  a restart, and a part-downloaded file resumes rather than starting over.
+- **Installs collections.** Paste a collection link and it lists what is in
+  there, marks what you already have, and lets you pick the optional entries.
+  Everything selected goes into the same queue, so Premium installs the lot
+  unattended and a free account is one click per mod. Entries hosted off Nexus
+  cannot be fetched for you and are listed separately rather than silently
+  skipped — a collection that quietly drops them looks installed while the
+  game is still missing mods.
 - **Keeps the library where you want it.** Mods and backups can live on another
   drive; only the small database stays in the app data folder. If the library
   ends up on a different drive from the game, the app says so, because hard
@@ -60,14 +68,22 @@ wrong is the usual reason a mod "doesn't work".
 
 ## Status
 
-The MVP core and single-mod Nexus downloads are complete and covered by tests.
-Not yet built:
+Everything the plan set out is built and covered by tests. Two things are
+worth knowing before the first real run:
 
-- Collections (the manifest parser and the GraphQL client are in place; the
-  install flow is not)
-- Update checks and the "update available" badge
-- Restoring the download queue after a restart — it currently lives in memory,
-  so a queue is lost if the manager is closed mid-download
+- **The collection lookup has not met the live API.** Nexus does not publish
+  its v2 GraphQL schema and the domain is unreachable from CI, so the query
+  was written from the documented shape and the response is read by walking
+  it for anything carrying a mod and file id rather than by a fixed path.
+  That survives a renamed wrapper, but not a renamed `collectionRevision`
+  itself. The `collection.json` inside the revision archive is the tested
+  path and is preferred whenever the response offers a link to it.
+- **The upscaler check needs GitHub.** Listing releases uses the public
+  GitHub API, which is rate limited for anonymous callers; when it refuses,
+  the screen says it could not check rather than claiming you are up to date.
+
+Not built:
+
 - ProjFS virtual filesystem as an alternative to hard-linking
 - Profiles (the schema already stores state per profile)
 - Asset-level conflict detection by reading `.pak` and `.utoc` indexes

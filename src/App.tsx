@@ -4,6 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import clsx from "clsx";
 import {
   AlertTriangle,
+  Boxes,
   CheckCircle2,
   Download,
   Layers,
@@ -14,6 +15,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { CollectionsView } from "./components/CollectionsView";
 import { DownloadsView } from "./components/DownloadsView";
 import { InstallDialog } from "./components/InstallDialog";
 import { LoadOrderView } from "./components/LoadOrderView";
@@ -29,6 +31,7 @@ const NAV: { id: View; label: string; icon: typeof Layers }[] = [
   { id: "mods", label: "Mods", icon: Layers },
   { id: "order", label: "Load order", icon: ListOrdered },
   { id: "downloads", label: "Downloads", icon: Download },
+  { id: "collections", label: "Collections", icon: Boxes },
   { id: "settings", label: "Settings", icon: Settings },
 ];
 
@@ -92,9 +95,12 @@ export default function App() {
         toast("error", name ? `${name}: ${reason}` : reason);
       }),
       listen<[string, string]>("nxm-rejected", (event) => toast("error", event.payload[1])),
-      listen("nxm-collection", () =>
-        toast("info", "Collections are not installable yet — this is the next thing being built."),
-      ),
+      // A collection link from the browser goes to the collections screen,
+      // which looks it up on arrival.
+      listen<{ slug: string }>("nxm-collection", (event) => {
+        useApp.getState().setPendingCollection(event.payload.slug);
+        setView("collections");
+      }),
     ];
 
     return () => {
@@ -160,6 +166,7 @@ export default function App() {
             {view === "mods" && <ModsView onAdd={pickFiles} />}
             {view === "order" && <LoadOrderView />}
             {view === "downloads" && <DownloadsView />}
+            {view === "collections" && <CollectionsView />}
             {view === "settings" && <SettingsView />}
             <ApplyBar />
           </main>

@@ -25,6 +25,7 @@ tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 
 sbmm-app = { path = "../crates/sbmm-app" }
+sbmm-archive = { path = "../crates/sbmm-archive" }
 sbmm-core = { path = "../crates/sbmm-core" }
 sbmm-game = { path = "../crates/sbmm-game" }
 sbmm-nexus = { path = "../crates/sbmm-nexus" }

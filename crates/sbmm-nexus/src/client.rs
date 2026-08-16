@@ -231,6 +231,26 @@ impl<T: Transport> NexusClient<T> {
         serde_json::from_str(&body).map_err(|e| NexusError::Decode(e.to_string()))
     }
 
+    /// Look up one revision of a collection.
+    ///
+    /// Revision `0` means "whatever is current": the API treats a missing
+    /// revision that way, and a bare collection link carries no number.
+    pub async fn collection_revision(
+        &self,
+        slug: &str,
+        revision: u64,
+    ) -> Result<crate::collection::Revision, NexusError> {
+        let variables = serde_json::json!({
+            "slug": slug,
+            "revision": revision,
+            "domain": self.domain,
+        });
+        let data = self
+            .graphql(crate::collection::REVISION_QUERY, variables)
+            .await?;
+        Ok(crate::collection::parse_revision(&data))
+    }
+
     /// Run a GraphQL query against the v2 API, used for collections.
     pub async fn graphql(
         &self,

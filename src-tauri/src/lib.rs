@@ -4,6 +4,7 @@
 //! forwards the call, and maps the error to a string for the frontend. All
 //! behaviour worth testing lives in `sbmm-app`.
 
+mod collections;
 mod downloads;
 mod upscaler;
 
@@ -610,6 +611,8 @@ pub fn run() {
             download_queue,
             cancel_download,
             clear_finished_downloads,
+            collections::resolve_collection,
+            collections::install_collection,
             upscaler::upscaler_status,
             upscaler::update_upscaler,
             upscaler::restore_upscaler,

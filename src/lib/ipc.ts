@@ -157,6 +157,38 @@ export interface QueueItem {
   collection: string | null;
 }
 
+export interface PlannedMod {
+  modId: number;
+  fileId: number;
+  name: string;
+  version: string | null;
+  optional: boolean;
+  /** True when this mod is already installed, so it can be skipped. */
+  installed: boolean;
+}
+
+export interface ManualMod {
+  name: string;
+  url: string | null;
+  reason: string;
+}
+
+export interface CollectionPlan {
+  name: string;
+  slug: string;
+  revision: number;
+  mods: PlannedMod[];
+  /** Entries hosted somewhere the API cannot reach. */
+  manual: ManualMod[];
+}
+
+export interface QueuedFile {
+  modId: number;
+  fileId: number;
+  name: string;
+  version: string | null;
+}
+
 export type UpscalerComponent =
   | "dlssSuperResolution"
   | "dlssFrameGeneration"
@@ -251,6 +283,10 @@ export const ipc = {
   downloadQueue: () => invoke<QueueItem[]>("download_queue"),
   cancelDownload: (id: number) => invoke<void>("cancel_download", { id }),
   clearFinishedDownloads: () => invoke<void>("clear_finished_downloads"),
+
+  resolveCollection: (link: string) => invoke<CollectionPlan>("resolve_collection", { link }),
+  installCollection: (slug: string, files: QueuedFile[]) =>
+    invoke<number>("install_collection", { slug, files }),
 
   upscalerStatus: () => invoke<UpscalerStatus>("upscaler_status"),
   updateUpscaler: (component: UpscalerComponent) =>
