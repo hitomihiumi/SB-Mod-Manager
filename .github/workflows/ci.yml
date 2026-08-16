@@ -74,7 +74,10 @@ jobs:
       - name: Generate a throwaway signing key
         shell: pwsh
         run: |
-          pnpm tauri signer generate --ci -p "" -w "$env:RUNNER_TEMP/ci.key" -f
+          # No -p: PowerShell drops an empty string argument, so passing one
+          # leaves --password with nothing after it and the CLI refuses.
+          # --ci already means "do not prompt", which gives an unprotected key.
+          pnpm tauri signer generate --ci -w "$env:RUNNER_TEMP/ci.key" -f
           # The key file is one line of base64, so it goes into the
           # environment as-is; the trim only guards a trailing newline.
           $key = (Get-Content -Raw "$env:RUNNER_TEMP/ci.key").Trim()
