@@ -65,6 +65,22 @@ impl Sink for WindowSink {
     }
 }
 
+/// Put back the queue the last run left behind.
+///
+/// Anything part-downloaded is still on disk in the downloads folder, so a
+/// restored transfer resumes from where it stopped rather than starting over.
+pub fn restore(app: &tauri::AppHandle) {
+    let state = app.state::<AppState>();
+    let Ok(service) = state.0.lock() else { return };
+    let Ok(items) = service.restore_download_queue() else {
+        return;
+    };
+    if items.is_empty() {
+        return;
+    }
+    app.state::<Downloads>().queue.restore(items);
+}
+
 /// Keep stepping the queue for as long as the app runs.
 pub fn spawn_driver(app: tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
@@ -75,6 +91,7 @@ pub fn spawn_driver(app: tauri::AppHandle) {
                 Arc::clone(&downloads.finished),
             )
         };
+        let mut saved_revision = u64::MAX;
         let sink = WindowSink {
             app: app.clone(),
             finished: Arc::clone(&finished),
@@ -90,6 +107,15 @@ pub fn spawn_driver(app: tauri::AppHandle) {
 
         loop {
             let installed = install_finished(&app, &finished).await;
+
+            // Written only when something actually moved. Progress ticks do
+            // not bump the revision, so a running download is not a write per
+            // network packet.
+            let revision = queue.revision();
+            if revision != saved_revision {
+                save(&app, &queue);
+                saved_revision = revision;
+            }
 
             // Without a key even a free account cannot ask for a link, so the
             // queue is left alone until one is entered.
@@ -153,6 +179,17 @@ async fn install_finished(app: &tauri::AppHandle, finished: &Finished) -> bool {
     })
     .await;
     true
+}
+
+/// Persist the queue. A failure here loses the queue on the next start but
+/// must not stop the downloads that are working now.
+fn save(app: &tauri::AppHandle, queue: &Queue) {
+    let items = queue.items();
+    let state = app.state::<AppState>();
+    let Ok(mut service) = state.0.lock() else {
+        return;
+    };
+    let _ = service.save_download_queue(&items);
 }
 
 fn current_api_key(app: &tauri::AppHandle) -> String {

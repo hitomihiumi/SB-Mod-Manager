@@ -58,6 +58,34 @@ pub struct QueueItem {
     attempts: u32,
 }
 
+impl DownloadState {
+    /// A short, stable name for storage. Not the serde form, so renaming a
+    /// variant for the UI cannot silently invalidate a saved queue.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DownloadState::Queued => "queued",
+            DownloadState::Running => "running",
+            DownloadState::Done => "done",
+            DownloadState::Failed => "failed",
+            DownloadState::Cancelled => "cancelled",
+            DownloadState::NeedsUserAction => "needsUserAction",
+        }
+    }
+
+    /// Anything unrecognised comes back as queued, which is the harmless
+    /// reading: the item is simply tried again.
+    pub fn from_str_id(text: &str) -> DownloadState {
+        match text {
+            "running" => DownloadState::Running,
+            "done" => DownloadState::Done,
+            "failed" => DownloadState::Failed,
+            "cancelled" => DownloadState::Cancelled,
+            "needsUserAction" => DownloadState::NeedsUserAction,
+            _ => DownloadState::Queued,
+        }
+    }
+}
+
 impl QueueItem {
     pub fn new(
         mod_id: u64,
@@ -101,6 +129,39 @@ impl QueueItem {
     pub fn has_credentials(&self) -> bool {
         self.credentials.is_some()
     }
+
+    /// Rebuild an item read back from storage.
+    #[allow(clippy::too_many_arguments)]
+    pub fn restored(
+        id: u64,
+        mod_id: u64,
+        file_id: u64,
+        name: String,
+        file_name: String,
+        version: Option<String>,
+        state: DownloadState,
+        bytes_total: Option<u64>,
+        error: Option<String>,
+        collection: Option<String>,
+    ) -> Self {
+        Self {
+            id,
+            mod_id,
+            file_id,
+            name,
+            file_name,
+            version,
+            state,
+            // Filled in by the first progress tick; the transfer itself
+            // resumes from the length of the partial file, not from here.
+            bytes_done: 0,
+            bytes_total,
+            error,
+            collection,
+            credentials: None,
+            attempts: 0,
+        }
+    }
 }
 
 /// What the queue reports back to the application.
@@ -125,6 +186,9 @@ struct State {
 pub struct Queue {
     state: Mutex<State>,
     next_id: AtomicU64,
+    /// Bumped on every change, so whoever persists the queue can tell whether
+    /// there is anything new to write without comparing the whole list.
+    revision: AtomicU64,
     domain: String,
 }
 
@@ -133,8 +197,41 @@ impl Queue {
         Self {
             state: Mutex::new(State::default()),
             next_id: AtomicU64::new(1),
+            revision: AtomicU64::new(0),
             domain: domain.into(),
         }
+    }
+
+    /// Put back a queue saved by an earlier run.
+    ///
+    /// Anything that was mid-flight comes back as queued: the credentials that
+    /// started it were short-lived and were not stored, so the transfer is
+    /// asked for again — and resumes from whatever bytes are already on disk.
+    pub fn restore(&self, items: Vec<QueueItem>) {
+        let highest = items.iter().map(|i| i.id).max().unwrap_or(0);
+        let mut state = self.state.lock().expect("queue lock");
+        state.items = items
+            .into_iter()
+            .map(|mut item| {
+                if item.state == DownloadState::Running {
+                    item.state = DownloadState::Queued;
+                }
+                item.attempts = 0;
+                item
+            })
+            .collect();
+        self.next_id.store(highest + 1, Ordering::SeqCst);
+        drop(state);
+        self.touch();
+    }
+
+    /// How many times the queue has changed.
+    pub fn revision(&self) -> u64 {
+        self.revision.load(Ordering::SeqCst)
+    }
+
+    fn touch(&self) {
+        self.revision.fetch_add(1, Ordering::SeqCst);
     }
 
     /// Add an item, or top up an existing one with fresh credentials.
@@ -155,12 +252,17 @@ impl Queue {
                 existing.error = None;
                 existing.attempts = 0;
             }
-            return existing.id;
+            let id = existing.id;
+            drop(state);
+            self.touch();
+            return id;
         }
 
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         item.id = id;
         state.items.push(item);
+        drop(state);
+        self.touch();
         id
     }
 
@@ -176,12 +278,16 @@ impl Queue {
                 item.state = DownloadState::Cancelled;
             }
         }
+        drop(state);
+        self.touch();
     }
 
     /// Forget everything that has finished one way or another.
     pub fn clear_finished(&self) {
         let mut state = self.state.lock().expect("queue lock");
         state.items.retain(|i| is_open(i.state));
+        drop(state);
+        self.touch();
     }
 
     fn take_next(&self) -> Option<QueueItem> {
@@ -191,9 +297,19 @@ impl Queue {
             .iter_mut()
             .find(|i| i.state == DownloadState::Queued)?;
         item.state = DownloadState::Running;
-        Some(item.clone())
+        let taken = item.clone();
+        drop(state);
+        self.touch();
+        Some(taken)
     }
 
+    /// Change one item.
+    ///
+    /// Deliberately does not bump the revision: this is also the progress
+    /// path, called for every chunk that arrives, and persisting the byte
+    /// count that often would be a write per network packet. Nothing is lost
+    /// by leaving it out — a resumed transfer picks up from the length of the
+    /// file on disk, not from a stored counter.
     fn update(&self, id: u64, apply: impl FnOnce(&mut QueueItem)) -> Option<QueueItem> {
         let mut state = self.state.lock().expect("queue lock");
         let item = state.items.iter_mut().find(|i| i.id == id)?;
@@ -263,6 +379,9 @@ impl Queue {
                 });
             }
         }
+        // Every arm above settles the item into a new state, which is the
+        // point worth persisting.
+        self.touch();
         true
     }
 
@@ -594,6 +713,52 @@ mod tests {
         );
         assert_eq!(queue.items()[0].state, DownloadState::Cancelled);
         assert!(sink.completed.lock().unwrap().is_empty());
+    }
+
+    /// A restart lands mid-transfer more often than not, and an item stuck in
+    /// Running would never be picked up again.
+    #[test]
+    fn a_restored_queue_retries_whatever_was_in_flight() {
+        let queue = Queue::new("stellarblade");
+        let mut running = QueueItem::new(1, 2, "Half Done", "a.zip");
+        running.id = 7;
+        running.state = DownloadState::Running;
+        let mut waiting = QueueItem::new(3, 4, "Waiting", "b.zip");
+        waiting.id = 8;
+
+        queue.restore(vec![running, waiting]);
+
+        let items = queue.items();
+        assert_eq!(items[0].state, DownloadState::Queued);
+        assert_eq!(items[1].state, DownloadState::Queued);
+
+        // Ids must continue past what was restored, or a new download would
+        // collide with one already in the list.
+        let fresh = queue.push(QueueItem::new(5, 6, "New", "c.zip"));
+        assert_eq!(fresh, 9);
+    }
+
+    /// Whoever persists the queue watches the revision to know when there is
+    /// anything worth writing, so settling into a final state has to bump it.
+    #[tokio::test]
+    async fn finishing_a_download_counts_as_a_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let queue = Queue::new("stellarblade");
+        queue.push(QueueItem::new(1, 2, "Thing", "a.zip"));
+
+        let after_push = queue.revision();
+        queue
+            .step(
+                &client(200),
+                &fetcher(false),
+                &Recorder::default(),
+                dir.path(),
+            )
+            .await;
+        assert!(
+            queue.revision() > after_push,
+            "settling into Done has to be persisted"
+        );
     }
 
     #[tokio::test]

@@ -54,6 +54,27 @@ pub struct ModRecord {
     pub update_checked_at: Option<String>,
 }
 
+/// One entry of the download queue, as it survives a restart.
+///
+/// The short-lived `key`/`expires` credentials an `nxm://` link carries are
+/// deliberately not here: they would be stale by the next start anyway, and a
+/// credential does not belong in a file on disk. A restored entry asks for a
+/// fresh link if it needs one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DownloadRecord {
+    pub id: i64,
+    pub mod_id: i64,
+    pub file_id: i64,
+    pub name: String,
+    pub file_name: String,
+    pub version: Option<String>,
+    pub state: String,
+    pub bytes_done: i64,
+    pub bytes_total: Option<i64>,
+    pub error: Option<String>,
+    pub collection: Option<String>,
+}
+
 /// A new mod being registered after a successful install.
 #[derive(Debug, Clone)]
 pub struct NewMod {
@@ -219,6 +240,66 @@ impl Store {
               WHERE id = ?1",
             params![mod_id, latest_version],
         )?;
+        Ok(())
+    }
+
+    // -- download queue ----------------------------------------------------
+
+    /// The queue as it was when the manager last closed.
+    pub fn list_downloads(&self) -> Result<Vec<DownloadRecord>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, mod_id, file_id, name, file_name, version, state,
+                    bytes_done, bytes_total, error, collection
+               FROM downloads ORDER BY id",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(DownloadRecord {
+                id: row.get(0)?,
+                mod_id: row.get(1)?,
+                file_id: row.get(2)?,
+                name: row.get(3)?,
+                file_name: row.get(4)?,
+                version: row.get(5)?,
+                state: row.get(6)?,
+                bytes_done: row.get(7)?,
+                bytes_total: row.get(8)?,
+                error: row.get(9)?,
+                collection: row.get(10)?,
+            })
+        })?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// Write the whole queue back.
+    ///
+    /// Replacing it wholesale rather than tracking individual edits: the queue
+    /// is small, lives in memory as the source of truth, and a rewrite cannot
+    /// drift out of step with it the way incremental updates can.
+    pub fn replace_downloads(&mut self, items: &[DownloadRecord]) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        tx.execute("DELETE FROM downloads", [])?;
+        for item in items {
+            tx.execute(
+                "INSERT INTO downloads
+                    (id, mod_id, file_id, name, file_name, version, state,
+                     bytes_done, bytes_total, error, collection)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                params![
+                    item.id,
+                    item.mod_id,
+                    item.file_id,
+                    item.name,
+                    item.file_name,
+                    item.version,
+                    item.state,
+                    item.bytes_done,
+                    item.bytes_total,
+                    item.error,
+                    item.collection,
+                ],
+            )?;
+        }
+        tx.commit()?;
         Ok(())
     }
 

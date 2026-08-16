@@ -398,6 +398,60 @@ impl App {
         self.commit_install(&staged.staging_id, &name, None, origin)
     }
 
+    // -- download queue ----------------------------------------------------
+
+    /// The queue as the last run left it.
+    ///
+    /// Entries that had already finished are dropped: their file is installed
+    /// and the row would only be clutter on the next start.
+    pub fn restore_download_queue(&self) -> Result<Vec<sbmm_nexus::QueueItem>> {
+        Ok(self
+            .store
+            .list_downloads()?
+            .into_iter()
+            .filter_map(|row| {
+                let state = sbmm_nexus::DownloadState::from_str_id(&row.state);
+                if matches!(state, sbmm_nexus::DownloadState::Done) {
+                    return None;
+                }
+                Some(sbmm_nexus::QueueItem::restored(
+                    row.id as u64,
+                    row.mod_id as u64,
+                    row.file_id as u64,
+                    row.name,
+                    row.file_name,
+                    row.version,
+                    state,
+                    row.bytes_total.map(|b| b as u64),
+                    row.error,
+                    row.collection,
+                ))
+            })
+            .collect())
+    }
+
+    /// Write the queue out so closing the manager does not lose it.
+    pub fn save_download_queue(&mut self, items: &[sbmm_nexus::QueueItem]) -> Result<()> {
+        let rows: Vec<sbmm_store::DownloadRecord> = items
+            .iter()
+            .map(|item| sbmm_store::DownloadRecord {
+                id: item.id as i64,
+                mod_id: item.mod_id as i64,
+                file_id: item.file_id as i64,
+                name: item.name.clone(),
+                file_name: item.file_name.clone(),
+                version: item.version.clone(),
+                state: item.state.as_str().to_string(),
+                bytes_done: item.bytes_done as i64,
+                bytes_total: item.bytes_total.map(|b| b as i64),
+                error: item.error.clone(),
+                collection: item.collection.clone(),
+            })
+            .collect();
+        self.store.replace_downloads(&rows)?;
+        Ok(())
+    }
+
     // -- upscalers ---------------------------------------------------------
 
     /// Which upscaler DLLs the game currently has, and their versions.

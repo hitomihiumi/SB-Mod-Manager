@@ -785,6 +785,69 @@ fn an_upscaler_the_game_does_not_ship_is_refused() {
     assert!(result.is_err());
 }
 
+/// Closing the manager mid-collection must not lose the queue — that is forty
+/// entries and a part-downloaded file the user would have to redo by hand.
+#[test]
+fn the_download_queue_survives_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().join("data");
+
+    {
+        let mut app = App::new(&data).unwrap();
+        let queued = sbmm_nexus::QueueItem::new(440, 1899, "Nice Outfit", "outfit.zip")
+            .with_version(Some("1.2".into()))
+            .in_collection("essential-sb");
+        let done = sbmm_nexus::QueueItem::new(12, 34, "Already In", "in.zip");
+
+        let mut items = vec![queued, done];
+        items[0].id = 1;
+        items[1].id = 2;
+        items[1].state = sbmm_nexus::DownloadState::Done;
+        app.save_download_queue(&items).unwrap();
+    }
+
+    let app = App::new(&data).unwrap();
+    let restored = app.restore_download_queue().unwrap();
+
+    assert_eq!(
+        restored.len(),
+        1,
+        "a finished download is installed already and should not come back"
+    );
+    assert_eq!(restored[0].id, 1);
+    assert_eq!(restored[0].mod_id, 440);
+    assert_eq!(restored[0].file_id, 1899);
+    assert_eq!(restored[0].name, "Nice Outfit");
+    assert_eq!(restored[0].file_name, "outfit.zip");
+    assert_eq!(restored[0].version.as_deref(), Some("1.2"));
+    assert_eq!(restored[0].collection.as_deref(), Some("essential-sb"));
+}
+
+/// The credentials an nxm:// link carries are short-lived, and a credential
+/// has no business sitting in a file on disk.
+#[test]
+fn a_saved_queue_never_holds_the_download_credentials() {
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().join("data");
+    let secret = "a-very-secret-download-key";
+
+    let mut app = App::new(&data).unwrap();
+    let mut item = sbmm_nexus::QueueItem::new(440, 1899, "Nice Outfit", "outfit.zip")
+        .with_credentials(secret, 1_800_000_000);
+    item.id = 1;
+    app.save_download_queue(&[item]).unwrap();
+    drop(app);
+
+    let raw = fs::read(data.join("sbmm.db")).unwrap();
+    assert!(
+        !contains(&raw, secret.as_bytes()),
+        "the download key must not reach the database"
+    );
+
+    let restored = App::new(&data).unwrap().restore_download_queue().unwrap();
+    assert!(!restored[0].has_credentials());
+}
+
 /// Naive substring search over the raw database bytes.
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {
     haystack.windows(needle.len()).any(|w| w == needle)

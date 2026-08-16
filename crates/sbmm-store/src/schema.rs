@@ -88,6 +88,27 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE mods ADD COLUMN latest_version TEXT;
     ALTER TABLE mods ADD COLUMN update_checked_at TEXT;
     "#,
+    // v3 — the download queue, so closing the manager mid-collection does not
+    // lose forty entries and orphan whatever was half-fetched.
+    //
+    // The `key`/`expires` pair from an nxm:// link is deliberately absent:
+    // it is a short-lived credential that would be stale by the next start,
+    // and it has no business sitting in a file on disk.
+    r#"
+    CREATE TABLE downloads (
+        id          INTEGER PRIMARY KEY,
+        mod_id      INTEGER NOT NULL,
+        file_id     INTEGER NOT NULL,
+        name        TEXT NOT NULL,
+        file_name   TEXT NOT NULL,
+        version     TEXT,
+        state       TEXT NOT NULL,
+        bytes_done  INTEGER NOT NULL DEFAULT 0,
+        bytes_total INTEGER,
+        error       TEXT,
+        collection  TEXT
+    );
+    "#,
 ];
 
 pub fn migrate(conn: &Connection) -> Result<()> {

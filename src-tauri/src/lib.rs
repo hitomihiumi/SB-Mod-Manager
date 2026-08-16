@@ -576,6 +576,7 @@ pub fn run() {
                 }
             }
 
+            downloads::restore(app.handle());
             downloads::spawn_driver(app.handle().clone());
             Ok(())
         })
