@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 import { formatBytes } from "../lib/format";
 import { ipc, type Folders, type UpdateChannel, type UpdateInfo } from "../lib/ipc";
 import { useApp } from "../store/useApp";
-import { Button, Section } from "./ui";
+import { Button, Checkbox, Section } from "./ui";
 import { UpscalerSection } from "./UpscalerSection";
 
 export function SettingsView() {
@@ -106,6 +106,8 @@ export function SettingsView() {
         </Section>
 
         <NexusSection />
+
+        <DiscordSection />
 
         <UpscalerSection />
 
@@ -240,6 +242,45 @@ function NexusSection() {
           Collections install the same way, one click per mod.
         </p>
       )}
+    </Section>
+  );
+}
+
+/// Discord presence. The only thing this app publishes anywhere, so the switch
+/// is here rather than buried, and the copy says exactly what is sent.
+function DiscordSection() {
+  const snapshot = useApp((s) => s.snapshot);
+  const refresh = useApp((s) => s.refresh);
+  const toast = useApp((s) => s.toast);
+  const enabled = snapshot?.discordRpc ?? true;
+
+  async function toggle(next: boolean) {
+    try {
+      await ipc.setDiscordRpc(next);
+      await refresh();
+    } catch (error) {
+      toast("error", String(error));
+    }
+  }
+
+  return (
+    <Section
+      title="Discord"
+      hint="Shows on your Discord profile that the manager is open. Only counts are sent — never the name of a mod, a collection or a folder."
+    >
+      <label className="flex cursor-pointer items-center gap-2.5">
+        <Checkbox
+          checked={enabled}
+          onChange={(next) => void toggle(next)}
+          label="Show activity on Discord"
+        />
+        <span className="text-[13px]">Show activity on Discord</span>
+      </label>
+      <p className="mt-2 text-[11px] leading-relaxed text-ink-muted">
+        {enabled
+          ? "Your profile shows \u201CManaging mods\u201D and how many of your installed mods are switched on."
+          : "Nothing is sent to Discord."}
+      </p>
     </Section>
   );
 }

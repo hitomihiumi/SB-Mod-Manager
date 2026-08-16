@@ -65,6 +65,8 @@ wrong is the usual reason a mod "doesn't work".
   and by which line the game is built against, so nothing is installed that the
   game would ignore or the hardware could never load. The swap goes through the
   same deployment record as a mod, so it undoes exactly.
+- **Says so on Discord**, if you want it to. Counts only — never the name of a
+  mod, a collection or a folder — and one switch in Settings turns it off.
 - **Updates itself** from GitHub releases, on either the stable or the nightly
   channel, with the download checked against a signature before anything is
   replaced.
@@ -110,6 +112,15 @@ publishes a GitHub Release with notes generated from the commits since the
 last tag, and a rolling `nightly` prerelease is rebuilt from `master` whenever
 something landed that day. The app version comes from `package.json` alone —
 `tauri.conf.json` points at it.
+
+### Discord presence (optional)
+
+Presence needs a Discord application id, and the one in `src-tauri/src/discord.rs`
+is a placeholder — nothing appears until it is replaced. Register an
+application at <https://discord.com/developers/applications>, put its id in
+`APP_ID`, and upload an image named `icon` under its Rich Presence art assets
+so the large icon resolves. Everything else works without this; the feature
+just stays invisible.
 
 ### Update signing (do this before the first release)
 

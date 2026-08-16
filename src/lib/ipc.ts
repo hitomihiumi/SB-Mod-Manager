@@ -12,6 +12,7 @@ export type ModTypeId =
   | "ue4ssLua"
   | "ue4ssDll"
   | "movie"
+  | "splash"
   | "rootBinary"
   | "genericPak"
   | "gameRootOverlay"
@@ -75,6 +76,8 @@ export interface AppSnapshot {
   /** Null until an API key has been validated. */
   nexus: NexusAccount | null;
   updateChannel: UpdateChannel;
+  /** Whether the manager publishes a Discord presence. */
+  discordRpc: boolean;
 }
 
 export type UpdateChannel = "stable" | "nightly";
@@ -331,6 +334,7 @@ export const ipc = {
   installUpdate: () => invoke<void>("install_update"),
   setUpdateChannel: (channel: UpdateChannel) =>
     invoke<void>("set_update_channel", { channel }),
+  setDiscordRpc: (enabled: boolean) => invoke<void>("set_discord_rpc", { enabled }),
 };
 
 /** The game's Nexus domain, mirroring `NEXUS_DOMAIN` in `sbmm-game`. */
@@ -349,6 +353,7 @@ export const MOD_TYPE_META: Record<ModTypeId, { label: string; hint: string }> =
   ue4ssFramework: { label: "UE4SS", hint: "UE4SS runtime" },
   rootBinary: { label: "Root", hint: "SB/Binaries/Win64" },
   movie: { label: "Movie", hint: "SB/Content/Movies" },
+  splash: { label: "Splash", hint: "SB/Content/Splash — the startup image" },
   gameRootOverlay: { label: "Overlay", hint: "Laid onto the game folder" },
   unknown: { label: "Unknown", hint: "Needs a type before it can install" },
 };
@@ -361,5 +366,6 @@ export const SELECTABLE_TYPES: ModTypeId[] = [
   "ue4ssFramework",
   "rootBinary",
   "movie",
+  "splash",
   "gameRootOverlay",
 ];

@@ -39,6 +39,8 @@ tauri-plugin-deep-link = "2.4.9"
 tauri-plugin-single-instance = { version = "2.4.3", features = ["deep-link"] }
 # Only for the download driver's idle wait; the runtime itself comes from Tauri.
 tokio = { version = "1", features = ["time"] }
+# Speaks Discord's local IPC socket directly — no SDK binary to ship.
+discord-rich-presence = "1.1"
 
 [profile.release]
 opt-level = "z"

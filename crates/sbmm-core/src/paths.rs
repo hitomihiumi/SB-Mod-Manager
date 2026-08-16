@@ -25,6 +25,10 @@ pub const BINARIES_WIN64: &str = "SB/Binaries/Win64";
 /// Bink/mp4 movie replacements.
 pub const CONTENT_MOVIES: &str = "SB/Content/Movies";
 
+/// The startup splash image. Unreal looks for `Splash.bmp` here before the
+/// engine is up, which is why splash art is loose files rather than a pak.
+pub const CONTENT_SPLASH: &str = "SB/Content/Splash";
+
 /// Directories that must never be treated as a redundant archive wrapper,
 /// because their name is itself the signal that identifies the mod type.
 pub const MEANINGFUL_DIRS: &[&str] = &[
@@ -40,6 +44,7 @@ pub const MEANINGFUL_DIRS: &[&str] = &[
     "content",
     "binaries",
     "win64",
+    "splash",
 ];
 
 /// DLL names commonly used as injector proxies by ReShade and similar tools.
@@ -57,3 +62,11 @@ pub const PROXY_DLLS: &[&str] = &[
 
 /// File extensions that indicate a movie replacement mod.
 pub const MOVIE_EXTS: &[&str] = &["mp4", "bk2", "bik", "usm"];
+
+/// The image files Unreal loads as the startup splash. `EdSplash` is the
+/// editor's and is harmless to ship, so a mod carrying it is still splash art.
+pub const SPLASH_FILES: &[&str] = &["splash.bmp", "edsplash.bmp"];
+
+/// Extensions a splash image can plausibly have. Unreal wants a `.bmp`, but
+/// mods are packaged by hand and a stray `.png` beside one is common.
+pub const SPLASH_EXTS: &[&str] = &["bmp", "png"];

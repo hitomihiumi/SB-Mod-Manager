@@ -101,6 +101,7 @@ const SETTING_AUTO_APPLY: &str = "autoApply";
 const SETTING_LIBRARY_ROOT: &str = "libraryRoot";
 const SETTING_NEXUS_ACCOUNT: &str = "nexusAccount";
 const SETTING_UPDATE_CHANNEL: &str = "updateChannel";
+const SETTING_DISCORD_RPC: &str = "discordRpc";
 
 pub struct App {
     store: Store,
@@ -187,6 +188,25 @@ impl App {
             .get_setting(SETTING_UPDATE_CHANNEL)?
             .filter(|c| c == "nightly")
             .unwrap_or_else(|| "stable".to_string()))
+    }
+
+    /// Whether the manager tells Discord what it is doing.
+    ///
+    /// On by default, because that is what a presence integration is for, and
+    /// off with one switch — it broadcasts to the user's friends list, so it
+    /// has to be theirs to turn off.
+    pub fn discord_rpc(&self) -> Result<bool> {
+        Ok(self
+            .store
+            .get_setting(SETTING_DISCORD_RPC)?
+            .map(|v| v != "off")
+            .unwrap_or(true))
+    }
+
+    pub fn set_discord_rpc(&mut self, enabled: bool) -> Result<()> {
+        self.store
+            .set_setting(SETTING_DISCORD_RPC, if enabled { "on" } else { "off" })?;
+        Ok(())
     }
 
     pub fn set_update_channel(&mut self, channel: &str) -> Result<()> {
@@ -890,6 +910,7 @@ impl App {
             auto_apply: self.auto_apply()?,
             nexus: self.nexus_account()?,
             update_channel: self.update_channel()?,
+            discord_rpc: self.discord_rpc()?,
         })
     }
 

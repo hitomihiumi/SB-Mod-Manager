@@ -1,0 +1,255 @@
+{
+  "info": {
+    "author": "daedaddy",
+    "authorUrl": "",
+    "name": "DEGEN: An NSFW AIO pack by dae",
+    "description": "",
+    "installInstructions": "",
+    "domainName": "stellarblade",
+    "gameVersions": [
+      "1.0.0.0"
+    ]
+  },
+  "mods": [
+    {
+      "name": "Eve and 2B shaking ass NSFW Menu",
+      "version": "1.0",
+      "optional": true,
+      "domainName": "stellarblade",
+      "source": {
+        "type": "nexus",
+        "modId": 228,
+        "fileId": 573,
+        "md5": "af45c59222e56372c6f7d6528fed1475",
+        "fileSize": 39470544,
+        "logicalFilename": "Eve and 2B shaking ass NSFW Menu",
+        "updatePolicy": "exact",
+        "tag": "XXfspQcUPj"
+      },
+      "instructions": "only install if you want an nsfw main menu replacer, if you didnt select the other main menu replacer, AND you want this specific one, which is 2b and eve twerking on loop. ",
+      "author": "Nosextu",
+      "details": {
+        "category": "User Interface",
+        "type": "stellarblade-movie"
+      },
+      "phase": 0
+    },
+    {
+      "name": "EVE FUTA puffy physics",
+      "version": "3.1",
+      "optional": true,
+      "domainName": "stellarblade",
+      "source": {
+        "type": "nexus",
+        "modId": 201,
+        "fileId": 456,
+        "md5": "181df47bd4d776974e9047cda904f6dd",
+        "fileSize": 18218439,
+        "logicalFilename": "EVE FUTA puffy physics",
+        "updatePolicy": "exact",
+        "tag": "LtF-2lQBJb"
+      },
+      "instructions": "only install if you want futa eve. not compatible with other body replacers.",
+      "author": "mashimas1",
+      "details": {
+        "category": "Miscellaneous",
+        "type": "stellarblade-uesortablepak"
+      },
+      "phase": 0
+    },
+    {
+      "name": "Splash Art - V3",
+      "version": "1.0",
+      "optional": true,
+      "domainName": "stellarblade",
+      "source": {
+        "type": "nexus",
+        "modId": 345,
+        "fileId": 963,
+        "md5": "cb03e8b5e450c7a229c5173099addd5d",
+        "fileSize": 549670,
+        "logicalFilename": "V3",
+        "updatePolicy": "exact",
+        "tag": "mHX0MUfs25"
+      },
+      "instructions": "optionally adds nsfw splash screen/startup. must be placed in StellarBlade\\SB\\Content\\Splash if the game doesnt do so automatically.  do not install with another splash. this one is a 2d eve with legs spread.",
+      "author": "slieexen",
+      "details": {
+        "category": "User Interface",
+        "type": "stellarblade-splash"
+      },
+      "phase": 0
+    },
+    {
+      "name": "Ultimate Engine Tweaks (Anti-Stutters - More Performance - Lower Latency - Better Clarity - Lossless) - Stellar Blade - Ultimate Unreal Engine.ini (VRR)",
+      "version": "16",
+      "optional": true,
+      "domainName": "stellarblade",
+      "source": {
+        "type": "nexus",
+        "modId": 17,
+        "fileId": 14540,
+        "md5": "bb14d47c0738a6a7ad90084c4828347e",
+        "fileSize": 8162,
+        "logicalFilename": "Stellar Blade - Ultimate Unreal Engine.ini (VRR)",
+        "updatePolicy": "exact",
+        "tag": "aR27UaMVQqD"
+      },
+      "instructions": "engine fixes. there are two for different monitor types. install this one If you have VRR/G-Sync/Freesync disabled on your Display. most people use this one. install the other if you dont have it enabled.",
+      "author": "P40L0",
+      "details": {
+        "category": "Miscellaneous",
+        "type": "stellarblade-config"
+      },
+      "phase": 0
+    },
+    {
+      "name": "CustomNanosuitSystem",
+      "version": "2.2",
+      "optional": false,
+      "domainName": "stellarblade",
+      "source": {
+        "type": "nexus",
+        "modId": 1496,
+        "fileId": 13020,
+        "md5": "a3801597f01b4affa25f0ee20822e12e",
+        "fileSize": 8321143,
+        "logicalFilename": "CustomNanosuitSystem",
+        "updatePolicy": "exact",
+        "tag": "2_0trG05QDR"
+      },
+      "author": "DekitaRPG",
+      "details": {
+        "category": "User Interface",
+        "type": "stellarblade-ue4sscombo"
+      },
+      "phase": 0
+    },
+    {
+      "name": "Better Jiggle Mod v2.6.3 - Real-Time Jiggle Editor",
+      "version": "v2.6.3",
+      "optional": false,
+      "domainName": "stellarblade",
+      "source": {
+        "type": "nexus",
+        "modId": 1570,
+        "fileId": 9101,
+        "md5": "352250f13efb182ca9b0e6d689f98eba",
+        "fileSize": 11983,
+        "logicalFilename": "Better Jiggle Mod v2.6.3 - Real-Time Jiggle Editor",
+        "updatePolicy": "exact",
+        "tag": "SRtCu_41EcK"
+      },
+      "author": "Mstrthief",
+      "details": {
+        "category": "",
+        "type": "stellarblade-scripts"
+      },
+      "phase": 0
+    },
+    {
+      "name": "CNS - Fusion Suit",
+      "version": "1.0.1",
+      "optional": false,
+      "domainName": "stellarblade",
+      "source": {
+        "type": "nexus",
+        "modId": 1562,
+        "fileId": 10344,
+        "md5": "40b5af291d15ef0c72b186d8a2a9bcc9",
+        "fileSize": 460,
+        "logicalFilename": "CNS - Fusion Suit",
+        "updatePolicy": "exact",
+        "tag": "XH8AFmCzHtI"
+      },
+      "author": "QueenEri",
+      "details": {
+        "category": "Outfits",
+        "type": "stellarblade-cnsjson"
+      },
+      "phase": 0
+    },
+    {
+      "name": "CNS_female_npc_faces",
+      "version": "1.1",
+      "optional": false,
+      "domainName": "stellarblade",
+      "source": {
+        "type": "nexus",
+        "modId": 1647,
+        "fileId": 7672,
+        "md5": "9342e9a959add75ca65b292493f39a8c",
+        "fileSize": 588,
+        "logicalFilename": "CNS_female_npc_faces",
+        "updatePolicy": "exact",
+        "tag": "0GZjzHwy0n0"
+      },
+      "author": "RavenLover",
+      "details": {
+        "category": "Outfits",
+        "type": "stellarblade-binaries"
+      },
+      "phase": 0
+    },
+    {
+      "name": "SB UE4SS 1.3",
+      "version": "1.3",
+      "optional": false,
+      "domainName": "stellarblade",
+      "source": {
+        "type": "nexus",
+        "modId": 2952,
+        "fileId": 14519,
+        "md5": "5b5748c1ba8b720ac06cdc2c6e2c48fe",
+        "fileSize": 7143733,
+        "logicalFilename": "SB UE4SS 1.3",
+        "updatePolicy": "exact",
+        "tag": "ExHH_1Ms2oNf"
+      },
+      "author": "RevOGUwU",
+      "details": {
+        "category": "",
+        "type": "stellarblade-ue4ss"
+      },
+      "phase": 0
+    }
+  ],
+  "modRules": [
+    {
+      "type": "after",
+      "reference": {
+        "fileExpression": "CustomNanosuitSystem-1496-2-2-1771093897",
+        "fileMD5": "a3801597f01b4affa25f0ee20822e12e",
+        "versionMatch": "*",
+        "logicalFileName": "CustomNanosuitSystem"
+      },
+      "source": {
+        "fileExpression": "SB UE4SS 1.3-2952-1-3-1779598580",
+        "fileMD5": "5b5748c1ba8b720ac06cdc2c6e2c48fe",
+        "versionMatch": "*",
+        "logicalFileName": "SB UE4SS 1.3"
+      }
+    }
+  ],
+  "loadOrder": {
+    "(CNS) EVE - Herald of Goddess-1670-1-1-1-1753797247": {
+      "enabled": true,
+      "locked": false,
+      "pos": 0
+    },
+    "(TFD) Dia Elias (Boss) - (CNS) - Eve-2110-1-0-1760193623": {
+      "enabled": true,
+      "locked": false,
+      "pos": 1
+    },
+    "00 NIKKE Marian v1.1 for CNS-1901-1-1-1755810591": {
+      "enabled": true,
+      "locked": false,
+      "pos": 2
+    }
+  },
+  "collectionConfig": {
+    "recommendNewProfile": false,
+    "excludePluginRules": false
+  }
+}
