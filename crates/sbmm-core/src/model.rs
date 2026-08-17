@@ -17,6 +17,10 @@ pub enum ModType {
     Ue4ssDll,
     /// Movie/cutscene replacement.
     Movie,
+    /// Startup splash art. Loose image files rather than a pak, because
+    /// Unreal reads the splash off disk before the engine — and so before any
+    /// pak — is mounted.
+    Splash,
     /// ReShade or a similar DLL proxy dropped next to the executable.
     RootBinary,
     /// Plain pak mod (with its IoStore siblings, when present).
@@ -40,6 +44,7 @@ impl ModType {
             ModType::LogicMod => paths::PAKS_LOGICMODS,
             ModType::Ue4ssLua | ModType::Ue4ssDll => paths::UE4SS_MODS,
             ModType::Movie => paths::CONTENT_MOVIES,
+            ModType::Splash => paths::CONTENT_SPLASH,
             ModType::GenericPak => paths::PAKS_MODS,
             ModType::GameRootOverlay => paths::GAME_SUBDIR,
             ModType::Unknown => "",
@@ -65,7 +70,7 @@ impl ModType {
     pub fn is_flat_target(self) -> bool {
         matches!(
             self,
-            ModType::GenericPak | ModType::LogicMod | ModType::Movie
+            ModType::GenericPak | ModType::LogicMod | ModType::Movie | ModType::Splash
         )
     }
 
@@ -77,6 +82,7 @@ impl ModType {
             ModType::Ue4ssLua => "ue4ssLua",
             ModType::Ue4ssDll => "ue4ssDll",
             ModType::Movie => "movie",
+            ModType::Splash => "splash",
             ModType::RootBinary => "rootBinary",
             ModType::GenericPak => "genericPak",
             ModType::GameRootOverlay => "gameRootOverlay",
@@ -91,6 +97,7 @@ impl ModType {
             "ue4ssLua" => ModType::Ue4ssLua,
             "ue4ssDll" => ModType::Ue4ssDll,
             "movie" => ModType::Movie,
+            "splash" => ModType::Splash,
             "rootBinary" => ModType::RootBinary,
             "genericPak" => ModType::GenericPak,
             "gameRootOverlay" => ModType::GameRootOverlay,
@@ -109,6 +116,7 @@ impl ModType {
             ModType::Ue4ssFramework,
             ModType::RootBinary,
             ModType::Movie,
+            ModType::Splash,
             ModType::GameRootOverlay,
         ]
     }

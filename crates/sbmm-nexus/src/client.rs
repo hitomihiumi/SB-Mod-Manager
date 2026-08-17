@@ -58,15 +58,43 @@ pub trait Transport: Send + Sync {
 
 // -- API models -------------------------------------------------------------
 
+/// Who an API key belongs to.
+///
+/// `validate.json` answers with *both* `is_premium` and `is_premium?` — the
+/// question mark is a legacy spelling Nexus still sends alongside the modern
+/// one. They have to be separate fields: aliasing the two onto one made serde
+/// see the same field twice and refuse the whole response with "duplicate
+/// field `is_premium`", which looked like a rejected key rather than a parsing
+/// bug on our side.
+#[derive(Debug, Clone, Deserialize)]
+struct RawAccount {
+    name: String,
+    #[serde(default)]
+    is_premium: Option<bool>,
+    #[serde(rename = "is_premium?", default)]
+    is_premium_legacy: Option<bool>,
+    #[serde(default)]
+    user_id: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Account {
-    #[serde(rename = "name")]
     pub name: String,
-    #[serde(rename = "is_premium", alias = "is_premium?", default)]
     pub is_premium: bool,
-    #[serde(rename = "user_id", default)]
     pub user_id: u64,
+}
+
+impl From<RawAccount> for Account {
+    fn from(raw: RawAccount) -> Account {
+        Account {
+            name: raw.name,
+            // Whichever spelling arrived. They agree in practice, and if a
+            // response ever carried only one, that one is the answer.
+            is_premium: raw.is_premium.or(raw.is_premium_legacy).unwrap_or(false),
+            user_id: raw.user_id,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -159,7 +187,9 @@ impl<T: Transport> NexusClient<T> {
     /// it is read here once rather than inferred from a failure later.
     pub async fn validate(&self) -> Result<Account, NexusError> {
         let body = self.get_v1("/v1/users/validate.json").await?;
-        serde_json::from_str(&body).map_err(|e| NexusError::Decode(e.to_string()))
+        let raw: RawAccount =
+            serde_json::from_str(&body).map_err(|e| NexusError::Decode(e.to_string()))?;
+        Ok(raw.into())
     }
 
     pub async fn mod_info(&self, mod_id: u64) -> Result<ModInfo, NexusError> {
@@ -542,5 +572,73 @@ mod tests {
         }));
         assert!(!should_retry(&NexusError::PremiumRequired));
         assert!(!should_retry(&NexusError::BadApiKey));
+    }
+
+    /// The real shape of `validate.json`: Nexus sends the modern and the
+    /// legacy spelling of the premium flags side by side. Aliasing the two
+    /// onto one field made serde reject the whole response as a duplicate,
+    /// which surfaced as a key that would not connect.
+    #[tokio::test]
+    async fn a_validate_response_carrying_both_premium_spellings_is_accepted() {
+        let body = r#"{
+            "user_id": 12345,
+            "key": "redacted",
+            "name": "SomeUser",
+            "is_premium?": true,
+            "is_supporter?": false,
+            "email": "someone@example.invalid",
+            "profile_url": "https://example.invalid/avatar.png",
+            "is_supporter": false,
+            "is_premium": true
+        }"#;
+        let client = NexusClient::new(
+            Fake::default().with("/v1/users/validate.json", 200, body),
+            "key",
+            "stellarblade",
+        );
+
+        let account = client.validate().await.expect("both spellings are normal");
+        assert_eq!(account.name, "SomeUser");
+        assert_eq!(account.user_id, 12345);
+        assert!(account.is_premium);
+    }
+
+    /// A free account, again with both spellings present.
+    #[tokio::test]
+    async fn a_free_account_is_not_reported_as_premium() {
+        let body = r#"{
+            "user_id": 7,
+            "name": "Free",
+            "is_premium?": false,
+            "is_supporter?": false,
+            "is_supporter": false,
+            "is_premium": false
+        }"#;
+        let client = NexusClient::new(
+            Fake::default().with("/v1/users/validate.json", 200, body),
+            "key",
+            "stellarblade",
+        );
+        assert!(!client.validate().await.unwrap().is_premium);
+    }
+
+    /// Either spelling on its own still answers, so a response that drops one
+    /// of them does not silently downgrade the account to free.
+    #[tokio::test]
+    async fn either_spelling_alone_is_enough() {
+        for body in [
+            r#"{"user_id":1,"name":"A","is_premium":true}"#,
+            r#"{"user_id":1,"name":"A","is_premium?":true}"#,
+        ] {
+            let client = NexusClient::new(
+                Fake::default().with("/v1/users/validate.json", 200, body),
+                "key",
+                "stellarblade",
+            );
+            assert!(
+                client.validate().await.unwrap().is_premium,
+                "failed for {body}"
+            );
+        }
     }
 }
