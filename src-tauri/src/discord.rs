@@ -27,7 +27,7 @@ use discord_rich_presence::{DiscordIpc, DiscordIpcClient};
 /// another app's id would put somebody else's branding on the user's profile.
 /// Upload an icon named `icon` to that application's Rich Presence assets to
 /// match [`Assets::large_image`] below. See the README.
-const APP_ID: &str = "0000000000000000000";
+const APP_ID: &str = "1561824958705832067";
 
 /// What the presence should say.
 #[derive(Debug, Clone, PartialEq, Eq)]
