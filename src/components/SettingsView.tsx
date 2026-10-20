@@ -8,6 +8,8 @@ import { formatBytes } from "../lib/format";
 import { ipc, type Folders, type UpdateChannel, type UpdateInfo } from "../lib/ipc";
 import { useApp } from "../store/useApp";
 import { Button, Checkbox, Section } from "./ui";
+import { DeploymentSection } from "./DeploymentSection";
+import { FramegenSection } from "./FramegenSection";
 import { UpscalerSection } from "./UpscalerSection";
 
 export function SettingsView() {
@@ -105,11 +107,15 @@ export function SettingsView() {
           </label>
         </Section>
 
+        <DeploymentSection />
+
         <NexusSection />
 
         <DiscordSection />
 
         <UpscalerSection />
+
+        <FramegenSection />
 
         <UpdateSection />
 

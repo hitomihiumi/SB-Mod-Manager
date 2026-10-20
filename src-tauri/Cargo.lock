@@ -3626,7 +3626,7 @@ dependencies = [
 
 [[package]]
 name = "sbmm"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "discord-rich-presence",
  "sbmm-app",
@@ -3635,6 +3635,7 @@ dependencies = [
  "sbmm-game",
  "sbmm-nexus",
  "sbmm-upscaler",
+ "sbmm-vfs",
  "serde",
  "serde_json",
  "tauri",
@@ -3661,6 +3662,7 @@ dependencies = [
  "sbmm-nexus",
  "sbmm-store",
  "sbmm-upscaler",
+ "sbmm-vfs",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
@@ -3746,8 +3748,19 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "sha2",
  "thiserror 2.0.20",
  "windows 0.62.2",
+]
+
+[[package]]
+name = "sbmm-vfs"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]

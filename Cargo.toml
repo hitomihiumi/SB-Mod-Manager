@@ -10,6 +10,8 @@ members = [
     "crates/sbmm-deploy",
     "crates/sbmm-store",
     "crates/sbmm-upscaler",
+    "crates/sbmm-vfs",
+    "crates/sbmm-vfs-hook",
 ]
 
 [workspace.package]
@@ -29,6 +31,7 @@ sbmm-nexus = { path = "crates/sbmm-nexus" }
 sbmm-deploy = { path = "crates/sbmm-deploy" }
 sbmm-store = { path = "crates/sbmm-store" }
 sbmm-upscaler = { path = "crates/sbmm-upscaler" }
+sbmm-vfs = { path = "crates/sbmm-vfs" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -78,7 +78,12 @@ export interface AppSnapshot {
   updateChannel: UpdateChannel;
   /** Whether the manager publishes a Discord presence. */
   discordRpc: boolean;
+  deploymentMode: DeploymentMode;
 }
+
+/** How enabled mods reach the game: hard links in the folder, or the virtual
+    file system when the game is started from the manager. */
+export type DeploymentMode = "hardlink" | "virtual";
 
 export type UpdateChannel = "stable" | "nightly";
 
@@ -261,11 +266,60 @@ export interface UpscalerStatus {
   entries: UpscalerEntry[];
 }
 
+/** Proxy DLL names the RTX 20/30 frame generation package can load under. */
+export type FramegenProxy = "version" | "winmm" | "dbghelp" | "dinput8" | "dxgi" | "d3d12";
+
+export type FramegenCheckState = "pass" | "warn" | "fail" | "info";
+
+export interface FramegenCheck {
+  id: string;
+  state: FramegenCheckState;
+  title: string;
+  detail: string;
+}
+
+export type FramegenVerdict =
+  | "compatible"
+  | "compatibleWithWarnings"
+  | "notNeeded"
+  | "incompatible";
+
+export interface FramegenAssessment {
+  verdict: FramegenVerdict;
+  checks: FramegenCheck[];
+}
+
+export interface FramegenInstall {
+  modId: number;
+  version: string;
+  proxy: FramegenProxy;
+  enabled: boolean;
+}
+
+export interface FramegenStatus {
+  adapter: Adapter | null;
+  /** Null until a game folder has been chosen. */
+  assessment: FramegenAssessment | null;
+  proxy: FramegenProxy;
+  installed: FramegenInstall | null;
+  /** Null when GitHub could not be asked. */
+  latestVersion: string | null;
+  projectUrl: string;
+}
+
+export interface FramegenProgress {
+  stage: "download" | "verify";
+  done: number;
+  total: number | null;
+}
+
 export interface Folders {
   library: string;
   mods: string;
   backups: string;
   downloads: string;
+  /** What the game created while running under the virtual file system. */
+  overwrite: string;
   game: string | null;
   /** False when the library is on a different drive from the game, which
       means mods are copied instead of hard-linked and stored twice. */
@@ -330,11 +384,19 @@ export const ipc = {
   restoreUpscaler: (component: UpscalerComponent) =>
     invoke<boolean>("restore_upscaler", { component }),
 
+  framegenStatus: (proxy?: FramegenProxy) =>
+    invoke<FramegenStatus>("framegen_status", { proxy: proxy ?? null }),
+  installFramegen: (proxy: FramegenProxy) => invoke<string>("install_framegen", { proxy }),
+  removeFramegen: () => invoke<boolean>("remove_framegen"),
+
   checkForUpdate: () => invoke<UpdateInfo>("check_for_update"),
   installUpdate: () => invoke<void>("install_update"),
   setUpdateChannel: (channel: UpdateChannel) =>
     invoke<void>("set_update_channel", { channel }),
   setDiscordRpc: (enabled: boolean) => invoke<void>("set_discord_rpc", { enabled }),
+  setDeploymentMode: (mode: DeploymentMode) =>
+    invoke<ApplyReport>("set_deployment_mode", { mode }),
+  launchGame: () => invoke<string>("launch_game"),
 };
 
 /** The game's Nexus domain, mirroring `NEXUS_DOMAIN` in `sbmm-game`. */

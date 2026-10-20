@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = "0.10.9"
 thiserror = { workspace = true }
 
 # Enumerating display adapters is the one part that cannot be faked on Linux.

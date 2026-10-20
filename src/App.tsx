@@ -10,6 +10,7 @@ import {
   Layers,
   ListOrdered,
   Loader2,
+  Play,
   Settings,
   Swords,
   X,
@@ -26,7 +27,7 @@ import { SettingsView } from "./components/SettingsView";
 import { SetupWizard } from "./components/SetupWizard";
 import { TitleBar } from "./components/TitleBar";
 import { Button } from "./components/ui";
-import type { QueueItem } from "./lib/ipc";
+import { ipc, type QueueItem } from "./lib/ipc";
 import { useApp, type View } from "./store/useApp";
 
 const NAV: { id: View; label: string; icon: typeof Layers }[] = [
@@ -163,6 +164,8 @@ export default function App() {
                 </button>
               );
             })}
+            <span className="flex-1" />
+            <PlayButton />
           </nav>
 
           <main className="flex min-w-0 flex-1 flex-col">
@@ -275,5 +278,45 @@ function Toasts() {
         </div>
       ))}
     </div>
+  );
+}
+
+/**
+ * Start the game. Under the virtual file system this is the only way the game
+ * sees its mods, so it lives on the rail rather than in a menu.
+ */
+function PlayButton() {
+  const snapshot = useApp((s) => s.snapshot);
+  const toast = useApp((s) => s.toast);
+  const refresh = useApp((s) => s.refresh);
+  const [starting, setStarting] = useState(false);
+  const virtual = snapshot?.deploymentMode === "virtual";
+  const label = virtual ? "Play (virtual file system)" : "Play";
+
+  return (
+    <button
+      onClick={async () => {
+        setStarting(true);
+        try {
+          toast("success", await ipc.launchGame());
+          await refresh();
+        } catch (error) {
+          toast("error", String(error));
+        } finally {
+          setStarting(false);
+        }
+      }}
+      disabled={starting}
+      title={label}
+      aria-label={label}
+      className="relative grid size-10 place-items-center rounded-lg bg-accent text-accent-ink transition-colors hover:bg-accent/85 disabled:opacity-50"
+    >
+      {starting ? <Loader2 size={17} className="animate-spin" /> : <Play size={17} />}
+      {virtual && (
+        <span className="absolute -right-0.5 -bottom-0.5 grid size-3.5 place-items-center rounded-full border border-surface bg-base">
+          <Layers size={8} className="text-accent-soft" />
+        </span>
+      )}
+    </button>
   );
 }

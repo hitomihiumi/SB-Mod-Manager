@@ -47,6 +47,8 @@ pub enum AppError {
     KeyStore(#[from] credentials::KeyStoreError),
     #[error(transparent)]
     Encode(#[from] serde_json::Error),
+    #[error(transparent)]
+    Vfs(#[from] sbmm_vfs::MappingError),
 }
 
 impl AppError {
@@ -102,6 +104,7 @@ const SETTING_LIBRARY_ROOT: &str = "libraryRoot";
 const SETTING_NEXUS_ACCOUNT: &str = "nexusAccount";
 const SETTING_UPDATE_CHANNEL: &str = "updateChannel";
 const SETTING_DISCORD_RPC: &str = "discordRpc";
+const SETTING_DEPLOYMENT_MODE: &str = "deploymentMode";
 
 pub struct App {
     store: Store,
@@ -251,6 +254,7 @@ impl App {
             backups: path_string(self.backup_dir()),
             library_bytes: library::size_of(&library) as i64,
             downloads: path_string(self.downloads_dir()),
+            overwrite: path_string(self.overwrite_dir()),
             library: path_string(library),
         })
     }
@@ -287,6 +291,7 @@ impl App {
         library::move_tree(&old_root.join("mods"), &new_root.join("mods"))?;
         library::move_tree(&old_root.join("backups"), &new_root.join("backups"))?;
         library::move_tree(&old_root.join("downloads"), &new_root.join("downloads"))?;
+        library::move_tree(&old_root.join("overwrite"), &new_root.join("overwrite"))?;
 
         self.store
             .set_setting(SETTING_LIBRARY_ROOT, &new_root.to_string_lossy())?;
@@ -748,10 +753,166 @@ impl App {
         let ctx = self.deploy_context()?;
         let record = self.record(id)?;
         let components = self.store.components_for(id)?;
-        let plan = self.plan_for(&record, &components);
+        let plan = self.deploy_plan_for(&record, &components)?;
         self.deploy_mod(&ctx, id, &plan)?;
 
         Ok(id)
+    }
+
+    // -- frame generation on RTX 20/30 (experimental) ----------------------
+
+    /// What the game folder looks like to the frame generation check, or
+    /// nothing when no game has been chosen.
+    pub fn framegen_facts(&self) -> Result<Option<sbmm_upscaler::framegen::GameFacts>> {
+        use sbmm_upscaler::framegen::Owner;
+
+        let Some(game) = self.game()? else {
+            return Ok(None);
+        };
+        let records = self.store.list_mods()?;
+        let owners: BTreeMap<String, Owner> = self
+            .store
+            .deployed_files()?
+            .into_iter()
+            .filter_map(|(mod_id, target, _, _)| {
+                let record = records.iter().find(|m| m.id == mod_id)?;
+                let owner = if record.staging_folder == FRAMEGEN_STAGING {
+                    Owner::Ours
+                } else {
+                    Owner::Mod(record.name.clone())
+                };
+                Some((comparable_path(&target), owner))
+            })
+            .collect();
+
+        Ok(Some(sbmm_upscaler::framegen::gather(
+            &game.root,
+            Path::new(sbmm_core::paths::BINARIES_WIN64),
+            game.executable.clone(),
+            |relative| {
+                owners
+                    .get(&comparable_path(&relative.to_string_lossy()))
+                    .cloned()
+                    .unwrap_or(Owner::Unmanaged)
+            },
+        )))
+    }
+
+    /// The frame generation package the manager installed, if any.
+    pub fn framegen_installed(&self) -> Result<Option<FramegenInstall>> {
+        use sbmm_upscaler::framegen::Proxy;
+
+        let Some(record) = self
+            .store
+            .list_mods()?
+            .into_iter()
+            .find(|m| m.staging_folder == FRAMEGEN_STAGING)
+        else {
+            return Ok(None);
+        };
+        // Which proxy is in use is read back from the files, so there is one
+        // record of it rather than a setting that could disagree.
+        let proxy = self
+            .store
+            .components_for(record.id)?
+            .iter()
+            .flat_map(|c| c.files.iter())
+            .find_map(|f| {
+                let parent = comparable_path(&f.target.parent()?.to_string_lossy());
+                (parent == comparable_path(sbmm_core::paths::BINARIES_WIN64))
+                    .then(|| Proxy::from_file_name(&f.target.file_name()?.to_string_lossy()))
+                    .flatten()
+            })
+            .unwrap_or_default();
+        Ok(Some(FramegenInstall {
+            mod_id: record.id,
+            version: record.version.unwrap_or_default(),
+            proxy,
+            enabled: record.enabled,
+        }))
+    }
+
+    /// Lay an unpacked, inspected `dlssg_for_sm86` release beside the game
+    /// executable under `proxy`.
+    ///
+    /// Registered as an ordinary mod, like the upscaler swaps, so whatever it
+    /// displaces is backed up and removing it restores the folder exactly.
+    /// The package's files are moved into staging rather than copied — the
+    /// release is over 200 MB unpacked and the caller discards it afterwards.
+    pub fn install_framegen(
+        &mut self,
+        package: &sbmm_upscaler::framegen::Package,
+        proxy: sbmm_upscaler::framegen::Proxy,
+        version: &str,
+    ) -> Result<i64> {
+        if let Some(previous) = self.framegen_installed()? {
+            self.uninstall(previous.mod_id)?;
+        }
+
+        let staging_root = self.staging_path(FRAMEGEN_STAGING);
+        let binaries = Path::new(sbmm_core::paths::BINARIES_WIN64);
+        let mut component_files = Vec::new();
+        for (source, relative) in sbmm_upscaler::framegen::files_to_deploy(package, proxy) {
+            let target = binaries.join(&relative);
+            let staged = staging_root.join(&target);
+            if let Some(parent) = staged.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
+            }
+            move_or_copy(&package.root.join(&source), &staged)?;
+            component_files.push(sbmm_core::model::ComponentFile {
+                source: target.clone(),
+                target,
+            });
+        }
+
+        let detected = DetectedComponent {
+            mod_type: ModType::GameRootOverlay,
+            confidence: Confidence::High,
+            files: component_files,
+            target_subdir: PathBuf::new(),
+            ue4ss_mod_name: None,
+            pak_sets: Vec::new(),
+            warnings: Vec::new(),
+            notes: vec![format!(
+                "Experimental: dlssg_for_sm86 loaded through {}. Disabling this removes \
+                 the proxy and puts back anything it displaced.",
+                proxy.file_name()
+            )],
+        };
+
+        let id = self.store.insert_mod(&NewMod {
+            name: format!("DLSS Frame Generation for RTX 20/30 {version}"),
+            staging_folder: FRAMEGEN_STAGING.to_string(),
+            version: Some(version.to_string()),
+            source: "framegen".into(),
+            nexus_mod_id: None,
+            nexus_file_id: None,
+            primary_type: ModType::GameRootOverlay.as_str().to_string(),
+            components: vec![detected],
+            size_bytes: sbmm_archive::directory_size(&staging_root) as i64,
+            image_path: None,
+        })?;
+
+        // Same reasoning as the upscalers: a staged frame generator does
+        // nothing, so it goes in now and only this mod is deployed.
+        self.set_enabled(&[id], true)?;
+        let ctx = self.deploy_context()?;
+        let record = self.record(id)?;
+        let components = self.store.components_for(id)?;
+        let plan = self.deploy_plan_for(&record, &components)?;
+        self.deploy_mod(&ctx, id, &plan)?;
+
+        Ok(id)
+    }
+
+    /// Take the frame generation package back out. Nothing installed is not
+    /// an error: the game folder is already as it should be.
+    pub fn remove_framegen(&mut self) -> Result<bool> {
+        let Some(installed) = self.framegen_installed()? else {
+            return Ok(false);
+        };
+        self.uninstall(installed.mod_id)?;
+        Ok(true)
     }
 
     /// Commit a staged install, recording where the files came from.
@@ -849,9 +1010,10 @@ impl App {
         let mut mods = Vec::with_capacity(records.len());
         let mut pending = Vec::new();
 
+        let virtual_mode = self.deployment_mode()? == DeploymentMode::Virtual;
         for record in &records {
             let components = self.store.components_for(record.id)?;
-            let planned = self.plan_for(record, &components);
+            let planned = self.deploy_plan_for(record, &components)?;
             let recorded = self.store.deployed_files_for(record.id)?;
             let deployed = !recorded.is_empty();
 
@@ -877,7 +1039,9 @@ impl App {
                 component_types,
                 group_id: record.group_id,
                 enabled: record.enabled,
-                deployed,
+                // Under the virtual file system an enabled mod is in effect
+                // whether or not any of its files had to be linked in.
+                deployed: deployed || (virtual_mode && record.enabled),
                 priority: record.priority,
                 size_bytes: record.size_bytes,
                 source: record.source.clone(),
@@ -911,6 +1075,7 @@ impl App {
             nexus: self.nexus_account()?,
             update_channel: self.update_channel()?,
             discord_rpc: self.discord_rpc()?,
+            deployment_mode: self.deployment_mode()?,
         })
     }
 
@@ -1008,7 +1173,7 @@ impl App {
 
         for record in self.store.list_mods()? {
             let components = self.store.components_for(record.id)?;
-            let planned = self.plan_for(&record, &components);
+            let planned = self.deploy_plan_for(&record, &components)?;
             let recorded = self.store.deployed_files_for(record.id)?;
             let deployed = !recorded.is_empty();
 
@@ -1037,8 +1202,31 @@ impl App {
             }
         }
 
-        self.sync_ue4ss_registrations(&ctx)?;
+        // Under the virtual file system `mods.txt` is generated into the
+        // view at launch; writing the real one would defeat the point.
+        if self.deployment_mode()? == DeploymentMode::Hardlink {
+            self.sync_ue4ss_registrations(&ctx)?;
+        }
         Ok(report)
+    }
+
+    /// The part of a mod's plan that goes into the game folder for real.
+    ///
+    /// Everything, with hard links. Under the virtual file system only what
+    /// the Windows loader reaches before the hook exists: proxy DLLs and the
+    /// rest of the binaries folder, UE4SS itself, and the DLL swaps the
+    /// manager makes — the same files Mod Organizer 2 needs Root Builder for.
+    fn deploy_plan_for(
+        &self,
+        record: &ModRecord,
+        components: &[DetectedComponent],
+    ) -> Result<DeployPlan> {
+        let mut plan = self.plan_for(record, components);
+        if self.deployment_mode()? == DeploymentMode::Virtual {
+            plan.files
+                .retain(|file| must_be_physical(&record.source, &file.target));
+        }
+        Ok(plan)
     }
 
     fn plan_for(&self, record: &ModRecord, components: &[DetectedComponent]) -> DeployPlan {
@@ -1191,6 +1379,177 @@ impl App {
         Ok(())
     }
 
+    // -- virtual file system -----------------------------------------------
+
+    pub fn deployment_mode(&self) -> Result<DeploymentMode> {
+        Ok(
+            match self.store.get_setting(SETTING_DEPLOYMENT_MODE)?.as_deref() {
+                Some("virtual") => DeploymentMode::Virtual,
+                _ => DeploymentMode::Hardlink,
+            },
+        )
+    }
+
+    /// Switch how mods reach the game, carrying every enabled mod across.
+    ///
+    /// Everything is taken out under the old mode and put back under the new
+    /// one, through the ordinary reconciliation, so the game folder passes
+    /// through its untouched state in between and neither mode inherits the
+    /// other's files — least of all a `mods.txt` the virtual view would
+    /// otherwise be generated on top of.
+    pub fn set_deployment_mode(&mut self, mode: DeploymentMode) -> Result<ApplyReport> {
+        if mode == self.deployment_mode()? {
+            return Ok(ApplyReport::default());
+        }
+        let enabled = self.store.enabled_mod_ids()?;
+        let game = self.game()?.is_some();
+        if game && !enabled.is_empty() {
+            self.store.set_enabled(&enabled, false)?;
+            let cleared = self.apply();
+            // Whatever happened, the user's choices are not lost.
+            self.store.set_enabled(&enabled, true)?;
+            cleared?;
+        }
+        self.store
+            .set_setting(SETTING_DEPLOYMENT_MODE, mode.as_str())?;
+        if game {
+            self.apply()
+        } else {
+            Ok(ApplyReport::default())
+        }
+    }
+
+    /// Everything needed to start the game under the virtual file system.
+    ///
+    /// Brings the real part of the deployment up to date first, then writes
+    /// the mapping, so what the game sees is what the mod list says.
+    pub fn launch_options(&mut self, hook: PathBuf) -> Result<sbmm_vfs::launch::LaunchOptions> {
+        let game = self.game()?.ok_or(AppError::NoGame)?;
+        let executable = game
+            .executable_path()
+            .ok_or_else(|| AppError::BadLibraryRoot("the game executable was not found".into()))?;
+        self.apply()?;
+        let mapping = self.write_vfs_mapping()?;
+
+        // Started outside Steam, a Steam game restarts itself through Steam —
+        // and out from under the hook — unless it is told its app id.
+        let mut environment = Vec::new();
+        if game.source == sbmm_game::InstallSource::Steam {
+            for name in ["SteamAppId", "SteamGameId"] {
+                environment.push((name.to_string(), sbmm_game::STEAM_APP_ID.to_string()));
+            }
+        }
+
+        Ok(sbmm_vfs::launch::LaunchOptions {
+            working_dir: game.binaries_dir(),
+            executable,
+            arguments: Vec::new(),
+            environment,
+            hook,
+            mapping,
+            log: Some(self.vfs_dir().join("hook.log")),
+        })
+    }
+
+    /// Where files the game creates while running under the virtual file
+    /// system are kept — Mod Organizer 2's "overwrite" folder.
+    pub fn overwrite_dir(&self) -> PathBuf {
+        self.library_root().join("overwrite")
+    }
+
+    /// Where the mapping and the files the manager generates for the game
+    /// are written before a launch.
+    pub fn vfs_dir(&self) -> PathBuf {
+        self.library_root().join("vfs")
+    }
+
+    pub fn vfs_mapping_path(&self) -> PathBuf {
+        self.vfs_dir().join("mapping.json")
+    }
+
+    /// The game folder as the enabled mods would make it, described as layers
+    /// rather than written into the folder.
+    ///
+    /// Built from exactly the plans the hard-link backend deploys, stacked in
+    /// the same order the conflicts view reads — lowest priority first, so
+    /// the mod furthest down the load order wins — which is what makes the
+    /// two ways of running the game indistinguishable to it. UE4SS's
+    /// `mods.txt` is generated from the real one, so the user's own entries
+    /// carry over without the real file being rewritten.
+    pub fn vfs_mapping(&self) -> Result<sbmm_vfs::Mapping> {
+        let game = self.game()?.ok_or(AppError::NoGame)?;
+        let mut records = self.store.list_mods()?;
+        records.sort_by_key(|m| (m.priority, m.id));
+
+        let mut layers = Vec::new();
+        let mut registrations: BTreeMap<String, bool> = BTreeMap::new();
+        for record in &records {
+            let components = self.store.components_for(record.id)?;
+            let plan = self.plan_for(record, &components);
+            for name in &plan.ue4ss_registrations {
+                // If two mods share a folder name, enabled wins.
+                let entry = registrations.entry(name.clone()).or_insert(false);
+                *entry = *entry || record.enabled;
+            }
+            if !record.enabled {
+                continue;
+            }
+            layers.push(sbmm_vfs::Layer {
+                origin: sbmm_vfs::Origin::Mod(record.id),
+                name: record.name.clone(),
+                files: plan
+                    .files
+                    .iter()
+                    .map(|f| sbmm_vfs::LayerFile {
+                        target: f.target.clone(),
+                        source: plan.staging_root.join(&f.source),
+                    })
+                    // A planned path that is a folder, or has gone missing,
+                    // is not something the game could open anyway.
+                    .filter(|f| f.source.is_file())
+                    .collect(),
+            });
+        }
+
+        if registrations.values().any(|enabled| *enabled) {
+            let real = std::fs::read_to_string(game.root.join(sbmm_core::paths::UE4SS_MODS_TXT))
+                .unwrap_or_default();
+            let generated = self
+                .vfs_dir()
+                .join("generated")
+                .join(sbmm_core::paths::UE4SS_MODS_TXT);
+            if let Some(parent) = generated.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
+            }
+            std::fs::write(&generated, ue4ss::render_mods_txt(&real, &registrations))
+                .map_err(|e| AppError::io(&generated, e))?;
+            layers.push(sbmm_vfs::Layer {
+                origin: sbmm_vfs::Origin::Generated,
+                name: "UE4SS mods.txt".into(),
+                files: vec![sbmm_vfs::LayerFile {
+                    target: PathBuf::from(sbmm_core::paths::UE4SS_MODS_TXT),
+                    source: generated,
+                }],
+            });
+        }
+
+        Ok(sbmm_vfs::Mapping::new(
+            game.root,
+            self.overwrite_dir(),
+            layers,
+        ))
+    }
+
+    /// Write the mapping where the hook will look for it, and return its path.
+    pub fn write_vfs_mapping(&self) -> Result<PathBuf> {
+        let mapping = self.vfs_mapping()?;
+        std::fs::create_dir_all(self.overwrite_dir())
+            .map_err(|e| AppError::io(self.overwrite_dir(), e))?;
+        let path = self.vfs_mapping_path();
+        mapping.save(&path)?;
+        Ok(path)
+    }
+
     // -- update checks -----------------------------------------------------
 
     /// Every installed mod that came from Nexus, so its page can be queried.
@@ -1333,13 +1692,44 @@ fn archive_display_name(archive: &Path) -> String {
     trimmed.trim().to_string()
 }
 
-/// Paths cross to the UI as strings, so lossy conversion happens in one place.
 /// One staging folder per upscaler component, so installing a newer version
 /// replaces the previous swap instead of stacking on top of it.
 fn upscaler_staging_id(component: sbmm_upscaler::Component) -> String {
     format!("upscaler-{}", component.file_name().replace(".dll", ""))
 }
 
+/// Whether a file has to be in the game folder for real even under the
+/// virtual file system: anything in the binaries folder except UE4SS's mods,
+/// which UE4SS reads through the hooked file API, and every DLL swap the
+/// manager makes, which the graphics driver loads on its own terms.
+fn must_be_physical(source: &str, target: &Path) -> bool {
+    if matches!(source, "upscaler" | "framegen") {
+        return true;
+    }
+    let target = comparable_path(&target.to_string_lossy());
+    let inside = |dir: &str| target.starts_with(&format!("{}/", comparable_path(dir)));
+    inside(sbmm_core::paths::BINARIES_WIN64) && !inside(sbmm_core::paths::UE4SS_MODS)
+}
+
+/// The staging folder of the RTX 20/30 frame generation package.
+const FRAMEGEN_STAGING: &str = "framegen-dlssg-sm86";
+
+/// A game-relative path in a form two spellings of it agree on: Windows paths
+/// ignore case, and the deployment record may hold either separator.
+fn comparable_path(path: &str) -> String {
+    path.replace('\\', "/").to_ascii_lowercase()
+}
+
+/// Rename where possible, copy across volumes.
+fn move_or_copy(from: &Path, to: &Path) -> Result<()> {
+    if std::fs::rename(from, to).is_ok() {
+        return Ok(());
+    }
+    std::fs::copy(from, to).map_err(|e| AppError::io(to, e))?;
+    Ok(())
+}
+
+/// Paths cross to the UI as strings, so lossy conversion happens in one place.
 fn path_string(path: impl AsRef<Path>) -> String {
     path.as_ref().to_string_lossy().into_owned()
 }

@@ -7,7 +7,9 @@
 mod collections;
 mod discord;
 mod downloads;
+mod framegen;
 mod upscaler;
+mod vfs;
 
 use std::sync::Mutex;
 
@@ -682,6 +684,11 @@ pub fn run() {
             upscaler::upscaler_status,
             upscaler::update_upscaler,
             upscaler::restore_upscaler,
+            framegen::framegen_status,
+            framegen::install_framegen,
+            framegen::remove_framegen,
+            vfs::set_deployment_mode,
+            vfs::launch_game,
         ])
         .run(tauri::generate_context!())
         .expect("failed to start SB Mod Manager");
