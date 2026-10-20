@@ -8,6 +8,7 @@ import { formatBytes } from "../lib/format";
 import { ipc, type Folders, type UpdateChannel, type UpdateInfo } from "../lib/ipc";
 import { useApp } from "../store/useApp";
 import { Button, Checkbox, Section } from "./ui";
+import { DeploymentSection } from "./DeploymentSection";
 import { FramegenSection } from "./FramegenSection";
 import { UpscalerSection } from "./UpscalerSection";
 
@@ -105,6 +106,8 @@ export function SettingsView() {
             <span className="text-[13px]">Apply automatically after every change</span>
           </label>
         </Section>
+
+        <DeploymentSection />
 
         <NexusSection />
 

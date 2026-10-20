@@ -78,7 +78,12 @@ export interface AppSnapshot {
   updateChannel: UpdateChannel;
   /** Whether the manager publishes a Discord presence. */
   discordRpc: boolean;
+  deploymentMode: DeploymentMode;
 }
+
+/** How enabled mods reach the game: hard links in the folder, or the virtual
+    file system when the game is started from the manager. */
+export type DeploymentMode = "hardlink" | "virtual";
 
 export type UpdateChannel = "stable" | "nightly";
 
@@ -313,6 +318,8 @@ export interface Folders {
   mods: string;
   backups: string;
   downloads: string;
+  /** What the game created while running under the virtual file system. */
+  overwrite: string;
   game: string | null;
   /** False when the library is on a different drive from the game, which
       means mods are copied instead of hard-linked and stored twice. */
@@ -387,6 +394,9 @@ export const ipc = {
   setUpdateChannel: (channel: UpdateChannel) =>
     invoke<void>("set_update_channel", { channel }),
   setDiscordRpc: (enabled: boolean) => invoke<void>("set_discord_rpc", { enabled }),
+  setDeploymentMode: (mode: DeploymentMode) =>
+    invoke<ApplyReport>("set_deployment_mode", { mode }),
+  launchGame: () => invoke<string>("launch_game"),
 };
 
 /** The game's Nexus domain, mirroring `NEXUS_DOMAIN` in `sbmm-game`. */

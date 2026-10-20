@@ -30,6 +30,16 @@ wrong is the usual reason a mod "doesn't work".
   UE4SS resolves those itself.
 - **Enable and disable one mod, a group, or everything**, with the game folder
   reconciled in a single pass.
+- **A virtual file system, like Mod Organizer 2's** *(experimental)*. Instead
+  of linking mods into the game folder, the manager can leave the folder
+  untouched and start the game under a hook that shows it the mods: every
+  enabled mod is a layer over the real folder in load order, the one furthest
+  down winning each file, and anything the game creates goes to an
+  *overwrite* folder rather than the game. Proxy DLLs, UE4SS itself and the
+  DLSS/frame generation swaps are still linked in, because Windows loads them
+  before any hook exists — the job Root Builder does for Mod Organizer.
+  Switching between the two modes carries every enabled mod across, and the
+  game sees byte-for-byte the same folder either way.
 - **Installs a batch in one go.** Drop or pick any number of archives; the ones
   it recognises install themselves and the rest queue up to be asked about, so
   nothing in the batch is lost.
@@ -110,9 +120,17 @@ worth knowing before the first real run:
   names are offered. Edits to `dlssg_sm86.ini` are replaced when the package
   is reinstalled or updated.
 
+- **The virtual file system is new.** Its rules are tested against real
+  deployments, and the hook and launcher are tested end to end under Wine
+  (`scripts/test-vfs-wine.sh`), but not yet against the game on Windows. The
+  hook redirects the Win32 file functions through import tables; code that
+  reaches the file system some other way — directly through `ntdll`, say —
+  sees the real folder. A Steam install started this way is told its app id
+  so it does not relaunch itself through Steam; an Epic install may need the
+  Epic launcher running.
+
 Not built:
 
-- ProjFS virtual filesystem as an alternative to hard-linking
 - Profiles (the schema already stores state per profile)
 
 ## Building
@@ -201,11 +219,14 @@ runs on any machine — `src-tauri` is only command wrappers.
 | `sbmm-store` | SQLite persistence: mods, groups, per-profile state, deployment record |
 | `sbmm-nexus` | Nexus REST/GraphQL client, `nxm://` parsing, rate limits, the download queue |
 | `sbmm-upscaler` | Finding DLSS/FSR DLLs, reading their PE version, GPU capability rules, vendor release catalogue; the RTX 20/30 frame generation package (`framegen`): compatibility check, release verification, proxy layout |
+| `sbmm-vfs` | The virtual file system: the layered view of the game folder, Mod Organizer's redirect and overwrite rules, the mapping file, and the launcher that starts the game with the hook |
+| `sbmm-vfs-hook` | The DLL loaded into the game: rewrites import tables so file calls are answered from the mapping |
 | `sbmm-app` | The application service the UI drives |
 | `src-tauri` | Tauri commands, window, bundling |
 
 Mods are kept unpacked in the library folder and hard-linked into the game when
-enabled. Links cost no extra disk space and are indistinguishable from real
+enabled — or, with the virtual file system, left there and shown to the game
+by the hook. Links cost no extra disk space and are indistinguishable from real
 files to the game, and the game folder holds nothing while a mod is disabled.
 The library defaults to the app data directory and can be moved anywhere; only
 `sbmm.db` stays behind, because it has to be found before any setting can be
@@ -213,7 +234,9 @@ read.
 
 `src-tauri` is deliberately its own Cargo workspace: it needs WebView2/WebKit
 system libraries, and keeping it separate lets `cargo test --workspace` run the
-domain crates on any platform.
+domain crates on any platform. Its build script builds `sbmm-vfs-hook` with a
+nested cargo and embeds the DLL, so the app always ships the hook from the
+same commit; set `SBMM_SKIP_VFS_HOOK=1` to skip that during development.
 
 ### Where mods are installed
 
@@ -235,6 +258,10 @@ All paths are relative to the folder containing `SB/`.
 
 ```sh
 cargo test --workspace          # domain crates
+
+# The virtual file system end to end under Wine: real launcher, real hook, a
+# stand-in for the game (needs wine64, mingw-w64 and the windows-gnu target)
+scripts/test-vfs-wine.sh
 
 # Check a real dlssg_for_sm86 release against the package rules (unpack it first)
 SBMM_SM86_PACKAGE=/path/to/unpacked cargo test -p sbmm-upscaler --test framegen_release

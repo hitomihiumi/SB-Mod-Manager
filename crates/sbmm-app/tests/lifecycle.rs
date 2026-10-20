@@ -999,6 +999,86 @@ fn the_virtual_view_matches_a_real_deployment_exactly() {
     );
 }
 
+/// Switching to the virtual file system takes the mods out of the game folder —
+/// all but the files the Windows loader needs before the hook exists — and the
+/// game still sees exactly what it saw before. Switching back restores the
+/// folder as hard links made it.
+#[test]
+fn switching_to_the_virtual_file_system_and_back_changes_nothing_the_game_sees() {
+    use sbmm_app::dto::DeploymentMode;
+
+    let mut fx = Fixture::new();
+    let outfit = fx.install_folder("Outfit", &[("Outfit_P.pak", "outfit")]);
+    let skip = fx.install_folder(
+        "Cutscene Skip",
+        &[("CutsceneSkip/scripts/main.lua", "-- lua")],
+    );
+    let reshade = fx.install_folder("ReShade", &[("dxgi.dll", "MZ reshade")]);
+    fx.app.set_enabled(&[outfit, skip, reshade], true).unwrap();
+    fx.app.apply().unwrap();
+    let linked = fx.game_snapshot();
+
+    fx.app.set_deployment_mode(DeploymentMode::Virtual).unwrap();
+    let win64 = fx.game.join("SB/Binaries/Win64");
+    assert!(
+        win64.join("dxgi.dll").is_file(),
+        "a proxy DLL is loaded before any hook exists, so it stays real"
+    );
+    assert!(!fx.game.join("SB/Content/Paks/~mods").exists());
+    assert!(
+        !win64.join("ue4ss").exists(),
+        "no mods.txt, no Lua mod folder"
+    );
+
+    let snapshot = fx.app.snapshot().unwrap();
+    assert_eq!(snapshot.deployment_mode, DeploymentMode::Virtual);
+    assert!(snapshot.pending.is_empty(), "{:?}", snapshot.pending);
+    assert!(snapshot.mods.iter().all(|m| m.deployed));
+
+    let view = virtual_view(&fx.game, fx.app.vfs_mapping().unwrap());
+    assert_eq!(view, linked);
+
+    // Changes keep working while virtual: the disabled mod drops out of the
+    // view without anything being written to the game.
+    fx.app.set_enabled(&[outfit], false).unwrap();
+    assert!(fx.app.snapshot().unwrap().pending.is_empty());
+    let view = virtual_view(&fx.game, fx.app.vfs_mapping().unwrap());
+    assert!(!view.keys().any(|k| k.contains("Outfit")));
+    fx.app.set_enabled(&[outfit], true).unwrap();
+
+    fx.app
+        .set_deployment_mode(DeploymentMode::Hardlink)
+        .unwrap();
+    assert_eq!(fx.game_snapshot(), linked);
+}
+
+#[test]
+fn launching_under_the_virtual_file_system_writes_a_current_mapping() {
+    use sbmm_app::dto::DeploymentMode;
+
+    let mut fx = Fixture::new();
+    let outfit = fx.install_folder("Outfit", &[("Outfit_P.pak", "outfit")]);
+    fx.app.set_deployment_mode(DeploymentMode::Virtual).unwrap();
+    fx.app.set_enabled(&[outfit], true).unwrap();
+
+    let options = fx.app.launch_options(PathBuf::from("hook.dll")).unwrap();
+    assert_eq!(
+        options.executable,
+        fx.game.join("SB/Binaries/Win64/SB-Win64-Shipping.exe")
+    );
+    assert_eq!(options.working_dir, fx.game.join("SB/Binaries/Win64"));
+    assert!(
+        options.environment.is_empty(),
+        "a hand-picked folder is not known to be a Steam install"
+    );
+
+    let vfs = sbmm_vfs::Mapping::load(&options.mapping)
+        .unwrap()
+        .into_vfs();
+    let pak = sbmm_vfs::VPath::from_relative("SB/Content/Paks/~mods/0010_Outfit_P.pak").unwrap();
+    assert!(vfs.overlay().file(&pak).is_some());
+}
+
 /// Files the game writes under the virtual file system go to overwrite and are
 /// there again next time, without ever touching the game folder.
 #[test]

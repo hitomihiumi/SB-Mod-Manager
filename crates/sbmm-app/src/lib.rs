@@ -104,6 +104,7 @@ const SETTING_LIBRARY_ROOT: &str = "libraryRoot";
 const SETTING_NEXUS_ACCOUNT: &str = "nexusAccount";
 const SETTING_UPDATE_CHANNEL: &str = "updateChannel";
 const SETTING_DISCORD_RPC: &str = "discordRpc";
+const SETTING_DEPLOYMENT_MODE: &str = "deploymentMode";
 
 pub struct App {
     store: Store,
@@ -253,6 +254,7 @@ impl App {
             backups: path_string(self.backup_dir()),
             library_bytes: library::size_of(&library) as i64,
             downloads: path_string(self.downloads_dir()),
+            overwrite: path_string(self.overwrite_dir()),
             library: path_string(library),
         })
     }
@@ -751,7 +753,7 @@ impl App {
         let ctx = self.deploy_context()?;
         let record = self.record(id)?;
         let components = self.store.components_for(id)?;
-        let plan = self.plan_for(&record, &components);
+        let plan = self.deploy_plan_for(&record, &components)?;
         self.deploy_mod(&ctx, id, &plan)?;
 
         Ok(id)
@@ -897,7 +899,7 @@ impl App {
         let ctx = self.deploy_context()?;
         let record = self.record(id)?;
         let components = self.store.components_for(id)?;
-        let plan = self.plan_for(&record, &components);
+        let plan = self.deploy_plan_for(&record, &components)?;
         self.deploy_mod(&ctx, id, &plan)?;
 
         Ok(id)
@@ -1008,9 +1010,10 @@ impl App {
         let mut mods = Vec::with_capacity(records.len());
         let mut pending = Vec::new();
 
+        let virtual_mode = self.deployment_mode()? == DeploymentMode::Virtual;
         for record in &records {
             let components = self.store.components_for(record.id)?;
-            let planned = self.plan_for(record, &components);
+            let planned = self.deploy_plan_for(record, &components)?;
             let recorded = self.store.deployed_files_for(record.id)?;
             let deployed = !recorded.is_empty();
 
@@ -1036,7 +1039,9 @@ impl App {
                 component_types,
                 group_id: record.group_id,
                 enabled: record.enabled,
-                deployed,
+                // Under the virtual file system an enabled mod is in effect
+                // whether or not any of its files had to be linked in.
+                deployed: deployed || (virtual_mode && record.enabled),
                 priority: record.priority,
                 size_bytes: record.size_bytes,
                 source: record.source.clone(),
@@ -1070,6 +1075,7 @@ impl App {
             nexus: self.nexus_account()?,
             update_channel: self.update_channel()?,
             discord_rpc: self.discord_rpc()?,
+            deployment_mode: self.deployment_mode()?,
         })
     }
 
@@ -1167,7 +1173,7 @@ impl App {
 
         for record in self.store.list_mods()? {
             let components = self.store.components_for(record.id)?;
-            let planned = self.plan_for(&record, &components);
+            let planned = self.deploy_plan_for(&record, &components)?;
             let recorded = self.store.deployed_files_for(record.id)?;
             let deployed = !recorded.is_empty();
 
@@ -1196,8 +1202,31 @@ impl App {
             }
         }
 
-        self.sync_ue4ss_registrations(&ctx)?;
+        // Under the virtual file system `mods.txt` is generated into the
+        // view at launch; writing the real one would defeat the point.
+        if self.deployment_mode()? == DeploymentMode::Hardlink {
+            self.sync_ue4ss_registrations(&ctx)?;
+        }
         Ok(report)
+    }
+
+    /// The part of a mod's plan that goes into the game folder for real.
+    ///
+    /// Everything, with hard links. Under the virtual file system only what
+    /// the Windows loader reaches before the hook exists: proxy DLLs and the
+    /// rest of the binaries folder, UE4SS itself, and the DLL swaps the
+    /// manager makes — the same files Mod Organizer 2 needs Root Builder for.
+    fn deploy_plan_for(
+        &self,
+        record: &ModRecord,
+        components: &[DetectedComponent],
+    ) -> Result<DeployPlan> {
+        let mut plan = self.plan_for(record, components);
+        if self.deployment_mode()? == DeploymentMode::Virtual {
+            plan.files
+                .retain(|file| must_be_physical(&record.source, &file.target));
+        }
+        Ok(plan)
     }
 
     fn plan_for(&self, record: &ModRecord, components: &[DetectedComponent]) -> DeployPlan {
@@ -1351,6 +1380,76 @@ impl App {
     }
 
     // -- virtual file system -----------------------------------------------
+
+    pub fn deployment_mode(&self) -> Result<DeploymentMode> {
+        Ok(
+            match self.store.get_setting(SETTING_DEPLOYMENT_MODE)?.as_deref() {
+                Some("virtual") => DeploymentMode::Virtual,
+                _ => DeploymentMode::Hardlink,
+            },
+        )
+    }
+
+    /// Switch how mods reach the game, carrying every enabled mod across.
+    ///
+    /// Everything is taken out under the old mode and put back under the new
+    /// one, through the ordinary reconciliation, so the game folder passes
+    /// through its untouched state in between and neither mode inherits the
+    /// other's files — least of all a `mods.txt` the virtual view would
+    /// otherwise be generated on top of.
+    pub fn set_deployment_mode(&mut self, mode: DeploymentMode) -> Result<ApplyReport> {
+        if mode == self.deployment_mode()? {
+            return Ok(ApplyReport::default());
+        }
+        let enabled = self.store.enabled_mod_ids()?;
+        let game = self.game()?.is_some();
+        if game && !enabled.is_empty() {
+            self.store.set_enabled(&enabled, false)?;
+            let cleared = self.apply();
+            // Whatever happened, the user's choices are not lost.
+            self.store.set_enabled(&enabled, true)?;
+            cleared?;
+        }
+        self.store
+            .set_setting(SETTING_DEPLOYMENT_MODE, mode.as_str())?;
+        if game {
+            self.apply()
+        } else {
+            Ok(ApplyReport::default())
+        }
+    }
+
+    /// Everything needed to start the game under the virtual file system.
+    ///
+    /// Brings the real part of the deployment up to date first, then writes
+    /// the mapping, so what the game sees is what the mod list says.
+    pub fn launch_options(&mut self, hook: PathBuf) -> Result<sbmm_vfs::launch::LaunchOptions> {
+        let game = self.game()?.ok_or(AppError::NoGame)?;
+        let executable = game
+            .executable_path()
+            .ok_or_else(|| AppError::BadLibraryRoot("the game executable was not found".into()))?;
+        self.apply()?;
+        let mapping = self.write_vfs_mapping()?;
+
+        // Started outside Steam, a Steam game restarts itself through Steam —
+        // and out from under the hook — unless it is told its app id.
+        let mut environment = Vec::new();
+        if game.source == sbmm_game::InstallSource::Steam {
+            for name in ["SteamAppId", "SteamGameId"] {
+                environment.push((name.to_string(), sbmm_game::STEAM_APP_ID.to_string()));
+            }
+        }
+
+        Ok(sbmm_vfs::launch::LaunchOptions {
+            working_dir: game.binaries_dir(),
+            executable,
+            arguments: Vec::new(),
+            environment,
+            hook,
+            mapping,
+            log: Some(self.vfs_dir().join("hook.log")),
+        })
+    }
 
     /// Where files the game creates while running under the virtual file
     /// system are kept — Mod Organizer 2's "overwrite" folder.
@@ -1597,6 +1696,19 @@ fn archive_display_name(archive: &Path) -> String {
 /// replaces the previous swap instead of stacking on top of it.
 fn upscaler_staging_id(component: sbmm_upscaler::Component) -> String {
     format!("upscaler-{}", component.file_name().replace(".dll", ""))
+}
+
+/// Whether a file has to be in the game folder for real even under the
+/// virtual file system: anything in the binaries folder except UE4SS's mods,
+/// which UE4SS reads through the hooked file API, and every DLL swap the
+/// manager makes, which the graphics driver loads on its own terms.
+fn must_be_physical(source: &str, target: &Path) -> bool {
+    if matches!(source, "upscaler" | "framegen") {
+        return true;
+    }
+    let target = comparable_path(&target.to_string_lossy());
+    let inside = |dir: &str| target.starts_with(&format!("{}/", comparable_path(dir)));
+    inside(sbmm_core::paths::BINARIES_WIN64) && !inside(sbmm_core::paths::UE4SS_MODS)
 }
 
 /// The staging folder of the RTX 20/30 frame generation package.

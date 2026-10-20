@@ -22,6 +22,31 @@ pub struct AppSnapshot {
     pub update_channel: String,
     /// Whether the manager publishes a Discord presence.
     pub discord_rpc: bool,
+    /// How enabled mods reach the game.
+    pub deployment_mode: DeploymentMode,
+}
+
+/// How enabled mods reach the game.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DeploymentMode {
+    /// Hard-linked into the game folder, which then really contains them.
+    #[default]
+    Hardlink,
+    /// Kept out of the game folder and shown to the game through the virtual
+    /// file system when it is started from the manager, as Mod Organizer 2
+    /// does. Files the Windows loader reaches before the hook is in place are
+    /// still linked in.
+    Virtual,
+}
+
+impl DeploymentMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DeploymentMode::Hardlink => "hardlink",
+            DeploymentMode::Virtual => "virtual",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -161,6 +186,8 @@ pub struct FoldersView {
     pub mods: String,
     pub backups: String,
     pub downloads: String,
+    /// What the game created while running under the virtual file system.
+    pub overwrite: String,
     pub game: Option<String>,
     /// False when the library is on a different drive from the game, which
     /// means deployment falls back to copying and every enabled mod is stored
