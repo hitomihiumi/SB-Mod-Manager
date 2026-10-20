@@ -1,0 +1,26 @@
+[package]
+name = "sbmm-vfs-hook"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# Loaded into the game process by the launcher in `sbmm-vfs`. Built as a DLL;
+# on other platforms it compiles to an empty library so the workspace still
+# builds and tests everywhere.
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+sbmm-vfs = { workspace = true }
+
+[target.'cfg(windows)'.dependencies.windows-sys]
+version = "0.60.2"
+features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Threading",
+]

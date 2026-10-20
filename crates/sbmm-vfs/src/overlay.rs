@@ -190,6 +190,21 @@ impl Overlay {
         }
     }
 
+    /// Take a file out of the view, for one the game moved or deleted.
+    ///
+    /// Whatever it shadowed stays hidden until the next launch rebuilds the
+    /// view: the game asked for the path to be gone, and bringing a lower
+    /// mod's copy back mid-session would be a surprise.
+    pub fn remove(&mut self, path: &VPath) -> Option<VirtualFile> {
+        let removed = self.files.remove(path)?;
+        if let Some(parent) = path.parent() {
+            if let Some(children) = self.dirs.get_mut(&parent) {
+                children.remove(&key(path.file_name()));
+            }
+        }
+        Some(removed)
+    }
+
     /// Record every directory between the root and `path`, so each one lists
     /// the next.
     fn link_parents(&mut self, path: &VPath, names: &[String]) {
@@ -424,6 +439,14 @@ mod tests {
         assert!(overlay.is_dir(&vpath("sb/saved/logs")));
         assert!(overlay.list(&vpath("SB/Saved/Logs"), []).is_empty());
         assert_eq!(overlay.list(&vpath("SB/Saved"), [])[0].name, "Logs");
+    }
+
+    #[test]
+    fn a_removed_file_is_gone_from_its_folder() {
+        let mut overlay = Overlay::build([layer(Origin::Mod(1), &[("SB/a.txt", "/1")])]);
+        assert!(overlay.remove(&vpath("sb/A.TXT")).is_some());
+        assert!(overlay.file(&vpath("SB/a.txt")).is_none());
+        assert!(overlay.list(&vpath("SB"), []).is_empty());
     }
 
     #[test]

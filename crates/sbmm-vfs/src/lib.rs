@@ -18,6 +18,7 @@
 //! Everything here is platform-free and tested anywhere; only the hook that
 //! intercepts the game's calls is Windows code.
 
+pub mod launch;
 pub mod mapping;
 pub mod overlay;
 pub mod path;
@@ -136,6 +137,11 @@ impl Vfs {
                 source: real,
             },
         );
+    }
+
+    /// Forget a file the game moved away or deleted.
+    pub fn removed(&mut self, path: &VPath) {
+        self.overlay.remove(path);
     }
 
     /// Record a directory the game just created in the overwrite folder.

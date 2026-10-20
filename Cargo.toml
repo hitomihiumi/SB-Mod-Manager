@@ -11,6 +11,7 @@ members = [
     "crates/sbmm-store",
     "crates/sbmm-upscaler",
     "crates/sbmm-vfs",
+    "crates/sbmm-vfs-hook",
 ]
 
 [workspace.package]
