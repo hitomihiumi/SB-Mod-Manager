@@ -3626,7 +3626,7 @@ dependencies = [
 
 [[package]]
 name = "sbmm"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "discord-rich-presence",
  "sbmm-app",
@@ -3746,6 +3746,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "sha2",
  "thiserror 2.0.20",
  "windows 0.62.2",
 ]

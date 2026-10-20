@@ -24,7 +24,18 @@ pub struct InstalledFile {
 }
 
 /// Directories that never hold a DLL the game loads, and can be large.
-const SKIP: &[&str] = &["~mods", "logicmods", "saved", "movies", "content"];
+///
+/// `dlssg_sm86` is the RTX 20/30 frame generation package's own folder: its
+/// `nvngx_dlssg.dll` and `nvngx_dlss.dll` are loaded by the proxy, not by the
+/// game, and swapping them for NVIDIA's would break the package.
+const SKIP: &[&str] = &[
+    "~mods",
+    "logicmods",
+    "saved",
+    "movies",
+    "content",
+    "dlssg_sm86",
+];
 
 /// Every upscaler DLL under `game_root`.
 ///
@@ -34,8 +45,32 @@ const SKIP: &[&str] = &["~mods", "logicmods", "saved", "movies", "content"];
 /// depending on which path the loader reaches first.
 pub fn scan(game_root: &Path) -> Vec<InstalledFile> {
     let mut found = Vec::new();
-    walk(game_root, game_root, 0, &mut found);
+    walk(game_root, game_root, 0, &mut |relative, path, name| {
+        let Some(component) = Component::from_file_name(name) else {
+            return;
+        };
+        found.push(InstalledFile {
+            component,
+            path: relative.to_path_buf(),
+            version: pe::file_version_opt(path),
+        });
+    });
     found.sort_by(|a, b| (a.component, &a.path).cmp(&(b.component, &b.path)));
+    found
+}
+
+/// Every file under `game_root` called one of `names`, relative to the root.
+///
+/// Matching ignores case, as Windows does. Walks the same folders [`scan`]
+/// does, for the same reasons.
+pub fn find_named(game_root: &Path, names: &[&str]) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    walk(game_root, game_root, 0, &mut |relative, _, name| {
+        if names.iter().any(|n| n.eq_ignore_ascii_case(name)) {
+            found.push(relative.to_path_buf());
+        }
+    });
+    found.sort();
     found
 }
 
@@ -43,7 +78,7 @@ pub fn scan(game_root: &Path) -> Vec<InstalledFile> {
 /// a game folder should not hang the app.
 const MAX_DEPTH: usize = 12;
 
-fn walk(root: &Path, dir: &Path, depth: usize, found: &mut Vec<InstalledFile>) {
+fn walk(root: &Path, dir: &Path, depth: usize, visit: &mut dyn FnMut(&Path, &Path, &str)) {
     if depth > MAX_DEPTH {
         return;
     }
@@ -64,7 +99,7 @@ fn walk(root: &Path, dir: &Path, depth: usize, found: &mut Vec<InstalledFile>) {
             if SKIP.contains(&name.as_str()) {
                 continue;
             }
-            walk(root, &path, depth + 1, found);
+            walk(root, &path, depth + 1, visit);
             continue;
         }
         if !kind.is_file() {
@@ -72,14 +107,8 @@ fn walk(root: &Path, dir: &Path, depth: usize, found: &mut Vec<InstalledFile>) {
         }
 
         let name = entry.file_name().to_string_lossy().into_owned();
-        let Some(component) = Component::from_file_name(&name) else {
-            continue;
-        };
-        found.push(InstalledFile {
-            component,
-            path: path.strip_prefix(root).unwrap_or(&path).to_path_buf(),
-            version: pe::file_version_opt(&path),
-        });
+        let relative = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
+        visit(&relative, &path, &name);
     }
 }
 
@@ -162,6 +191,37 @@ mod tests {
         touch(&root.join("SB/Content/nvngx_dlss.dll"));
 
         assert!(scan(root).is_empty());
+    }
+
+    #[test]
+    fn the_frame_generation_packages_own_runtime_is_not_the_games() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        touch(&root.join("SB/Binaries/Win64/nvngx_dlssg.dll"));
+        touch(&root.join("SB/Binaries/Win64/dlssg_sm86/runtime/nvngx_dlssg.dll"));
+        touch(&root.join("SB/Binaries/Win64/dlssg_sm86/sr/nvngx_dlss.dll"));
+
+        let found = scan(root);
+        assert_eq!(found.len(), 1);
+        assert_eq!(
+            found[0].path,
+            PathBuf::from("SB/Binaries/Win64/nvngx_dlssg.dll")
+        );
+    }
+
+    #[test]
+    fn named_files_are_found_whatever_the_case() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        touch(&root.join("Engine/Plugins/Streamline/Binaries/Win64/SL.DLSS_G.DLL"));
+        touch(&root.join("SB/Binaries/Win64/sl.interposer.dll"));
+
+        assert_eq!(
+            find_named(root, &["sl.dlss_g.dll"]),
+            vec![PathBuf::from(
+                "Engine/Plugins/Streamline/Binaries/Win64/SL.DLSS_G.DLL"
+            )]
+        );
     }
 
     #[test]

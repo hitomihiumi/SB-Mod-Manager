@@ -20,6 +20,7 @@
 //! machine.
 
 pub mod catalog;
+pub mod framegen;
 pub mod gpu;
 pub mod pe;
 pub mod scan;

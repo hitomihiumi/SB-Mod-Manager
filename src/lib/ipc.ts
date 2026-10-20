@@ -261,6 +261,53 @@ export interface UpscalerStatus {
   entries: UpscalerEntry[];
 }
 
+/** Proxy DLL names the RTX 20/30 frame generation package can load under. */
+export type FramegenProxy = "version" | "winmm" | "dbghelp" | "dinput8" | "dxgi" | "d3d12";
+
+export type FramegenCheckState = "pass" | "warn" | "fail" | "info";
+
+export interface FramegenCheck {
+  id: string;
+  state: FramegenCheckState;
+  title: string;
+  detail: string;
+}
+
+export type FramegenVerdict =
+  | "compatible"
+  | "compatibleWithWarnings"
+  | "notNeeded"
+  | "incompatible";
+
+export interface FramegenAssessment {
+  verdict: FramegenVerdict;
+  checks: FramegenCheck[];
+}
+
+export interface FramegenInstall {
+  modId: number;
+  version: string;
+  proxy: FramegenProxy;
+  enabled: boolean;
+}
+
+export interface FramegenStatus {
+  adapter: Adapter | null;
+  /** Null until a game folder has been chosen. */
+  assessment: FramegenAssessment | null;
+  proxy: FramegenProxy;
+  installed: FramegenInstall | null;
+  /** Null when GitHub could not be asked. */
+  latestVersion: string | null;
+  projectUrl: string;
+}
+
+export interface FramegenProgress {
+  stage: "download" | "verify";
+  done: number;
+  total: number | null;
+}
+
 export interface Folders {
   library: string;
   mods: string;
@@ -329,6 +376,11 @@ export const ipc = {
     invoke<string>("update_upscaler", { component }),
   restoreUpscaler: (component: UpscalerComponent) =>
     invoke<boolean>("restore_upscaler", { component }),
+
+  framegenStatus: (proxy?: FramegenProxy) =>
+    invoke<FramegenStatus>("framegen_status", { proxy: proxy ?? null }),
+  installFramegen: (proxy: FramegenProxy) => invoke<string>("install_framegen", { proxy }),
+  removeFramegen: () => invoke<boolean>("remove_framegen"),
 
   checkForUpdate: () => invoke<UpdateInfo>("check_for_update"),
   installUpdate: () => invoke<void>("install_update"),

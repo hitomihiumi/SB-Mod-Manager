@@ -188,3 +188,15 @@ pub struct LibraryMoveReport {
     /// The result of putting previously enabled mods back after the move.
     pub redeployed: ApplyReport,
 }
+
+/// The RTX 20/30 frame generation package, as installed by the manager.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FramegenInstall {
+    pub mod_id: i64,
+    pub version: String,
+    /// The name the proxy DLL went in under.
+    pub proxy: sbmm_upscaler::framegen::Proxy,
+    /// False when the user switched it off in the mod list.
+    pub enabled: bool,
+}

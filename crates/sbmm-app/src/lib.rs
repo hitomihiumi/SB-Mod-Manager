@@ -754,6 +754,162 @@ impl App {
         Ok(id)
     }
 
+    // -- frame generation on RTX 20/30 (experimental) ----------------------
+
+    /// What the game folder looks like to the frame generation check, or
+    /// nothing when no game has been chosen.
+    pub fn framegen_facts(&self) -> Result<Option<sbmm_upscaler::framegen::GameFacts>> {
+        use sbmm_upscaler::framegen::Owner;
+
+        let Some(game) = self.game()? else {
+            return Ok(None);
+        };
+        let records = self.store.list_mods()?;
+        let owners: BTreeMap<String, Owner> = self
+            .store
+            .deployed_files()?
+            .into_iter()
+            .filter_map(|(mod_id, target, _, _)| {
+                let record = records.iter().find(|m| m.id == mod_id)?;
+                let owner = if record.staging_folder == FRAMEGEN_STAGING {
+                    Owner::Ours
+                } else {
+                    Owner::Mod(record.name.clone())
+                };
+                Some((comparable_path(&target), owner))
+            })
+            .collect();
+
+        Ok(Some(sbmm_upscaler::framegen::gather(
+            &game.root,
+            Path::new(sbmm_core::paths::BINARIES_WIN64),
+            game.executable.clone(),
+            |relative| {
+                owners
+                    .get(&comparable_path(&relative.to_string_lossy()))
+                    .cloned()
+                    .unwrap_or(Owner::Unmanaged)
+            },
+        )))
+    }
+
+    /// The frame generation package the manager installed, if any.
+    pub fn framegen_installed(&self) -> Result<Option<FramegenInstall>> {
+        use sbmm_upscaler::framegen::Proxy;
+
+        let Some(record) = self
+            .store
+            .list_mods()?
+            .into_iter()
+            .find(|m| m.staging_folder == FRAMEGEN_STAGING)
+        else {
+            return Ok(None);
+        };
+        // Which proxy is in use is read back from the files, so there is one
+        // record of it rather than a setting that could disagree.
+        let proxy = self
+            .store
+            .components_for(record.id)?
+            .iter()
+            .flat_map(|c| c.files.iter())
+            .find_map(|f| {
+                let parent = comparable_path(&f.target.parent()?.to_string_lossy());
+                (parent == comparable_path(sbmm_core::paths::BINARIES_WIN64))
+                    .then(|| Proxy::from_file_name(&f.target.file_name()?.to_string_lossy()))
+                    .flatten()
+            })
+            .unwrap_or_default();
+        Ok(Some(FramegenInstall {
+            mod_id: record.id,
+            version: record.version.unwrap_or_default(),
+            proxy,
+            enabled: record.enabled,
+        }))
+    }
+
+    /// Lay an unpacked, inspected `dlssg_for_sm86` release beside the game
+    /// executable under `proxy`.
+    ///
+    /// Registered as an ordinary mod, like the upscaler swaps, so whatever it
+    /// displaces is backed up and removing it restores the folder exactly.
+    /// The package's files are moved into staging rather than copied — the
+    /// release is over 200 MB unpacked and the caller discards it afterwards.
+    pub fn install_framegen(
+        &mut self,
+        package: &sbmm_upscaler::framegen::Package,
+        proxy: sbmm_upscaler::framegen::Proxy,
+        version: &str,
+    ) -> Result<i64> {
+        if let Some(previous) = self.framegen_installed()? {
+            self.uninstall(previous.mod_id)?;
+        }
+
+        let staging_root = self.staging_path(FRAMEGEN_STAGING);
+        let binaries = Path::new(sbmm_core::paths::BINARIES_WIN64);
+        let mut component_files = Vec::new();
+        for (source, relative) in sbmm_upscaler::framegen::files_to_deploy(package, proxy) {
+            let target = binaries.join(&relative);
+            let staged = staging_root.join(&target);
+            if let Some(parent) = staged.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
+            }
+            move_or_copy(&package.root.join(&source), &staged)?;
+            component_files.push(sbmm_core::model::ComponentFile {
+                source: target.clone(),
+                target,
+            });
+        }
+
+        let detected = DetectedComponent {
+            mod_type: ModType::GameRootOverlay,
+            confidence: Confidence::High,
+            files: component_files,
+            target_subdir: PathBuf::new(),
+            ue4ss_mod_name: None,
+            pak_sets: Vec::new(),
+            warnings: Vec::new(),
+            notes: vec![format!(
+                "Experimental: dlssg_for_sm86 loaded through {}. Disabling this removes \
+                 the proxy and puts back anything it displaced.",
+                proxy.file_name()
+            )],
+        };
+
+        let id = self.store.insert_mod(&NewMod {
+            name: format!("DLSS Frame Generation for RTX 20/30 {version}"),
+            staging_folder: FRAMEGEN_STAGING.to_string(),
+            version: Some(version.to_string()),
+            source: "framegen".into(),
+            nexus_mod_id: None,
+            nexus_file_id: None,
+            primary_type: ModType::GameRootOverlay.as_str().to_string(),
+            components: vec![detected],
+            size_bytes: sbmm_archive::directory_size(&staging_root) as i64,
+            image_path: None,
+        })?;
+
+        // Same reasoning as the upscalers: a staged frame generator does
+        // nothing, so it goes in now and only this mod is deployed.
+        self.set_enabled(&[id], true)?;
+        let ctx = self.deploy_context()?;
+        let record = self.record(id)?;
+        let components = self.store.components_for(id)?;
+        let plan = self.plan_for(&record, &components);
+        self.deploy_mod(&ctx, id, &plan)?;
+
+        Ok(id)
+    }
+
+    /// Take the frame generation package back out. Nothing installed is not
+    /// an error: the game folder is already as it should be.
+    pub fn remove_framegen(&mut self) -> Result<bool> {
+        let Some(installed) = self.framegen_installed()? else {
+            return Ok(false);
+        };
+        self.uninstall(installed.mod_id)?;
+        Ok(true)
+    }
+
     /// Commit a staged install, recording where the files came from.
     pub fn commit_install(
         &mut self,
@@ -1333,13 +1489,31 @@ fn archive_display_name(archive: &Path) -> String {
     trimmed.trim().to_string()
 }
 
-/// Paths cross to the UI as strings, so lossy conversion happens in one place.
 /// One staging folder per upscaler component, so installing a newer version
 /// replaces the previous swap instead of stacking on top of it.
 fn upscaler_staging_id(component: sbmm_upscaler::Component) -> String {
     format!("upscaler-{}", component.file_name().replace(".dll", ""))
 }
 
+/// The staging folder of the RTX 20/30 frame generation package.
+const FRAMEGEN_STAGING: &str = "framegen-dlssg-sm86";
+
+/// A game-relative path in a form two spellings of it agree on: Windows paths
+/// ignore case, and the deployment record may hold either separator.
+fn comparable_path(path: &str) -> String {
+    path.replace('\\', "/").to_ascii_lowercase()
+}
+
+/// Rename where possible, copy across volumes.
+fn move_or_copy(from: &Path, to: &Path) -> Result<()> {
+    if std::fs::rename(from, to).is_ok() {
+        return Ok(());
+    }
+    std::fs::copy(from, to).map_err(|e| AppError::io(to, e))?;
+    Ok(())
+}
+
+/// Paths cross to the UI as strings, so lossy conversion happens in one place.
 fn path_string(path: impl AsRef<Path>) -> String {
     path.as_ref().to_string_lossy().into_owned()
 }

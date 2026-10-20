@@ -793,6 +793,140 @@ fn an_upscaler_the_game_does_not_ship_is_refused() {
     assert!(result.is_err());
 }
 
+/// An unpacked dlssg_for_sm86 release with dummy binaries.
+fn fake_framegen_release(root: &Path) -> sbmm_upscaler::framegen::Package {
+    for (rel, contents) in [
+        ("version.dll", "MZ version proxy"),
+        ("alternatives/winmm.dll", "MZ winmm proxy"),
+        ("alternatives/dbghelp.dll", "MZ dbghelp proxy"),
+        ("alternatives/dinput8.dll", "MZ dinput8 proxy"),
+        ("alternatives/dxgi.dll", "MZ dxgi proxy"),
+        ("alternatives/d3d12.dll", "MZ d3d12 proxy"),
+        ("dlssg_sm86.ini", "[General]\nEnabled=1\n"),
+        ("dlssg_sm86/backend/sm86_backend.dll", "MZ backend"),
+        ("dlssg_sm86/kernels/fg_kernels.dll", "MZ kernels"),
+        ("dlssg_sm86/runtime/nvngx_dlssg.dll", "MZ runtime"),
+        ("README.en.md", "readme"),
+    ] {
+        let path = root.join(rel);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, contents).unwrap();
+    }
+    sbmm_upscaler::framegen::inspect(root).unwrap()
+}
+
+/// The frame generation package goes beside the executable at once, takes a
+/// hand-placed DLL of the same name aside, and gives it back on removal.
+#[test]
+fn frame_generation_for_older_cards_installs_and_comes_back_out_exactly() {
+    use sbmm_upscaler::framegen::{Owner, Proxy};
+
+    let mut fx = Fixture::new();
+    let win64 = fx.game.join("SB/Binaries/Win64");
+    fs::write(win64.join("version.dll"), "someone else's proxy").unwrap();
+    fs::write(win64.join("sl.dlss_g.dll"), "MZ streamline").unwrap();
+    let before = fx.game_snapshot();
+
+    let facts = fx.app.framegen_facts().unwrap().unwrap();
+    assert_eq!(facts.streamline.len(), 1);
+    assert_eq!(facts.proxies[0].owner, Owner::Unmanaged);
+
+    let package = fake_framegen_release(&fx.source.join("release"));
+    fx.app
+        .install_framegen(&package, Proxy::Version, "0.4.0")
+        .unwrap();
+
+    assert_eq!(
+        fs::read(win64.join("version.dll")).unwrap(),
+        b"MZ version proxy"
+    );
+    assert!(win64.join("dlssg_sm86.ini").is_file());
+    assert!(win64.join("dlssg_sm86/runtime/nvngx_dlssg.dll").is_file());
+    assert!(
+        !win64.join("winmm.dll").exists(),
+        "only one proxy may ever be in place"
+    );
+    assert!(!win64.join("README.en.md").exists());
+
+    let installed = fx.app.framegen_installed().unwrap().unwrap();
+    assert_eq!(installed.proxy, Proxy::Version);
+    assert_eq!(installed.version, "0.4.0");
+    let facts = fx.app.framegen_facts().unwrap().unwrap();
+    assert_eq!(facts.proxies[0].owner, Owner::Ours);
+    assert!(!facts.hand_installed, "our own INI is not a manual install");
+
+    assert!(fx.app.remove_framegen().unwrap());
+    assert_eq!(fx.game_snapshot(), before);
+    assert!(!fx.app.remove_framegen().unwrap());
+}
+
+/// Switching the proxy name replaces the install rather than adding a second
+/// loader beside the first.
+#[test]
+fn reinstalling_frame_generation_under_another_proxy_replaces_the_first() {
+    use sbmm_upscaler::framegen::Proxy;
+
+    let mut fx = Fixture::new();
+    let win64 = fx.game.join("SB/Binaries/Win64");
+    let before = fx.game_snapshot();
+
+    let first = fake_framegen_release(&fx.source.join("first"));
+    fx.app
+        .install_framegen(&first, Proxy::Version, "0.4.0")
+        .unwrap();
+    let second = fake_framegen_release(&fx.source.join("second"));
+    fx.app
+        .install_framegen(&second, Proxy::Winmm, "0.4.0")
+        .unwrap();
+
+    assert!(!win64.join("version.dll").exists());
+    assert_eq!(
+        fs::read(win64.join("winmm.dll")).unwrap(),
+        b"MZ winmm proxy"
+    );
+    assert_eq!(
+        fx.app.framegen_installed().unwrap().unwrap().proxy,
+        Proxy::Winmm
+    );
+
+    fx.app.remove_framegen().unwrap();
+    assert_eq!(fx.game_snapshot(), before);
+}
+
+/// A proxy name another mod already deploys is reported as that mod's.
+#[test]
+fn a_proxy_name_owned_by_another_mod_is_attributed_to_it() {
+    use sbmm_upscaler::framegen::{assess, Owner, Proxy, Verdict};
+
+    let mut fx = Fixture::new();
+    let id = fx.install_folder("ReShade", &[("dxgi.dll", "MZ reshade")]);
+    fx.app.set_enabled(&[id], true).unwrap();
+    fx.app.apply().unwrap();
+    fs::write(fx.game.join("SB/Binaries/Win64/sl.dlss_g.dll"), "MZ").unwrap();
+
+    let facts = fx.app.framegen_facts().unwrap().unwrap();
+    let dxgi = facts
+        .proxies
+        .iter()
+        .find(|p| p.proxy == Proxy::Dxgi)
+        .unwrap();
+    assert_eq!(dxgi.owner, Owner::Mod("ReShade".into()));
+
+    let card = sbmm_upscaler::Adapter::new(
+        "NVIDIA GeForce RTX 3070",
+        sbmm_upscaler::Vendor::Nvidia,
+        8 << 30,
+    );
+    assert_eq!(
+        assess(Some(&card), &facts, Proxy::Dxgi).verdict,
+        Verdict::Incompatible
+    );
+    assert_eq!(
+        assess(Some(&card), &facts, Proxy::Version).verdict,
+        Verdict::Compatible
+    );
+}
+
 /// Closing the manager mid-collection must not lose the queue — that is forty
 /// entries and a part-downloaded file the user would have to redo by hand.
 #[test]
