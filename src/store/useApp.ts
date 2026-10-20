@@ -14,6 +14,7 @@ export type View =
   | "mods"
   | "order"
   | "conflicts"
+  | "files"
   | "downloads"
   | "collections"
   | "settings";

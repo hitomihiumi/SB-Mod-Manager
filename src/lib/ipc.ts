@@ -87,6 +87,28 @@ export type DeploymentMode = "hardlink" | "virtual";
 
 export type UpdateChannel = "stable" | "nightly";
 
+/** One entry of the virtual file tree, like Mod Organizer 2's Data tab. */
+export interface VfsEntry {
+  name: string;
+  isDir: boolean;
+  /** Game-relative path, for navigating into a folder. */
+  path: string;
+  /** Winning provider: a mod's name, "Game", "Overwrite" or the UE4SS list. */
+  providedBy: string;
+  /** "mod" | "game" | "overwrite" | "generated". */
+  origin: string;
+  modId: number | null;
+  /** Hidden providers of the same path, the next in line first. */
+  shadowedBy: string[];
+  /** The real file the winning version comes from. */
+  source: string | null;
+}
+
+export interface VfsListing {
+  dir: string;
+  entries: VfsEntry[];
+}
+
 export interface AvailableUpdate {
   version: string;
   notes: string | null;
@@ -397,6 +419,7 @@ export const ipc = {
   setDeploymentMode: (mode: DeploymentMode) =>
     invoke<ApplyReport>("set_deployment_mode", { mode }),
   launchGame: () => invoke<string>("launch_game"),
+  vfsTree: (dir: string) => invoke<VfsListing>("vfs_tree", { dir }),
 };
 
 /** The game's Nexus domain, mirroring `NEXUS_DOMAIN` in `sbmm-game`. */

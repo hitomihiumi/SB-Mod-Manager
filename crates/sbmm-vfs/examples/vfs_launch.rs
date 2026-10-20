@@ -80,6 +80,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         hook: here.join("sbmm_vfs_hook.dll"),
         mapping: mapping_path,
         log: Some(work.join("hook.log")),
+        diagnostics: Some(work.join("launch.log")),
     })?;
     println!("launched probe as process {pid}");
     Ok(())

@@ -1079,6 +1079,50 @@ fn launching_under_the_virtual_file_system_writes_a_current_mapping() {
     assert!(vfs.overlay().file(&pak).is_some());
 }
 
+/// The Files view shows the merged tree: a mod's file where a mod wins, the
+/// game's own where nothing touches it, and the losing mod named as hidden.
+#[test]
+fn the_virtual_file_tree_names_the_winner_and_what_it_hides() {
+    let mut fx = Fixture::new();
+    let movie = fx.game.join("SB/Content/Movies/Intro.mp4");
+    fs::create_dir_all(movie.parent().unwrap()).unwrap();
+    fs::write(&movie, "original").unwrap();
+
+    let a = fx.install_folder("Intro A", &[("Movies/Intro.mp4", "a")]);
+    let b = fx.install_folder("Intro B", &[("Movies/Intro.mp4", "b")]);
+    fx.app.set_enabled(&[a, b], true).unwrap();
+    fx.app.set_order(&[a, b]).unwrap();
+
+    // Navigate down to the Movies folder.
+    let root = fx.app.vfs_tree("").unwrap();
+    assert!(root.entries.iter().any(|e| e.name == "SB" && e.is_dir));
+
+    let movies = fx.app.vfs_tree("SB/Content/Movies").unwrap();
+    let intro = movies
+        .entries
+        .iter()
+        .find(|e| e.name == "Intro.mp4")
+        .unwrap();
+    assert_eq!(intro.origin, "mod");
+    assert_eq!(
+        intro.provided_by, "Intro B",
+        "the mod lower in the order wins"
+    );
+    assert_eq!(intro.shadowed_by, vec!["Intro A".to_string()]);
+    assert!(intro.source.is_some());
+
+    // A game file nothing replaces is attributed to the game.
+    fs::write(fx.game.join("SB/Content/Movies/Logo.mp4"), "logo").unwrap();
+    let movies = fx.app.vfs_tree("SB/Content/Movies").unwrap();
+    let logo = movies
+        .entries
+        .iter()
+        .find(|e| e.name == "Logo.mp4")
+        .unwrap();
+    assert_eq!(logo.origin, "game");
+    assert!(logo.shadowed_by.is_empty());
+}
+
 /// Files the game writes under the virtual file system go to overwrite and are
 /// there again next time, without ever touching the game folder.
 #[test]

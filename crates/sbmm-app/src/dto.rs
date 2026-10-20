@@ -227,3 +227,36 @@ pub struct FramegenInstall {
     /// False when the user switched it off in the mod list.
     pub enabled: bool,
 }
+
+/// One entry in the virtual file tree, in the manner of Mod Organizer 2's
+/// "Data" tab: the game folder as the enabled mods make it, with who provides
+/// each file and who it hides.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VfsEntry {
+    pub name: String,
+    pub is_dir: bool,
+    /// Game-relative path of this entry, for navigating into a folder.
+    pub path: String,
+    /// What provides the winning version: a mod's name, "Game", "Overwrite"
+    /// or the generated UE4SS list.
+    pub provided_by: String,
+    /// `mod`, `game`, `overwrite` or `generated`.
+    pub origin: String,
+    /// The mod's id, when a mod provides it, so the UI can jump to it.
+    pub mod_id: Option<i64>,
+    /// Other providers of the same path, hidden beneath the winner, the next
+    /// in line first. A non-empty list is a conflict.
+    pub shadowed_by: Vec<String>,
+    /// The real file on disk the winning version comes from, for opening it.
+    pub source: Option<String>,
+}
+
+/// A directory of the virtual file tree.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VfsListing {
+    /// The game-relative directory shown. Empty is the game root.
+    pub dir: String,
+    pub entries: Vec<VfsEntry>,
+}

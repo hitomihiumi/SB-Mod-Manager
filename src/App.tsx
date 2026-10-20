@@ -7,6 +7,7 @@ import {
   Boxes,
   CheckCircle2,
   Download,
+  FolderTree,
   Layers,
   ListOrdered,
   Loader2,
@@ -20,6 +21,7 @@ import { useEffect, useState } from "react";
 import { CollectionsView } from "./components/CollectionsView";
 import { ConflictsView } from "./components/ConflictsView";
 import { DownloadsView } from "./components/DownloadsView";
+import { FilesView } from "./components/FilesView";
 import { InstallDialog } from "./components/InstallDialog";
 import { LoadOrderView } from "./components/LoadOrderView";
 import { ModsView } from "./components/ModsView";
@@ -34,6 +36,7 @@ const NAV: { id: View; label: string; icon: typeof Layers }[] = [
   { id: "mods", label: "Mods", icon: Layers },
   { id: "order", label: "Load order", icon: ListOrdered },
   { id: "conflicts", label: "Conflicts", icon: Swords },
+  { id: "files", label: "Files", icon: FolderTree },
   { id: "downloads", label: "Downloads", icon: Download },
   { id: "collections", label: "Collections", icon: Boxes },
   { id: "settings", label: "Settings", icon: Settings },
@@ -172,6 +175,7 @@ export default function App() {
             {view === "mods" && <ModsView onAdd={pickFiles} />}
             {view === "order" && <LoadOrderView />}
             {view === "conflicts" && <ConflictsView />}
+            {view === "files" && <FilesView />}
             {view === "downloads" && <DownloadsView />}
             {view === "collections" && <CollectionsView />}
             {view === "settings" && <SettingsView />}

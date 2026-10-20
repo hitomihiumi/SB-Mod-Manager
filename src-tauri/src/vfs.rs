@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-use sbmm_app::dto::{ApplyReport, DeploymentMode};
+use sbmm_app::dto::{ApplyReport, DeploymentMode, VfsListing};
 use sbmm_game::InstallSource;
 use tauri_plugin_opener::OpenerExt;
 
@@ -14,6 +14,12 @@ use crate::{fail, AppState};
 
 /// Built by `build.rs` from `crates/sbmm-vfs-hook`. Empty off Windows.
 const HOOK: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/sbmm_vfs_hook.dll"));
+
+/// One directory of the virtual file tree, for the Files view.
+#[tauri::command]
+pub fn vfs_tree(state: tauri::State<'_, AppState>, dir: Option<String>) -> Result<VfsListing, String> {
+    crate::with_app!(state, |app| app.vfs_tree(dir.as_deref().unwrap_or("")))
+}
 
 #[tauri::command]
 pub fn set_deployment_mode(
@@ -56,11 +62,12 @@ pub async fn launch_game(
     let vfs_dir = crate::with_app!(state, |app| Ok::<_, sbmm_app::AppError>(app.vfs_dir()))?;
     let hook = install_hook(&vfs_dir)?;
     let options = crate::with_app!(state, |app| app.launch_options(hook))?;
+    let log = vfs_dir.join("launch.log");
 
     let pid = tauri::async_runtime::spawn_blocking(move || sbmm_vfs::launch::launch(&options))
         .await
         .map_err(fail)?
-        .map_err(fail)?;
+        .map_err(|error| format!("{error}\nLaunch log: {}", log.display()))?;
     Ok(format!(
         "Started Stellar Blade under the virtual file system (process {pid})."
     ))

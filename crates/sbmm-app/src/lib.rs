@@ -1448,6 +1448,7 @@ impl App {
             hook,
             mapping,
             log: Some(self.vfs_dir().join("hook.log")),
+            diagnostics: Some(self.vfs_dir().join("launch.log")),
         })
     }
 
@@ -1548,6 +1549,118 @@ impl App {
         let path = self.vfs_mapping_path();
         mapping.save(&path)?;
         Ok(path)
+    }
+
+    /// One directory of the virtual file tree, in the manner of Mod Organizer
+    /// 2's "Data" tab: the merged view the game would see, with who provides
+    /// each entry and who it hides.
+    ///
+    /// `dir` is a game-relative path; empty is the root. The real game folder
+    /// is read from disk and merged with the overlay, so an entry the game
+    /// ships but no mod touches is shown too, attributed to the game.
+    pub fn vfs_tree(&self, dir: &str) -> Result<VfsListing> {
+        use sbmm_vfs::{Origin, VPath};
+
+        let Some(game) = self.game()? else {
+            return Ok(VfsListing {
+                dir: String::new(),
+                entries: Vec::new(),
+            });
+        };
+        let mapping = self.vfs_mapping()?;
+
+        // The display name of each provider, resolved before the mapping is
+        // turned into the live view.
+        let mut names: std::collections::HashMap<Origin, String> = std::collections::HashMap::new();
+        for layer in &mapping.layers {
+            names.insert(layer.origin, layer.name.clone());
+        }
+        names.insert(Origin::Overwrite, "Overwrite".into());
+        let label = |origin: Origin| -> (String, String, Option<i64>) {
+            let (kind, mod_id) = match origin {
+                Origin::Mod(id) => ("mod", Some(id)),
+                Origin::Generated => ("generated", None),
+                Origin::Overwrite => ("overwrite", None),
+            };
+            let name = names.get(&origin).cloned().unwrap_or_else(|| match origin {
+                Origin::Mod(id) => format!("mod {id}"),
+                _ => kind.to_string(),
+            });
+            (kind.to_string(), name, mod_id)
+        };
+
+        let vfs = mapping.into_vfs();
+        let overlay = vfs.overlay();
+
+        let dir_path = if dir.is_empty() {
+            VPath::root()
+        } else {
+            VPath::from_relative(dir).ok_or_else(|| {
+                AppError::BadLibraryRoot(format!("{dir} is not a path inside the game folder"))
+            })?
+        };
+
+        // The real folder on disk, in its own spelling, so game files keep
+        // their case and can be opened.
+        let mut real_dir = game.root.clone();
+        for component in dir_path.components() {
+            real_dir.push(component);
+        }
+        let real: Vec<(String, bool)> = std::fs::read_dir(&real_dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|entry| {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                let is_dir = entry.file_type().map(|k| k.is_dir()).unwrap_or(false);
+                (name, is_dir)
+            })
+            .collect();
+
+        let mut entries = Vec::new();
+        for listed in overlay.list(&dir_path, real) {
+            let child = dir_path.join(&listed.name);
+            let entry = match overlay.file(&child) {
+                Some(file) => {
+                    let (origin, provided_by, mod_id) = label(file.origin);
+                    VfsEntry {
+                        name: listed.name,
+                        is_dir: false,
+                        path: child.display().to_string(),
+                        provided_by,
+                        origin,
+                        mod_id,
+                        shadowed_by: file.shadowed.iter().map(|o| label(*o).1).collect(),
+                        source: Some(path_string(&file.source)),
+                    }
+                }
+                None => VfsEntry {
+                    name: listed.name.clone(),
+                    is_dir: listed.is_dir,
+                    path: child.display().to_string(),
+                    provided_by: "Game".into(),
+                    origin: "game".into(),
+                    mod_id: None,
+                    shadowed_by: Vec::new(),
+                    source: (!listed.is_dir).then(|| path_string(real_dir.join(&listed.name))),
+                },
+            };
+            entries.push(entry);
+        }
+
+        // Folders first, then files, each case-insensitively by name — the
+        // order a file browser shows and the load-order screen does not care
+        // about here.
+        entries.sort_by(|a, b| {
+            b.is_dir
+                .cmp(&a.is_dir)
+                .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+        });
+
+        Ok(VfsListing {
+            dir: dir_path.display().to_string(),
+            entries,
+        })
     }
 
     // -- update checks -----------------------------------------------------

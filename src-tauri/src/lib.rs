@@ -689,6 +689,7 @@ pub fn run() {
             framegen::remove_framegen,
             vfs::set_deployment_mode,
             vfs::launch_game,
+            vfs::vfs_tree,
         ])
         .run(tauri::generate_context!())
         .expect("failed to start SB Mod Manager");
