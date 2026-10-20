@@ -154,6 +154,7 @@ fn detect_heuristic(tree: &FileTree) -> Vec<DetectedComponent> {
     claim_ue4ss_framework(tree, &mut claimed, &mut components);
     claim_logic_mods(tree, &mut claimed, &mut components);
     claim_ue4ss_mods(tree, &mut claimed, &mut components);
+    claim_splash(tree, &mut claimed, &mut components);
     claim_movies(tree, &mut claimed, &mut components);
     claim_root_binaries(tree, &mut claimed, &mut components);
     claim_generic_paks(tree, &mut claimed, &mut components);
@@ -318,6 +319,58 @@ fn claim_ue4ss_mods(
             notes,
         });
     }
+}
+
+/// Startup splash art.
+///
+/// Claimed before movies, because a splash mod is images and a movie mod is
+/// video — but both are loose media, and `Splash/Splash.png` next to a stray
+/// `.mp4` would otherwise be swept into the movies folder where the engine
+/// never looks for it.
+///
+/// The marker is either the file name Unreal actually loads, or a `Splash`
+/// directory. An image on its own says nothing: mods ship preview screenshots,
+/// and those are not splash art.
+fn claim_splash(tree: &FileTree, claimed: &mut HashSet<String>, out: &mut Vec<DetectedComponent>) {
+    let entries: Vec<TreeEntry> = tree
+        .entries()
+        .iter()
+        .filter(|e| !claimed.contains(&e.norm))
+        .filter(|e| {
+            let named = paths::SPLASH_FILES.contains(&e.file_name());
+            let in_splash_dir = e.segments().contains(&"splash")
+                && e.extension()
+                    .is_some_and(|ext| paths::SPLASH_EXTS.contains(&ext));
+            named || in_splash_dir
+        })
+        // Deliberately not `is_junk`: images count as junk because mods ship
+        // previews and screenshots, and splash art is images. The name and the
+        // folder above are what tell the two apart, and both were just
+        // checked — so only genuine system litter is dropped here.
+        .filter(|e| !is_system_junk(e))
+        .cloned()
+        .collect();
+    if entries.is_empty() {
+        return;
+    }
+
+    let files = map_flat(&entries, paths::CONTENT_SPLASH);
+    mark_claimed(&entries, claimed);
+    out.push(DetectedComponent {
+        mod_type: ModType::Splash,
+        confidence: Confidence::Medium,
+        files,
+        target_subdir: PathBuf::from(paths::CONTENT_SPLASH),
+        ue4ss_mod_name: None,
+        pak_sets: Vec::new(),
+        warnings: Vec::new(),
+        notes: vec![
+            "Replaces the image shown while the game starts. Unreal reads this \
+             off disk before any pak is mounted, so it is loose files rather \
+             than a pak."
+                .to_string(),
+        ],
+    });
 }
 
 fn claim_movies(tree: &FileTree, claimed: &mut HashSet<String>, out: &mut Vec<DetectedComponent>) {
@@ -591,15 +644,16 @@ fn mark_claimed(entries: &[TreeEntry], claimed: &mut HashSet<String>) {
 }
 
 fn is_junk(entry: &TreeEntry) -> bool {
-    if entry.segments().contains(&"__macosx") {
-        return true;
-    }
-    if JUNK_NAMES.contains(&entry.file_name()) {
-        return true;
-    }
-    entry
-        .extension()
-        .is_some_and(|ext| JUNK_EXTS.contains(&ext))
+    is_system_junk(entry)
+        || entry
+            .extension()
+            .is_some_and(|ext| JUNK_EXTS.contains(&ext))
+}
+
+/// Litter the operating system or the archiver left behind, as opposed to
+/// files that merely *look* incidental. Never part of any mod.
+fn is_system_junk(entry: &TreeEntry) -> bool {
+    entry.segments().contains(&"__macosx") || JUNK_NAMES.contains(&entry.file_name())
 }
 
 fn strip_leading(path: &Path, count: usize) -> Option<PathBuf> {

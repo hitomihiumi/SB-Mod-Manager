@@ -5,6 +5,7 @@
 //! behaviour worth testing lives in `sbmm-app`.
 
 mod collections;
+mod discord;
 mod downloads;
 mod upscaler;
 
@@ -24,6 +25,7 @@ use tauri::{Emitter, Manager};
 use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_updater::UpdaterExt;
 
+use discord::{Discord, Presence};
 use downloads::Downloads;
 
 struct AppState(Mutex<App>);
@@ -47,8 +49,51 @@ macro_rules! with_app {
 }
 
 #[tauri::command]
-fn snapshot(state: tauri::State<'_, AppState>) -> Result<AppSnapshot, String> {
-    with_app!(state, |app| app.snapshot())
+fn snapshot(
+    state: tauri::State<'_, AppState>,
+    discord: tauri::State<'_, Discord>,
+    downloads: tauri::State<'_, Downloads>,
+) -> Result<AppSnapshot, String> {
+    let snapshot = with_app!(state, |app| app.snapshot())?;
+    // The window asks for a snapshot after everything that could change what
+    // the presence says, so this is the one place it needs refreshing.
+    discord.update(presence_from(&snapshot, &downloads));
+    Ok(snapshot)
+}
+
+/// Counts only — see the module docs for why nothing is named.
+fn presence_from(snapshot: &AppSnapshot, downloads: &Downloads) -> Presence {
+    Presence {
+        enabled: snapshot.discord_rpc,
+        installed: snapshot.mods.len(),
+        enabled_mods: snapshot.mods.iter().filter(|m| m.enabled).count(),
+        downloading: downloads
+            .queue
+            .items()
+            .iter()
+            .filter(|i| {
+                matches!(
+                    i.state,
+                    sbmm_nexus::DownloadState::Queued | sbmm_nexus::DownloadState::Running
+                )
+            })
+            .count(),
+    }
+}
+
+#[tauri::command]
+fn set_discord_rpc(
+    state: tauri::State<'_, AppState>,
+    discord: tauri::State<'_, Discord>,
+    downloads: tauri::State<'_, Downloads>,
+    enabled: bool,
+) -> Result<(), String> {
+    with_app!(state, |app| app.set_discord_rpc(enabled))?;
+    // Switching it off has to take down what is already showing, so the new
+    // state is published rather than waiting for the next snapshot.
+    let snapshot = with_app!(state, |app| app.snapshot())?;
+    discord.update(presence_from(&snapshot, &downloads));
+    Ok(())
 }
 
 #[tauri::command]
@@ -572,6 +617,7 @@ pub fn run() {
             let service = App::new(data_dir)?;
             app.manage(AppState(Mutex::new(service)));
             app.manage(Downloads::new());
+            app.manage(Discord::start());
 
             // Only needed during development and on Linux; the installer
             // registers the scheme on Windows.
@@ -625,6 +671,7 @@ pub fn run() {
             check_for_update,
             install_update,
             set_update_channel,
+            set_discord_rpc,
             add_nxm_link,
             check_mod_updates,
             download_queue,

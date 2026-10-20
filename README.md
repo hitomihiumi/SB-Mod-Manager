@@ -65,6 +65,8 @@ wrong is the usual reason a mod "doesn't work".
   and by which line the game is built against, so nothing is installed that the
   game would ignore or the hardware could never load. The swap goes through the
   same deployment record as a mod, so it undoes exactly.
+- **Says so on Discord**, if you want it to. Counts only — never the name of a
+  mod, a collection or a folder — and one switch in Settings turns it off.
 - **Updates itself** from GitHub releases, on either the stable or the nightly
   channel, with the download checked against a signature before anything is
   replaced.
@@ -105,11 +107,44 @@ pnpm tauri dev      # run it
 pnpm tauri build    # produce an installer
 ```
 
-Releases are automated: pushing a `v*` tag builds the Windows installer and
-publishes a GitHub Release with notes generated from the commits since the
-last tag, and a rolling `nightly` prerelease is rebuilt from `master` whenever
-something landed that day. The app version comes from `package.json` alone —
-`tauri.conf.json` points at it.
+### Publishing a release
+
+The version lives in `package.json` and nowhere else — `tauri.conf.json` points
+at it, and the installer, the updater manifest and the in-app version all come
+from there. So a stable release is two steps, in this order:
+
+```sh
+# 1. Bump the version and land it on master.
+npm version 0.2.0 --no-git-tag-version   # edits package.json
+git commit -am "Release 0.2.0" && git push origin master
+
+# 2. Tag that commit and push the tag.
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+Pushing the tag builds the Windows installer and publishes a GitHub Release
+with notes generated from the commits since the last tag. The tag must match
+`package.json` exactly (`v0.2.0` ↔ `0.2.0`); the workflow refuses otherwise,
+because a mismatched release publishes fine and is then never offered as an
+update, which is a failure that looks like a success.
+
+**Nightlies** need no action. At 03:00 UTC the workflow looks at `master`, and
+builds a rolling `nightly` prerelease if anything landed in the last 24 hours —
+so a quiet day publishes nothing, by design. To force one, run the *Release*
+workflow from the Actions tab with `nightly` ticked.
+
+Until the first `v*` tag exists there is no stable release, so the updater's
+stable channel has nothing to point at and reports that it cannot check.
+Nightly works from the first nightly build onwards.
+
+### Discord presence (optional)
+
+Presence needs a Discord application id, and the one in `src-tauri/src/discord.rs`
+is a placeholder — nothing appears until it is replaced. Register an
+application at <https://discord.com/developers/applications>, put its id in
+`APP_ID`, and upload an image named `icon` under its Rich Presence art assets
+so the large icon resolves. Everything else works without this; the feature
+just stays invisible.
 
 ### Update signing (do this before the first release)
 

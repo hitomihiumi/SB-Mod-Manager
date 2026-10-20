@@ -262,3 +262,71 @@ fn priority_changes_the_deployed_pak_name_consistently() {
         ]
     );
 }
+
+/// Splash art is loose images, not a pak: Unreal reads the splash off disk
+/// before any pak is mounted, so a splash mod packaged as a pak would never be
+/// seen. Real collections carry these as their own `stellarblade-splash` type.
+#[test]
+fn splash_art_is_routed_to_the_splash_folder() {
+    let components = detect(&["Splash/Splash.bmp"]);
+    assert_eq!(components.len(), 1);
+    assert_eq!(components[0].mod_type, ModType::Splash);
+
+    let plan = build_plan(1, "/staging", &components, 10, "Splash Art");
+    assert_eq!(
+        plan.files[0].target.to_string_lossy().replace('\\', "/"),
+        "SB/Content/Splash/Splash.bmp"
+    );
+}
+
+/// The file Unreal actually loads is enough on its own, wrapper folder or not.
+#[test]
+fn a_bare_splash_file_is_recognised_without_its_folder() {
+    for layout in [
+        &["Splash.bmp"][..],
+        &["EVE Raven Tachy Splash Art/Splash.bmp"][..],
+        &["Splash/EdSplash.bmp"][..],
+    ] {
+        let components = detect(layout);
+        assert_eq!(
+            components.first().map(|c| c.mod_type),
+            Some(ModType::Splash),
+            "failed for {layout:?}"
+        );
+    }
+}
+
+/// The reason splash is claimed before movies: both are loose media, and a
+/// splash image swept into the movies folder is a file the engine never reads.
+#[test]
+fn a_splash_image_beside_a_movie_is_not_swept_into_the_movies_folder() {
+    let components = detect(&["Splash/Splash.bmp", "Movies/Startup.mp4"]);
+
+    let splash = components
+        .iter()
+        .find(|c| c.mod_type == ModType::Splash)
+        .expect("the splash image is its own component");
+    let movie = components
+        .iter()
+        .find(|c| c.mod_type == ModType::Movie)
+        .expect("the movie is still a movie");
+
+    assert_eq!(splash.files.len(), 1);
+    assert_eq!(movie.files.len(), 1);
+    assert!(movie.files[0]
+        .target
+        .to_string_lossy()
+        .replace('\\', "/")
+        .starts_with("SB/Content/Movies/"));
+}
+
+/// A screenshot shipped alongside a mod is not splash art, and claiming it
+/// would put a preview image into the game folder.
+#[test]
+fn a_stray_image_is_not_mistaken_for_splash_art() {
+    let components = detect(&["Outfit_P.pak", "preview.png", "screenshot.bmp"]);
+    assert!(
+        !components.iter().any(|c| c.mod_type == ModType::Splash),
+        "only the name Unreal loads, or a Splash folder, means splash art"
+    );
+}

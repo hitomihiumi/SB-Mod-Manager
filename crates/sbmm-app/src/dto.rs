@@ -20,6 +20,8 @@ pub struct AppSnapshot {
     pub nexus: Option<NexusAccount>,
     /// Which release stream the app updates itself from.
     pub update_channel: String,
+    /// Whether the manager publishes a Discord presence.
+    pub discord_rpc: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
