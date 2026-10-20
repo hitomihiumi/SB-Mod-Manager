@@ -16,7 +16,7 @@ wrong is the usual reason a mod "doesn't work".
 
 ## What it does
 
-- **Detects the mod type and destination.** Eight layouts are recognised from
+- **Detects the mod type and destination.** Nine layouts are recognised from
   structural markers rather than guesswork, and a single archive can contain
   several — a logic mod bundled with a cosmetic pak is routed as two
   independent components. When nothing is conclusive it asks once and
@@ -65,6 +65,19 @@ wrong is the usual reason a mod "doesn't work".
   and by which line the game is built against, so nothing is installed that the
   game would ignore or the hardware could never load. The swap goes through the
   same deployment record as a mod, so it undoes exactly.
+- **Frame Generation on RTX 20 and 30 cards** *(experimental)*. NVIDIA only
+  runs DLSS Frame Generation on RTX 40 and newer; the community project
+  [dlssg_for_sm86](https://github.com/sdli1995/dlssg_for_sm86) gets it running
+  on Turing and Ampere through a proxy DLL beside the game. The manager checks
+  first whether it can work at all — the card has to be an RTX 20 or 30, the
+  game has to ship DLSS Frame Generation for the proxy to take over, and the
+  proxy's file name must not already belong to another mod — and only then
+  offers to install. The release is fetched from the project's own GitHub
+  releases, every file that goes into the game is checked against the
+  archive's SHA-256 manifest, and only one proxy is ever put in place. It is
+  deployed like any mod, so removing it puts the folder back exactly. If the
+  game does not load `version.dll`, the other proxy names upstream ships can
+  be chosen instead.
 - **Says so on Discord**, if you want it to. Counts only — never the name of a
   mod, a collection or a folder — and one switch in Settings turns it off.
 - **Updates itself** from GitHub releases, on either the stable or the nightly
@@ -87,9 +100,15 @@ worth knowing before the first real run:
   That survives a renamed wrapper, but not a renamed `collectionRevision`
   itself. The `collection.json` inside the revision archive is the tested
   path and is preferred whenever the response offers a link to it.
-- **The upscaler check needs GitHub.** Listing releases uses the public
-  GitHub API, which is rate limited for anonymous callers; when it refuses,
-  the screen says it could not check rather than claiming you are up to date.
+- **The upscaler and frame generation checks need GitHub.** Listing releases
+  uses the public GitHub API, which is rate limited for anonymous callers;
+  when it refuses, the screen says it could not check rather than claiming you
+  are up to date.
+- **Frame generation on RTX 20/30 is third-party and experimental.** The
+  compatibility check reads the card and the game folder; it cannot tell
+  whether the game will actually load the proxy, which is why the other proxy
+  names are offered. Edits to `dlssg_sm86.ini` are replaced when the package
+  is reinstalled or updated.
 
 Not built:
 
@@ -115,16 +134,16 @@ from there. So a stable release is two steps, in this order:
 
 ```sh
 # 1. Bump the version and land it on master.
-npm version 0.2.0 --no-git-tag-version   # edits package.json
-git commit -am "Release 0.2.0" && git push origin master
+npm version 0.3.0 --no-git-tag-version   # edits package.json
+git commit -am "Release 0.3.0" && git push origin master
 
 # 2. Tag that commit and push the tag.
-git tag v0.2.0 && git push origin v0.2.0
+git tag v0.3.0 && git push origin v0.3.0
 ```
 
 Pushing the tag builds the Windows installer and publishes a GitHub Release
 with notes generated from the commits since the last tag. The tag must match
-`package.json` exactly (`v0.2.0` ↔ `0.2.0`); the workflow refuses otherwise,
+`package.json` exactly (`v0.3.0` ↔ `0.3.0`); the workflow refuses otherwise,
 because a mismatched release publishes fine and is then never offered as an
 update, which is a failure that looks like a success.
 
@@ -133,25 +152,24 @@ builds a rolling `nightly` prerelease if anything landed in the last 24 hours �
 so a quiet day publishes nothing, by design. To force one, run the *Release*
 workflow from the Actions tab with `nightly` ticked.
 
-Until the first `v*` tag exists there is no stable release, so the updater's
-stable channel has nothing to point at and reports that it cannot check.
-Nightly works from the first nightly build onwards.
+The stable channel follows the newest `v*` release (the first was `v0.2.0`);
+nightly follows the rolling `nightly` prerelease.
 
 ### Discord presence (optional)
 
-Presence needs a Discord application id, and the one in `src-tauri/src/discord.rs`
-is a placeholder — nothing appears until it is replaced. Register an
-application at <https://discord.com/developers/applications>, put its id in
-`APP_ID`, and upload an image named `icon` under its Rich Presence art assets
-so the large icon resolves. Everything else works without this; the feature
-just stays invisible.
+Presence uses the project's own Discord application, whose id is `APP_ID` in
+`src-tauri/src/discord.rs`. A fork that wants its own name on the presence
+registers an application at <https://discord.com/developers/applications>,
+puts its id in `APP_ID`, and uploads an image named `icon` under its Rich
+Presence art assets so the large icon resolves.
 
-### Update signing (do this before the first release)
+### Update signing
 
 The app updates itself from these releases and refuses anything without a
-valid signature, so the repository needs its own signing keypair. The public
-key committed in `tauri.conf.json` is a placeholder that only keeps local
-builds valid — nobody holds its private half, so replace it:
+valid signature. The project's public key is committed in
+`src-tauri/tauri.conf.json` (and as `.tauri/updater.key.pub`); its private half
+is the repository secret `TAURI_SIGNING_PRIVATE_KEY`. A fork that publishes its
+own releases needs its own keypair:
 
 ```sh
 pnpm tauri signer generate -w .tauri/updater.key
@@ -182,7 +200,7 @@ runs on any machine — `src-tauri` is only command wrappers.
 | `sbmm-assets` | Reading `.pak` and `.utoc` indexes to find out what a mod replaces |
 | `sbmm-store` | SQLite persistence: mods, groups, per-profile state, deployment record |
 | `sbmm-nexus` | Nexus REST/GraphQL client, `nxm://` parsing, rate limits, the download queue |
-| `sbmm-upscaler` | Finding DLSS/FSR DLLs, reading their PE version, GPU capability rules, vendor release catalogue |
+| `sbmm-upscaler` | Finding DLSS/FSR DLLs, reading their PE version, GPU capability rules, vendor release catalogue; the RTX 20/30 frame generation package (`framegen`): compatibility check, release verification, proxy layout |
 | `sbmm-app` | The application service the UI drives |
 | `src-tauri` | Tauri commands, window, bundling |
 
@@ -210,12 +228,16 @@ All paths are relative to the folder containing `SB/`.
 | UE4SS runtime | `UE4SS.dll` | `SB/Binaries/Win64/` |
 | Root / ReShade | `ReShade.ini`, a proxy DLL | `SB/Binaries/Win64/` |
 | Movie | `.mp4`/`.bk2`, a `Movies` directory | `SB/Content/Movies/` |
+| Splash art | `Splash.bmp`, a `Splash` directory | `SB/Content/Splash/` |
 | Game root overlay | an explicit `SB/` tree | laid onto the game folder |
 
 ## Development
 
 ```sh
 cargo test --workspace          # domain crates
+
+# Check a real dlssg_for_sm86 release against the package rules (unpack it first)
+SBMM_SM86_PACKAGE=/path/to/unpacked cargo test -p sbmm-upscaler --test framegen_release
 cargo clippy --workspace --all-targets
 pnpm typecheck
 
