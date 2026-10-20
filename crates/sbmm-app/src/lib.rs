@@ -47,6 +47,8 @@ pub enum AppError {
     KeyStore(#[from] credentials::KeyStoreError),
     #[error(transparent)]
     Encode(#[from] serde_json::Error),
+    #[error(transparent)]
+    Vfs(#[from] sbmm_vfs::MappingError),
 }
 
 impl AppError {
@@ -287,6 +289,7 @@ impl App {
         library::move_tree(&old_root.join("mods"), &new_root.join("mods"))?;
         library::move_tree(&old_root.join("backups"), &new_root.join("backups"))?;
         library::move_tree(&old_root.join("downloads"), &new_root.join("downloads"))?;
+        library::move_tree(&old_root.join("overwrite"), &new_root.join("overwrite"))?;
 
         self.store
             .set_setting(SETTING_LIBRARY_ROOT, &new_root.to_string_lossy())?;
@@ -1345,6 +1348,107 @@ impl App {
             .collect();
         self.store.forget_created_dirs(&gone)?;
         Ok(())
+    }
+
+    // -- virtual file system -----------------------------------------------
+
+    /// Where files the game creates while running under the virtual file
+    /// system are kept — Mod Organizer 2's "overwrite" folder.
+    pub fn overwrite_dir(&self) -> PathBuf {
+        self.library_root().join("overwrite")
+    }
+
+    /// Where the mapping and the files the manager generates for the game
+    /// are written before a launch.
+    pub fn vfs_dir(&self) -> PathBuf {
+        self.library_root().join("vfs")
+    }
+
+    pub fn vfs_mapping_path(&self) -> PathBuf {
+        self.vfs_dir().join("mapping.json")
+    }
+
+    /// The game folder as the enabled mods would make it, described as layers
+    /// rather than written into the folder.
+    ///
+    /// Built from exactly the plans the hard-link backend deploys, stacked in
+    /// the same order the conflicts view reads — lowest priority first, so
+    /// the mod furthest down the load order wins — which is what makes the
+    /// two ways of running the game indistinguishable to it. UE4SS's
+    /// `mods.txt` is generated from the real one, so the user's own entries
+    /// carry over without the real file being rewritten.
+    pub fn vfs_mapping(&self) -> Result<sbmm_vfs::Mapping> {
+        let game = self.game()?.ok_or(AppError::NoGame)?;
+        let mut records = self.store.list_mods()?;
+        records.sort_by_key(|m| (m.priority, m.id));
+
+        let mut layers = Vec::new();
+        let mut registrations: BTreeMap<String, bool> = BTreeMap::new();
+        for record in &records {
+            let components = self.store.components_for(record.id)?;
+            let plan = self.plan_for(record, &components);
+            for name in &plan.ue4ss_registrations {
+                // If two mods share a folder name, enabled wins.
+                let entry = registrations.entry(name.clone()).or_insert(false);
+                *entry = *entry || record.enabled;
+            }
+            if !record.enabled {
+                continue;
+            }
+            layers.push(sbmm_vfs::Layer {
+                origin: sbmm_vfs::Origin::Mod(record.id),
+                name: record.name.clone(),
+                files: plan
+                    .files
+                    .iter()
+                    .map(|f| sbmm_vfs::LayerFile {
+                        target: f.target.clone(),
+                        source: plan.staging_root.join(&f.source),
+                    })
+                    // A planned path that is a folder, or has gone missing,
+                    // is not something the game could open anyway.
+                    .filter(|f| f.source.is_file())
+                    .collect(),
+            });
+        }
+
+        if registrations.values().any(|enabled| *enabled) {
+            let real = std::fs::read_to_string(game.root.join(sbmm_core::paths::UE4SS_MODS_TXT))
+                .unwrap_or_default();
+            let generated = self
+                .vfs_dir()
+                .join("generated")
+                .join(sbmm_core::paths::UE4SS_MODS_TXT);
+            if let Some(parent) = generated.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
+            }
+            std::fs::write(&generated, ue4ss::render_mods_txt(&real, &registrations))
+                .map_err(|e| AppError::io(&generated, e))?;
+            layers.push(sbmm_vfs::Layer {
+                origin: sbmm_vfs::Origin::Generated,
+                name: "UE4SS mods.txt".into(),
+                files: vec![sbmm_vfs::LayerFile {
+                    target: PathBuf::from(sbmm_core::paths::UE4SS_MODS_TXT),
+                    source: generated,
+                }],
+            });
+        }
+
+        Ok(sbmm_vfs::Mapping::new(
+            game.root,
+            self.overwrite_dir(),
+            layers,
+        ))
+    }
+
+    /// Write the mapping where the hook will look for it, and return its path.
+    pub fn write_vfs_mapping(&self) -> Result<PathBuf> {
+        let mapping = self.vfs_mapping()?;
+        std::fs::create_dir_all(self.overwrite_dir())
+            .map_err(|e| AppError::io(self.overwrite_dir(), e))?;
+        let path = self.vfs_mapping_path();
+        mapping.save(&path)?;
+        Ok(path)
     }
 
     // -- update checks -----------------------------------------------------

@@ -927,6 +927,111 @@ fn a_proxy_name_owned_by_another_mod_is_attributed_to_it() {
     );
 }
 
+/// What the game would see through the virtual file system: the real folder
+/// with every overlay file laid over it, in the same shape as
+/// [`Fixture::game_snapshot`].
+fn virtual_view(game: &Path, mapping: sbmm_vfs::Mapping) -> BTreeMap<String, Vec<u8>> {
+    let vfs = mapping.into_vfs();
+    let mut view = snapshot(game);
+    for (path, file) in vfs.overlay().files() {
+        // The real entry may be spelled differently; the overlay replaces it.
+        view.retain(|existing, _| existing.to_lowercase() != path.as_str());
+        for dir in path.ancestors().iter().filter(|d| !d.is_root()) {
+            let spelled = format!("{}/", dir.display());
+            if !view
+                .keys()
+                .any(|k| k.to_lowercase() == spelled.to_lowercase())
+            {
+                view.insert(spelled, Vec::new());
+            }
+        }
+        view.insert(path.display().to_string(), fs::read(&file.source).unwrap());
+    }
+    view
+}
+
+/// The point of the virtual file system is that the game cannot tell it from
+/// a real deployment. So the view it builds has to be exactly the folder the
+/// hard-link backend produces — paks renamed for load order, UE4SS folders
+/// and `mods.txt`, a replaced game file, and the winner of a clash — while
+/// the real folder is left untouched.
+#[test]
+fn the_virtual_view_matches_a_real_deployment_exactly() {
+    let mut fx = Fixture::new();
+    let movie = fx.game.join("SB/Content/Movies/Intro.mp4");
+    fs::create_dir_all(movie.parent().unwrap()).unwrap();
+    fs::write(&movie, "original").unwrap();
+    let mods_txt = fx.game.join("SB/Binaries/Win64/ue4ss/Mods/mods.txt");
+    fs::create_dir_all(mods_txt.parent().unwrap()).unwrap();
+    fs::write(&mods_txt, "; mine\nKeepMe : 1\n").unwrap();
+
+    let outfit = fx.install_folder("Outfit", &[("Outfit_P.pak", "outfit")]);
+    let hair = fx.install_folder("Hair", &[("Hair_P.pak", "hair")]);
+    let skip = fx.install_folder(
+        "Cutscene Skip",
+        &[("CutsceneSkip/scripts/main.lua", "-- lua")],
+    );
+    let intro_a = fx.install_folder("Intro A", &[("Movies/Intro.mp4", "intro a")]);
+    let intro_b = fx.install_folder("Intro B", &[("Movies/Intro.mp4", "intro b")]);
+    let _off = fx.install_folder("Switched Off", &[("Off_P.pak", "off")]);
+    fx.app
+        .set_enabled(&[outfit, hair, skip, intro_a, intro_b], true)
+        .unwrap();
+    fx.app
+        .set_order(&[hair, outfit, intro_a, skip, intro_b])
+        .unwrap();
+
+    let untouched = fx.game_snapshot();
+    let view = virtual_view(&fx.game, fx.app.vfs_mapping().unwrap());
+    assert_eq!(
+        fx.game_snapshot(),
+        untouched,
+        "building the view must not write to the game folder"
+    );
+
+    fx.app.apply().unwrap();
+    let deployed = fx.game_snapshot();
+    assert_eq!(view, deployed);
+    assert_eq!(
+        fs::read_to_string(&movie).unwrap(),
+        "intro b",
+        "the clash goes to the mod further down the load order"
+    );
+}
+
+/// Files the game writes under the virtual file system go to overwrite and are
+/// there again next time, without ever touching the game folder.
+#[test]
+fn files_the_game_creates_go_to_overwrite() {
+    use sbmm_vfs::{Access, Redirect, VPath};
+
+    let mut fx = Fixture::new();
+    let id = fx.install_folder(
+        "Cutscene Skip",
+        &[("CutsceneSkip/scripts/main.lua", "-- lua")],
+    );
+    fx.app.set_enabled(&[id], true).unwrap();
+
+    let path = fx.app.write_vfs_mapping().unwrap();
+    let vfs = sbmm_vfs::Mapping::load(&path).unwrap().into_vfs();
+    let log = VPath::from_relative("SB/Binaries/Win64/ue4ss/UE4SS.log").unwrap();
+    let Redirect::To(real) = vfs.redirect(&log, Access::Create, false) else {
+        panic!("a new file has to be redirected");
+    };
+    assert!(real.starts_with(fx.app.overwrite_dir()));
+    fs::create_dir_all(real.parent().unwrap()).unwrap();
+    fs::write(&real, "log").unwrap();
+
+    let again = sbmm_vfs::Mapping::load(&fx.app.write_vfs_mapping().unwrap())
+        .unwrap()
+        .into_vfs();
+    assert_eq!(
+        again.redirect(&log, Access::Read, false),
+        Redirect::To(real)
+    );
+    assert!(!fx.game.join("SB/Binaries/Win64/ue4ss/UE4SS.log").exists());
+}
+
 /// Closing the manager mid-collection must not lose the queue — that is forty
 /// entries and a part-downloaded file the user would have to redo by hand.
 #[test]

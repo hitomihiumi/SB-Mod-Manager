@@ -39,7 +39,18 @@ pub fn sync_mods_txt(
         Err(e) => return Err(DeployError::io(&path, e)),
     };
 
-    let mut lines = parse(&existing);
+    write(&path, &apply(&existing, states))
+}
+
+/// What `mods.txt` reads after applying `states` to `existing`, without
+/// touching the disk — for the virtual file system, which serves the result
+/// instead of writing it into the game folder.
+pub fn render_mods_txt(existing: &str, states: &BTreeMap<String, bool>) -> String {
+    serialise(&apply(existing, states))
+}
+
+fn apply(existing: &str, states: &BTreeMap<String, bool>) -> Vec<Line> {
+    let mut lines = parse(existing);
     let mut seen: Vec<String> = Vec::new();
 
     for line in lines.iter_mut() {
@@ -59,8 +70,7 @@ pub fn sync_mods_txt(
             });
         }
     }
-
-    write(&path, &lines)
+    lines
 }
 
 /// Drop a mod's registration entirely, for when the mod is uninstalled.
@@ -127,6 +137,14 @@ fn parse(text: &str) -> Vec<Line> {
 }
 
 fn write(path: &Path, lines: &[Line]) -> Result<(), DeployError> {
+    let out = serialise(lines);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| DeployError::io(parent, e))?;
+    }
+    fs::write(path, out).map_err(|e| DeployError::io(path, e))
+}
+
+fn serialise(lines: &[Line]) -> String {
     let mut out = String::new();
     for line in lines {
         match line {
@@ -139,10 +157,7 @@ fn write(path: &Path, lines: &[Line]) -> Result<(), DeployError> {
             }
         }
     }
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| DeployError::io(parent, e))?;
-    }
-    fs::write(path, out).map_err(|e| DeployError::io(path, e))
+    out
 }
 
 /// Called when no UE4SS mods are enabled any more.

@@ -1504,6 +1504,7 @@ dependencies = [
  "sbmm-nexus",
  "sbmm-store",
  "sbmm-upscaler",
+ "sbmm-vfs",
  "serde",
  "serde_json",
  "tempfile",
@@ -1601,6 +1602,16 @@ dependencies = [
  "tempfile",
  "thiserror",
  "windows",
+]
+
+[[package]]
+name = "sbmm-vfs"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
 ]
 
 [[package]]
