@@ -634,9 +634,61 @@ export const ipc = {
   setWatchDir: (dir: string | null) => invoke<void>("set_watch_dir", { dir }),
   setWatchAutoInstall: (on: boolean) => invoke<void>("set_watch_auto_install", { on }),
   markSeen: (keys: string[]) => invoke<void>("mark_seen", { keys }),
+  /** Resolves to how many mods were written. */
+  exportModList: (path: string) => invoke<number>("export_mod_list", { path }),
+  planImport: (path: string) => invoke<ImportPlan>("plan_import", { path }),
+  importModList: (path: string, profile: string) =>
+    invoke<ImportOutcome>("import_mod_list", { path, profile }),
+  updatableMods: () => invoke<UpdatableMod[]>("updatable_mods"),
+  /** Queue the newest files; each replaces its old version on install. */
+  updateMods: (ids: number[]) => invoke<UpdatesQueued>("update_mods", { ids }),
 };
 
 export type ShortcutPlace = "desktop" | "startMenu";
+
+/** One entry of a mod list being imported. */
+export interface ImportEntry {
+  name: string;
+  version: string | null;
+  enabled: boolean;
+  status: "installed" | "download" | "manual";
+  modId: number | null;
+  nexusModId: number | null;
+  nexusFileId: number | null;
+}
+
+export interface ImportPlan {
+  /** The profile it was exported from. */
+  profile: string;
+  entries: ImportEntry[];
+  rules: number;
+}
+
+export interface ImportOutcome {
+  profileId: number;
+  profile: string;
+  matched: number;
+  /** Queued; each takes its place when it arrives. */
+  downloads: ImportEntry[];
+  /** To fetch by hand. */
+  manual: string[];
+  applied: ApplyReport;
+}
+
+export interface UpdatableMod {
+  id: number;
+  name: string;
+  nexusModId: number;
+  nexusFileId: number | null;
+  version: string | null;
+  latest: string;
+}
+
+export interface UpdatesQueued {
+  queued: number;
+  current: string[];
+  failed: [string, string][];
+}
 
 /** Where the library's disk space goes. */
 export interface StorageReport {

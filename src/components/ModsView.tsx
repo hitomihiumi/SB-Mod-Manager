@@ -22,6 +22,7 @@ import { useApp, visibleMods } from "../store/useApp";
 import { OverwriteBar } from "./OverwriteBar";
 import { ProfileSwitcher } from "./ProfileSwitcher";
 import { ModDetails } from "./ModDetails";
+import { UpdateAllButton } from "./ModListSections";
 import { GameUpdateBanner } from "./SafetySections";
 import { Ue4ssBanner } from "./Ue4ssSection";
 import { Badge, Button, Checkbox, Empty } from "./ui";
@@ -271,6 +272,7 @@ function Toolbar({
       )}
 
       <div className="ml-auto" />
+      <UpdateAllButton />
       <CheckUpdatesButton />
       <Button variant="primary" size="sm" onClick={onAdd}>
         <Plus size={13} /> Add mods

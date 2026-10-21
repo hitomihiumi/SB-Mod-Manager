@@ -559,3 +559,56 @@ pub struct FoundArchive {
     pub name: String,
     pub bytes: u64,
 }
+
+/// What importing a mod list would do.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportPlan {
+    /// The profile it was exported from, to suggest as the new one's name.
+    pub profile: String,
+    /// In load order.
+    pub entries: Vec<ImportEntry>,
+    /// Load order rules it carries.
+    pub rules: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportEntry {
+    pub name: String,
+    pub version: Option<String>,
+    pub enabled: bool,
+    /// `installed`, `download` (from Nexus) or `manual`.
+    pub status: String,
+    /// The installed mod it matched.
+    pub mod_id: Option<i64>,
+    pub nexus_mod_id: Option<i64>,
+    pub nexus_file_id: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportOutcome {
+    pub profile_id: i64,
+    pub profile: String,
+    /// Installed mods put in place.
+    pub matched: usize,
+    /// Nexus mods to download; each takes its place when it arrives.
+    pub downloads: Vec<ImportEntry>,
+    /// Mods from elsewhere, to fetch by hand.
+    pub manual: Vec<String>,
+    /// What switching to the new profile changed in the game folder.
+    pub applied: ApplyReport,
+}
+
+/// A Nexus mod with a newer version out.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdatableMod {
+    pub id: i64,
+    pub name: String,
+    pub nexus_mod_id: i64,
+    pub nexus_file_id: Option<i64>,
+    pub version: Option<String>,
+    pub latest: String,
+}

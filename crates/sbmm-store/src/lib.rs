@@ -666,6 +666,49 @@ impl Store {
         Ok(())
     }
 
+    /// A mod's place in every profile, as `(profile_id, enabled, priority)`.
+    pub fn profile_states(&self, mod_id: i64) -> Result<Vec<(i64, bool, i64)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT profile_id, enabled, priority FROM profile_mods WHERE mod_id = ?1")?;
+        let rows = stmt.query_map([mod_id], |r| {
+            Ok((r.get(0)?, r.get::<_, i64>(1)? != 0, r.get(2)?))
+        })?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// Set a mod's place in one profile, whichever profile is active.
+    pub fn set_profile_state(
+        &self,
+        profile_id: i64,
+        mod_id: i64,
+        enabled: bool,
+        priority: i64,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO profile_mods (profile_id, mod_id, enabled, priority)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(profile_id, mod_id)
+             DO UPDATE SET enabled = excluded.enabled, priority = excluded.priority",
+            params![profile_id, mod_id, enabled as i64, priority],
+        )?;
+        Ok(())
+    }
+
+    /// Make every rule about `old` about `new` instead, as when one version
+    /// of a mod replaces another.
+    pub fn repoint_order_rules(&self, old: i64, new: i64) -> Result<()> {
+        self.conn.execute(
+            "UPDATE OR IGNORE order_rules SET before_mod = ?2 WHERE before_mod = ?1",
+            params![old, new],
+        )?;
+        self.conn.execute(
+            "UPDATE OR IGNORE order_rules SET after_mod = ?2 WHERE after_mod = ?1",
+            params![old, new],
+        )?;
+        Ok(())
+    }
+
     /// Mods enabled in at least one profile.
     pub fn mods_enabled_anywhere(&self) -> Result<std::collections::BTreeSet<i64>> {
         let mut stmt = self

@@ -2935,3 +2935,168 @@ fn a_watched_folder_offers_each_new_archive_once() {
     assert!(fx.app.new_watched_archives().unwrap().is_empty());
     assert!(fx.app.set_watch_dir(Some(&browser.join("nope"))).is_err());
 }
+
+// -- stage 11: mod lists and updates ----------------------------------------
+
+/// Install a loose folder as if it came from Nexus.
+fn install_from_nexus(
+    fx: &mut Fixture,
+    name: &str,
+    files: &[(&str, &str)],
+    nexus: (i64, i64),
+) -> i64 {
+    let folder = fx.source.join(format!("{name}-{}", nexus.1));
+    for (rel, contents) in files {
+        let path = folder.join(rel);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, contents).unwrap();
+    }
+    let staged = fx.app.stage_folder(&folder).unwrap();
+    fx.app
+        .commit_install(
+            &staged.staging_id,
+            name,
+            None,
+            sbmm_app::Origin::nexus(nexus.0, nexus.1).with_version(Some(format!("1.{}", nexus.1))),
+        )
+        .unwrap()
+}
+
+#[test]
+fn a_mod_list_moves_a_setup_to_another_install() {
+    let mut home = Fixture::new();
+    let outfit = install_from_nexus(&mut home, "Outfit", &[("Outfit_P.pak", "o")], (101, 1));
+    let hair = install_from_nexus(&mut home, "Hair", &[("Hair_P.pak", "h")], (202, 1));
+    let local = home.install_folder("My Recolour", &[("Recolour_P.pak", "r")]);
+    home.app.set_order(&[local, hair, outfit]).unwrap();
+    home.app.set_enabled(&[outfit, local], true).unwrap();
+    home.app.add_order_rule(local, outfit).unwrap();
+    home.app.set_mod_tags(outfit, &["suit".into()]).unwrap();
+
+    let file = home.source.join("setup.sbmm.json");
+    assert_eq!(home.app.export_mod_list(&file).unwrap(), 3);
+
+    // Elsewhere, only the hair mod is installed, under another name.
+    let mut away = Fixture::new();
+    let theirs = install_from_nexus(
+        &mut away,
+        "Hair (renamed)",
+        &[("Hair_P.pak", "h")],
+        (202, 1),
+    );
+    let plan = away.app.plan_import(&file).unwrap();
+    let statuses: Vec<(&str, &str)> = plan
+        .entries
+        .iter()
+        .map(|e| (e.name.as_str(), e.status.as_str()))
+        .collect();
+    assert_eq!(
+        statuses,
+        [
+            ("My Recolour", "manual"),
+            ("Hair", "installed"),
+            ("Outfit", "download")
+        ]
+    );
+    assert_eq!(plan.rules, 1);
+
+    let outcome = away.app.import_mod_list(&file, "From home").unwrap();
+    assert_eq!(outcome.matched, 1);
+    assert_eq!(outcome.manual, ["My Recolour"]);
+    assert_eq!(outcome.downloads.len(), 1);
+    let snapshot = away.app.snapshot().unwrap();
+    assert!(snapshot
+        .profiles
+        .iter()
+        .any(|p| p.active && p.name == "From home"));
+    assert!(
+        !snapshot
+            .mods
+            .iter()
+            .find(|m| m.id == theirs)
+            .unwrap()
+            .enabled
+    );
+
+    // The download arrives and takes its place, enabled, after the hair mod.
+    let arrived = install_from_nexus(&mut away, "Outfit", &[("Outfit_P.pak", "o")], (101, 1));
+    let mods = away.app.snapshot().unwrap().mods;
+    let order: Vec<i64> = mods.iter().map(|m| m.id).collect();
+    assert_eq!(order, [theirs, arrived]);
+    assert!(mods.iter().find(|m| m.id == arrived).unwrap().enabled);
+
+    assert!(
+        away.app.import_mod_list(&file, "From home").is_err(),
+        "name taken"
+    );
+    let junk = away.source.join("junk.json");
+    fs::write(&junk, "{\"hello\": 1}").unwrap();
+    assert!(away.app.plan_import(&junk).is_err());
+}
+
+/// An update replaces the version it updates, keeping everything the user
+/// set on it.
+#[test]
+fn an_update_takes_the_old_versions_place() {
+    let mut fx = Fixture::new();
+    let other = fx.install_folder("Base", &[("Base_P.pak", "b")]);
+    let old = install_from_nexus(
+        &mut fx,
+        "Outfit",
+        &[("Outfit_P.pak", "v1"), ("Outfit.ini", "[Look]\nShine=1\n")],
+        (101, 1),
+    );
+    fx.app.set_order(&[old, other]).unwrap();
+    fx.app.set_enabled(&[old, other], true).unwrap();
+    fx.app.add_order_rule(other, old).unwrap();
+    fx.app.sort_by_rules().unwrap();
+    fx.app.set_mod_tags(old, &["suit".into()]).unwrap();
+    fx.app.set_mod_notes(old, "the white one").unwrap();
+    fx.app.apply().unwrap();
+    fx.app
+        .write_config(
+            sbmm_app::config::ConfigScope::Mod { mod_id: old },
+            "Outfit.ini",
+            "[Look]\nShine=5\n",
+        )
+        .unwrap();
+    fx.app.record_update_check(old, Some("1.2")).unwrap();
+    assert_eq!(fx.app.updatable_mods().unwrap().len(), 1);
+
+    fx.app.expect_update(old).unwrap();
+    let new = install_from_nexus(
+        &mut fx,
+        "Outfit",
+        &[
+            ("Outfit_P.pak", "v2"),
+            ("Outfit.ini", "[Look]\nShine=1\nGloss=0\n"),
+        ],
+        (101, 2),
+    );
+
+    let mods = fx.app.snapshot().unwrap().mods;
+    assert!(!mods.iter().any(|m| m.id == old), "the old version is gone");
+    let view = mods.iter().find(|m| m.id == new).unwrap();
+    assert!(view.enabled);
+    assert_eq!(view.tags, ["suit"]);
+    assert_eq!(view.notes.as_deref(), Some("the white one"));
+    assert!(view.misordered.is_empty());
+    let rules = fx.app.order_rules().unwrap();
+    assert_eq!((rules[0].before_id, rules[0].after_id), (other, new));
+
+    let ini = fx
+        .app
+        .read_config(
+            sbmm_app::config::ConfigScope::Mod { mod_id: new },
+            "Outfit.ini",
+        )
+        .unwrap();
+    assert_eq!(ini.text, "[Look]\nShine=5\nGloss=0\n");
+    let game = fx.game_snapshot();
+    let pak = game
+        .iter()
+        .find(|(k, _)| k.contains("Outfit_P.pak"))
+        .unwrap();
+    assert_eq!(pak.1, b"v2");
+    assert!(fx.app.updatable_mods().unwrap().is_empty());
+}
