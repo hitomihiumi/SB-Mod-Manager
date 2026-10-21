@@ -1,0 +1,20 @@
+[package]
+name = "sbmm-shell"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+# A Windows shortcut is written by the shell's own COM object, so it holds
+# exactly what Explorer would write, whatever the characters in its paths.
+[target.'cfg(windows)'.dependencies.windows]
+version = "0.62"
+features = [
+    "Win32_System_Com",
+    "Win32_UI_Shell",
+]

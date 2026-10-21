@@ -576,7 +576,23 @@ export const ipc = {
   renameProfile: (id: number, name: string) => invoke<void>("rename_profile", { id, name }),
   deleteProfile: (id: number) => invoke<void>("delete_profile", { id }),
   switchProfile: (id: number) => invoke<ApplyReport>("switch_profile", { id }),
+  /** What a profile's shortcut runs, as one line. */
+  profileCommand: (profileId: number, launch: boolean) =>
+    invoke<string>("profile_command", { profileId, launch }),
+  /** Resolves to the shortcut's path. */
+  createProfileShortcut: (profileId: number, place: ShortcutPlace, launch: boolean) =>
+    invoke<string>("create_profile_shortcut", { profileId, place, launch }),
+  /** Messages about command-line requests, each handed over once. */
+  takeNotices: () => invoke<Notice[]>("take_notices"),
 };
+
+export type ShortcutPlace = "desktop" | "startMenu";
+
+/** The outcome of a request from the command line or a shortcut. */
+export interface Notice {
+  kind: "success" | "error";
+  message: string;
+}
 
 /** The game's Nexus domain, mirroring `NEXUS_DOMAIN` in `sbmm-game`. */
 const NEXUS_DOMAIN = "stellarblade";

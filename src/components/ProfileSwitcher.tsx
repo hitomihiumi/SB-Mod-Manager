@@ -1,8 +1,9 @@
-import { Copy, FilePlus2, Pencil, Trash2, UserCog } from "lucide-react";
+import { Copy, FilePlus2, Link2, Pencil, Trash2, UserCog } from "lucide-react";
 import { useState } from "react";
 
 import { ipc, type ProfileView } from "../lib/ipc";
 import { useApp } from "../store/useApp";
+import { ShortcutDialog } from "./ShortcutDialog";
 import { Button, Dialog } from "./ui";
 
 type Editing =
@@ -24,6 +25,7 @@ export function ProfileSwitcher() {
   const [editing, setEditing] = useState<Editing | null>(null);
   const [name, setName] = useState("");
   const [working, setWorking] = useState(false);
+  const [shortcut, setShortcut] = useState(false);
 
   const profiles = snapshot?.profiles ?? [];
   const active = profiles.find((p) => p.active) ?? null;
@@ -133,6 +135,14 @@ export function ProfileSwitcher() {
           >
             <Pencil size={13} />
           </Button>
+          <Button
+            size="sm"
+            title="Shortcut that starts the game with a profile"
+            disabled={working}
+            onClick={() => setShortcut(true)}
+          >
+            <Link2 size={13} />
+          </Button>
         </>
       )}
       {profiles.length > 1 && (
@@ -148,6 +158,14 @@ export function ProfileSwitcher() {
         >
           <Trash2 size={13} />
         </Button>
+      )}
+
+      {shortcut && active && (
+        <ShortcutDialog
+          profiles={profiles}
+          initial={active.id}
+          onClose={() => setShortcut(false)}
+        />
       )}
 
       <Dialog

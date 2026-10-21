@@ -1595,6 +1595,20 @@ fn profiles_are_named_sensibly_and_the_active_one_cannot_be_deleted() {
     );
 }
 
+/// A shortcut names its profile, so the name is found however it is cased.
+#[test]
+fn a_profile_is_found_by_the_name_a_shortcut_carries() {
+    let mut fx = Fixture::new();
+    let id = fx.app.create_profile("Фото режим", false).unwrap();
+    assert_eq!(fx.app.profile_named("  фото РЕЖИМ ").unwrap().id, id);
+    let missing = fx.app.profile_named("Vanilla").unwrap_err().to_string();
+    assert!(missing.contains("“Vanilla”"), "{missing}");
+    assert!(
+        missing.contains("“Фото режим”"),
+        "names the ones there are: {missing}"
+    );
+}
+
 /// The mod list flags loose-file clashes the way Mod Organizer 2 does: the
 /// mod further down wins, the one above loses, and a mod whose every file is
 /// taken is called out as doing nothing.

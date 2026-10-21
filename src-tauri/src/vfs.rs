@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use sbmm_app::dto::{ApplyReport, DeploymentMode, VfsEntry, VfsListing};
 use sbmm_game::InstallSource;
+use tauri::Manager;
 use tauri_plugin_opener::OpenerExt;
 
 use crate::{fail, AppState};
@@ -59,10 +60,13 @@ pub fn set_deployment_mode(
 /// Start the game the way the current mode needs: through the virtual file
 /// system, or the ordinary way with the mods already in the folder.
 #[tauri::command]
-pub async fn launch_game(
-    app_handle: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
-) -> Result<String, String> {
+pub async fn launch_game(app_handle: tauri::AppHandle) -> Result<String, String> {
+    launch(&app_handle).await
+}
+
+/// The launch itself, shared by the Play button and the command line.
+pub async fn launch(app_handle: &tauri::AppHandle) -> Result<String, String> {
+    let state = app_handle.state::<AppState>();
     let (mode, game) = crate::with_app!(state, |app| app
         .deployment_mode()
         .and_then(|mode| Ok((mode, app.game()?))))?;

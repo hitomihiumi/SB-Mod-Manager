@@ -1323,6 +1323,27 @@ impl App {
         Ok(self.store.list_profiles()?)
     }
 
+    /// The profile a command line or shortcut names. Case is ignored in any
+    /// script, since the name was typed or carried over from a rename.
+    pub fn profile_named(&self, name: &str) -> Result<sbmm_store::ProfileRecord> {
+        let wanted = name.trim().to_lowercase();
+        let profiles = self.store.list_profiles()?;
+        let names = profiles
+            .iter()
+            .map(|p| format!("“{}”", p.name))
+            .collect::<Vec<_>>()
+            .join(", ");
+        profiles
+            .into_iter()
+            .find(|p| p.name.to_lowercase() == wanted)
+            .ok_or_else(|| {
+                AppError::Invalid(format!(
+                    "there is no profile called “{}” (there are {names})",
+                    name.trim()
+                ))
+            })
+    }
+
     /// A new profile from the active one: its load order always, its enabled
     /// set too when `copy_enabled` (a duplicate), otherwise nothing enabled.
     pub fn create_profile(&mut self, name: &str, copy_enabled: bool) -> Result<i64> {

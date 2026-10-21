@@ -9,6 +9,7 @@ members = [
     "crates/sbmm-nexus",
     "crates/sbmm-deploy",
     "crates/sbmm-store",
+    "crates/sbmm-shell",
     "crates/sbmm-upscaler",
     "crates/sbmm-vfs",
     "crates/sbmm-vfs-hook",
@@ -30,6 +31,7 @@ sbmm-game = { path = "crates/sbmm-game" }
 sbmm-nexus = { path = "crates/sbmm-nexus" }
 sbmm-deploy = { path = "crates/sbmm-deploy" }
 sbmm-store = { path = "crates/sbmm-store" }
+sbmm-shell = { path = "crates/sbmm-shell" }
 sbmm-upscaler = { path = "crates/sbmm-upscaler" }
 sbmm-vfs = { path = "crates/sbmm-vfs" }
 

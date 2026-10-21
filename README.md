@@ -124,6 +124,20 @@ wrong is the usual reason a mod "doesn't work".
   between them from the mod list; the game folder is brought in line on the
   spot. A new profile keeps the current order with nothing enabled; a
   duplicate keeps the enabled set too.
+- **Profile shortcuts and a command line.** As with Mod Organizer 2, a
+  shortcut on the desktop or in the Start menu can start the game with a
+  chosen profile without opening the manager:
+
+  ```text
+  sbmm.exe --profile "Cosmetics only" --launch
+  ```
+
+  `--profile` (`-p`) makes the profile active, `--launch` (`-l`) starts the
+  game; either works alone. Started only to launch, the manager stays hidden
+  and closes once the game is on its way; if anything stops it, the window
+  opens and says what. A manager that is already open takes the request
+  over. The profile shortcut dialog shows the exact command for this
+  install, to paste into Steam, Playnite or any other launcher.
 - **A Files view, like Mod Organizer 2's Data tab.** Browse the game folder as
   the enabled mods make it: every file is labelled with the mod, the game or
   the overwrite folder that provides it, and with the mods it hides. A
@@ -261,6 +275,7 @@ runs on any machine — `src-tauri` is only command wrappers.
 | `sbmm-upscaler` | Finding DLSS/FSR DLLs, reading their PE version, GPU capability rules, vendor release catalogue; the RTX 20/30 frame generation package (`framegen`): compatibility check, release verification, proxy layout |
 | `sbmm-vfs` | The virtual file system: the layered view of the game folder, Mod Organizer's redirect and overwrite rules, the mapping file, and the launcher that starts the game with the hook |
 | `sbmm-vfs-hook` | The DLL loaded into the game: rewrites import tables so file calls are answered from the mapping |
+| `sbmm-shell` | The command line (`--profile`, `--launch`) and profile shortcuts, written through the Windows shell's link object |
 | `sbmm-app` | The application service the UI drives |
 | `src-tauri` | Tauri commands, window, bundling |
 

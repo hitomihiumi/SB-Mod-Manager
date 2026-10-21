@@ -3643,6 +3643,7 @@ dependencies = [
  "sbmm-core",
  "sbmm-game",
  "sbmm-nexus",
+ "sbmm-shell",
  "sbmm-upscaler",
  "sbmm-vfs",
  "serde",
@@ -3741,6 +3742,13 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "sbmm-shell"
+version = "0.1.0"
+dependencies = [
+ "windows 0.62.2",
 ]
 
 [[package]]

@@ -76,6 +76,10 @@ jobs:
           & "$bin\vfs_launch.exe" "$env:RUNNER_TEMP\vfs-run"
           exit $LASTEXITCODE
 
+      # Profile shortcuts go through the Windows shell's own link object.
+      - name: Shortcuts through the Windows shell
+        run: cargo test --release -p sbmm-shell
+
   # The Tauri crate needs WebView2, so it only builds on the target platform.
   app:
     name: Windows app

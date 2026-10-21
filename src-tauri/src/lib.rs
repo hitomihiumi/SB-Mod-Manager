@@ -8,6 +8,7 @@ mod collections;
 mod discord;
 mod downloads;
 mod framegen;
+mod shell;
 mod ue4ss;
 mod upscaler;
 mod vfs;
@@ -694,8 +695,13 @@ pub fn run() {
         // nxm:// link, and this is what forwards the link to the running
         // window instead of opening a second manager.
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
-            focus_main_window(app);
-            for arg in argv.iter().skip(1) {
+            let args = argv.get(1..).unwrap_or_default();
+            // A shortcut that only starts the game leaves the window alone.
+            let request = shell::handle(app, args, false);
+            if !request.is_some_and(|r| r.launch) {
+                focus_main_window(app);
+            }
+            for arg in args {
                 deliver_nxm(app, arg);
             }
         }))
@@ -710,6 +716,7 @@ pub fn run() {
             app.manage(AppState(Mutex::new(service)));
             app.manage(Downloads::new());
             app.manage(Discord::start());
+            app.manage(shell::Notices::default());
 
             // Only needed during development and on Linux; the installer
             // registers the scheme on Windows.
@@ -734,6 +741,16 @@ pub fn run() {
 
             downloads::restore(app.handle());
             downloads::spawn_driver(app.handle().clone());
+
+            // The window starts hidden so a start that only launches the game
+            // never shows it; every other start shows it now.
+            let args: Vec<String> = std::env::args().skip(1).collect();
+            let request = shell::handle(app.handle(), &args, true);
+            if !request.is_some_and(|r| r.launch) {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                }
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -793,6 +810,9 @@ pub fn run() {
             vfs::clear_overwrite,
             ue4ss::ue4ss_latest,
             ue4ss::install_ue4ss,
+            shell::take_notices,
+            shell::profile_command,
+            shell::create_profile_shortcut,
         ])
         .run(tauri::generate_context!())
         .expect("failed to start SB Mod Manager");

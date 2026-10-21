@@ -50,6 +50,8 @@ interface AppStore {
   toasts: Toast[];
 
   init: () => Promise<void>;
+  /** Show what a shortcut or command line did, and the state it left. */
+  takeNotices: () => Promise<void>;
   refresh: () => Promise<void>;
   refreshDownloads: () => Promise<void>;
   /** Apply a progress event without a round trip to the backend. */
@@ -108,6 +110,19 @@ export const useApp = create<AppStore>((set, get) => ({
     await get().refresh();
     await get().refreshDownloads();
     set({ ready: true });
+    await get().takeNotices();
+  },
+
+  async takeNotices() {
+    try {
+      const notices = await ipc.takeNotices();
+      if (notices.length === 0) return;
+      // A profile switched from outside changes the whole list.
+      await get().refresh();
+      for (const notice of notices) get().toast(notice.kind, notice.message);
+    } catch (error) {
+      get().toast("error", String(error));
+    }
   },
 
   async refresh() {

@@ -107,6 +107,8 @@ export default function App() {
         toast("error", name ? `${name}: ${reason}` : reason);
       }),
       listen<[string, string]>("nxm-rejected", (event) => toast("error", event.payload[1])),
+      // A shortcut or a second start asked for a profile or the game.
+      listen("notices", () => void useApp.getState().takeNotices()),
       // A collection link from the browser goes to the collections screen,
       // which looks it up on arrival.
       listen<{ slug: string }>("nxm-collection", (event) => {
