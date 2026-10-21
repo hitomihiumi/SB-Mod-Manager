@@ -93,6 +93,16 @@ wrong is the usual reason a mod "doesn't work".
 - **Updates itself** from GitHub releases, on either the stable or the nightly
   channel, with the download checked against a signature before anything is
   replaced.
+- **Profiles.** Keep several setups — say, vanilla, cosmetics only and
+  everything — each with its own enabled mods and load order, and switch
+  between them from the mod list; the game folder is brought in line on the
+  spot. A new profile keeps the current order with nothing enabled; a
+  duplicate keeps the enabled set too.
+- **A Files view, like Mod Organizer 2's Data tab.** Browse the game folder as
+  the enabled mods make it: every file is labelled with the mod, the game or
+  the overwrite folder that provides it, and with the mods it hides.
+- **One-click diagnostics.** Settings → Diagnostics writes a zip with a
+  summary of the setup and every relevant log, for attaching to a report.
 - **Leaves nothing behind.** Every file written and every original displaced is
   recorded, so disabling everything restores the folder byte for byte —
   including removing directories and the `mods.txt` it created, while never
@@ -119,19 +129,15 @@ worth knowing before the first real run:
   whether the game will actually load the proxy, which is why the other proxy
   names are offered. Edits to `dlssg_sm86.ini` are replaced when the package
   is reinstalled or updated.
-
 - **The virtual file system is new.** Its rules are tested against real
-  deployments, and the hook and launcher are tested end to end under Wine
-  (`scripts/test-vfs-wine.sh`), but not yet against the game on Windows. The
+  deployments, and the hook and launcher run end to end on every push —
+  natively on Windows in CI, and under Wine with `scripts/test-vfs-wine.sh` —
+  with a stand-in for the game, but not yet against the game itself. The
   hook redirects the Win32 file functions through import tables; code that
   reaches the file system some other way — directly through `ntdll`, say —
   sees the real folder. A Steam install started this way is told its app id
   so it does not relaunch itself through Steam; an Epic install may need the
   Epic launcher running.
-
-Not built:
-
-- Profiles (the schema already stores state per profile)
 
 ## Building
 

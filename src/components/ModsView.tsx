@@ -17,6 +17,7 @@ import { useMemo, useRef, useState } from "react";
 import { formatBytes } from "../lib/format";
 import { ipc, modPageUrl, MOD_TYPE_META, type GroupView, type ModView } from "../lib/ipc";
 import { useApp, visibleMods } from "../store/useApp";
+import { ProfileSwitcher } from "./ProfileSwitcher";
 import { Badge, Button, Checkbox, Empty } from "./ui";
 
 const ROW_HEIGHT = 38;
@@ -194,6 +195,8 @@ function Toolbar({
   const scope = selectionCount > 0 ? `${selectionCount} selected` : `all ${totalShown}`;
   return (
     <div className="flex h-12 shrink-0 items-center gap-2 border-b border-line px-3">
+      <ProfileSwitcher />
+      <div className="mx-1 h-5 w-px bg-line" />
       <div className="relative">
         <Search
           size={13}
@@ -203,7 +206,7 @@ function Toolbar({
           value={search}
           onChange={(event) => setSearch(event.target.value)}
           placeholder="Search mods"
-          className="h-8 w-56 rounded-md border border-line bg-base pr-2 pl-7 text-[12px] placeholder:text-ink-muted focus:border-accent-soft focus:outline-none"
+          className="h-8 w-36 rounded-md border border-line bg-base pr-2 pl-7 text-[12px] placeholder:text-ink-muted focus:border-accent-soft focus:outline-none xl:w-56"
         />
       </div>
 
@@ -270,7 +273,7 @@ function CheckUpdatesButton() {
   return (
     <Button size="sm" disabled={checking} onClick={() => void check()} title="Check Nexus for newer versions">
       <RefreshCw size={13} className={checking ? "animate-spin" : undefined} />
-      {checking ? "Checking…" : "Check updates"}
+      <span className="hidden xl:inline">{checking ? "Checking…" : "Check updates"}</span>
     </Button>
   );
 }

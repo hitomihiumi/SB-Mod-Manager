@@ -50,6 +50,8 @@ pub enum AppError {
     Encode(#[from] serde_json::Error),
     #[error(transparent)]
     Vfs(#[from] sbmm_vfs::MappingError),
+    #[error("{0}")]
+    Invalid(String),
 }
 
 impl AppError {
@@ -1077,6 +1079,7 @@ impl App {
             update_channel: self.update_channel()?,
             discord_rpc: self.discord_rpc()?,
             deployment_mode: self.deployment_mode()?,
+            profiles: self.store.list_profiles()?,
         })
     }
 
@@ -1160,6 +1163,66 @@ impl App {
     pub fn rename_mod(&mut self, mod_id: i64, name: &str) -> Result<()> {
         self.store.rename_mod(mod_id, name)?;
         Ok(())
+    }
+
+    // -- profiles ----------------------------------------------------------
+
+    pub fn profiles(&self) -> Result<Vec<sbmm_store::ProfileRecord>> {
+        Ok(self.store.list_profiles()?)
+    }
+
+    /// A new profile from the active one: its load order always, its enabled
+    /// set too when `copy_enabled` (a duplicate), otherwise nothing enabled.
+    pub fn create_profile(&mut self, name: &str, copy_enabled: bool) -> Result<i64> {
+        let name = self.valid_profile_name(name, None)?;
+        Ok(self.store.create_profile(&name, None, copy_enabled)?)
+    }
+
+    pub fn rename_profile(&mut self, id: i64, name: &str) -> Result<()> {
+        let name = self.valid_profile_name(name, Some(id))?;
+        Ok(self.store.rename_profile(id, &name)?)
+    }
+
+    pub fn delete_profile(&mut self, id: i64) -> Result<()> {
+        Ok(self.store.delete_profile(id)?)
+    }
+
+    /// Make another profile active and bring the game folder in line with it.
+    ///
+    /// Enabled state and load order are per profile while the deployment
+    /// record is not, so the ordinary reconciliation does the switch: it
+    /// removes what the new profile does not enable, adds what it does, and
+    /// renames paks whose position changed. Under the virtual file system
+    /// that touches only the files that have to be real; the rest follows at
+    /// the next launch.
+    pub fn switch_profile(&mut self, id: i64) -> Result<ApplyReport> {
+        if id == self.store.active_profile()? {
+            return Ok(ApplyReport::default());
+        }
+        self.store.set_active_profile(id)?;
+        if self.game()?.is_some() {
+            self.apply()
+        } else {
+            Ok(ApplyReport::default())
+        }
+    }
+
+    fn valid_profile_name(&self, name: &str, renaming: Option<i64>) -> Result<String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(AppError::Invalid("a profile needs a name".into()));
+        }
+        let taken = self
+            .store
+            .list_profiles()?
+            .into_iter()
+            .any(|p| Some(p.id) != renaming && p.name.eq_ignore_ascii_case(name));
+        if taken {
+            return Err(AppError::Invalid(format!(
+                "there is already a profile called “{name}”"
+            )));
+        }
+        Ok(name.to_string())
     }
 
     // -- applying ----------------------------------------------------------

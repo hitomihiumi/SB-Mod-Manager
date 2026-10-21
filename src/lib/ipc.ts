@@ -79,6 +79,16 @@ export interface AppSnapshot {
   /** Whether the manager publishes a Discord presence. */
   discordRpc: boolean;
   deploymentMode: DeploymentMode;
+  /** Every profile, the active one marked. */
+  profiles: ProfileView[];
+}
+
+/** A named set of enabled mods and a load order. */
+export interface ProfileView {
+  id: number;
+  name: string;
+  active: boolean;
+  enabledCount: number;
 }
 
 /** How enabled mods reach the game: hard links in the folder, or the virtual
@@ -422,6 +432,11 @@ export const ipc = {
   vfsTree: (dir: string) => invoke<VfsListing>("vfs_tree", { dir }),
   /** Write the diagnostics zip to `path`; resolves to where it went. */
   collectDiagnostics: (path: string) => invoke<string>("collect_diagnostics", { path }),
+  createProfile: (name: string, copyEnabled: boolean) =>
+    invoke<number>("create_profile", { name, copyEnabled }),
+  renameProfile: (id: number, name: string) => invoke<void>("rename_profile", { id, name }),
+  deleteProfile: (id: number) => invoke<void>("delete_profile", { id }),
+  switchProfile: (id: number) => invoke<ApplyReport>("switch_profile", { id }),
 };
 
 /** The game's Nexus domain, mirroring `NEXUS_DOMAIN` in `sbmm-game`. */

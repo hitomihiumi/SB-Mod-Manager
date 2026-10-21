@@ -24,6 +24,8 @@ pub struct AppSnapshot {
     pub discord_rpc: bool,
     /// How enabled mods reach the game.
     pub deployment_mode: DeploymentMode,
+    /// Every profile, the active one marked.
+    pub profiles: Vec<sbmm_store::ProfileRecord>,
 }
 
 /// How enabled mods reach the game.

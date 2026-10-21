@@ -215,6 +215,31 @@ fn folders(state: tauri::State<'_, AppState>) -> Result<FoldersView, String> {
     with_app!(state, |app| app.folders())
 }
 
+#[tauri::command]
+fn create_profile(
+    state: tauri::State<'_, AppState>,
+    name: String,
+    copy_enabled: bool,
+) -> Result<i64, String> {
+    with_app!(state, |app| app.create_profile(&name, copy_enabled))
+}
+
+#[tauri::command]
+fn rename_profile(state: tauri::State<'_, AppState>, id: i64, name: String) -> Result<(), String> {
+    with_app!(state, |app| app.rename_profile(id, &name))
+}
+
+#[tauri::command]
+fn delete_profile(state: tauri::State<'_, AppState>, id: i64) -> Result<(), String> {
+    with_app!(state, |app| app.delete_profile(id))
+}
+
+/// Make another profile active and reconcile the game folder with it.
+#[tauri::command]
+fn switch_profile(state: tauri::State<'_, AppState>, id: i64) -> Result<ApplyReport, String> {
+    with_app!(state, |app| app.switch_profile(id))
+}
+
 /// Write the diagnostics bundle to `path`, with what only the shell knows —
 /// the manager's version, the system and the graphics card — added to it.
 #[tauri::command]
@@ -693,6 +718,10 @@ pub fn run() {
             set_auto_apply,
             folders,
             collect_diagnostics,
+            create_profile,
+            rename_profile,
+            delete_profile,
+            switch_profile,
             conflicts,
             index_mod_assets,
             set_library_root,

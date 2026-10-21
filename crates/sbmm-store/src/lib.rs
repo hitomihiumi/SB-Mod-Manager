@@ -20,6 +20,10 @@ pub enum StoreError {
     Encode(#[from] serde_json::Error),
     #[error("no mod with id {0}")]
     UnknownMod(i64),
+    #[error("no profile with id {0}")]
+    UnknownProfile(i64),
+    #[error("the active profile, or the only one left, cannot be deleted")]
+    ProfileInUse,
 }
 
 type Result<T> = std::result::Result<T, StoreError>;
@@ -103,6 +107,16 @@ pub struct NewMod {
     pub image_path: Option<String>,
 }
 
+/// A named set of enabled mods and a load order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileRecord {
+    pub id: i64,
+    pub name: String,
+    pub active: bool,
+    pub enabled_count: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GroupRecord {
@@ -164,6 +178,99 @@ impl Store {
         )?)
     }
 
+    pub fn list_profiles(&self) -> Result<Vec<ProfileRecord>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT p.id, p.name, p.active,
+                    (SELECT COUNT(*) FROM profile_mods pm
+                      WHERE pm.profile_id = p.id AND pm.enabled = 1)
+             FROM profiles p ORDER BY p.id",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(ProfileRecord {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                active: r.get::<_, i64>(2)? != 0,
+                enabled_count: r.get(3)?,
+            })
+        })?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// Add a profile, taking its load order from `copy_from` (or the active
+    /// profile). With `copy_enabled` the enabled set comes along too, which
+    /// is a duplicate; without it every mod starts disabled, which is a fresh
+    /// profile that still knows the order the user arranged.
+    pub fn create_profile(
+        &mut self,
+        name: &str,
+        copy_from: Option<i64>,
+        copy_enabled: bool,
+    ) -> Result<i64> {
+        let source = match copy_from {
+            Some(id) => id,
+            None => self.active_profile()?,
+        };
+        let tx = self.conn.transaction()?;
+        tx.execute(
+            "INSERT INTO profiles (name, active) VALUES (?1, 0)",
+            [name.trim()],
+        )?;
+        let id = tx.last_insert_rowid();
+        // Every mod gets a row, so the new profile has a full, gap-free order
+        // even for mods the source profile never had a row for.
+        tx.execute(
+            "INSERT INTO profile_mods (profile_id, mod_id, enabled, priority)
+             SELECT ?1, m.id,
+                    CASE WHEN ?3 THEN COALESCE(pm.enabled, 0) ELSE 0 END,
+                    COALESCE(pm.priority, 1000000 + m.id)
+             FROM mods m
+             LEFT JOIN profile_mods pm ON pm.mod_id = m.id AND pm.profile_id = ?2",
+            params![id, source, copy_enabled],
+        )?;
+        tx.commit()?;
+        Ok(id)
+    }
+
+    pub fn rename_profile(&self, id: i64, name: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE profiles SET name = ?2 WHERE id = ?1",
+            params![id, name.trim()],
+        )?;
+        Ok(())
+    }
+
+    /// Delete a profile. The active profile and the last one left are
+    /// refused: something has to describe what the game folder holds.
+    pub fn delete_profile(&self, id: i64) -> Result<()> {
+        let (active, count): (i64, i64) = self.conn.query_row(
+            "SELECT (SELECT active FROM profiles WHERE id = ?1),
+                    (SELECT COUNT(*) FROM profiles)",
+            [id],
+            |r| Ok((r.get::<_, Option<i64>>(0)?.unwrap_or(0), r.get(1)?)),
+        )?;
+        if active != 0 || count <= 1 {
+            return Err(StoreError::ProfileInUse);
+        }
+        self.conn
+            .execute("DELETE FROM profiles WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    /// Make `id` the profile every per-mod query reads from.
+    pub fn set_active_profile(&mut self, id: i64) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        let exists: i64 =
+            tx.query_row("SELECT COUNT(*) FROM profiles WHERE id = ?1", [id], |r| {
+                r.get(0)
+            })?;
+        if exists == 0 {
+            return Err(StoreError::UnknownProfile(id));
+        }
+        tx.execute("UPDATE profiles SET active = (id = ?1)", [id])?;
+        tx.commit()?;
+        Ok(())
+    }
+
     // -- mods --------------------------------------------------------------
 
     pub fn insert_mod(&self, new: &NewMod) -> Result<i64> {
@@ -188,18 +295,16 @@ impl Store {
         )?;
         let id = self.conn.last_insert_rowid();
 
-        // New mods start disabled at the end of the load order, so installing
-        // never changes what the game currently loads.
-        let profile = self.active_profile()?;
-        let next_priority: i64 = self.conn.query_row(
-            "SELECT COALESCE(MAX(priority), 0) + 10 FROM profile_mods WHERE profile_id = ?1",
-            [profile],
-            |r| r.get(0),
-        )?;
+        // New mods start disabled at the end of the load order — in every
+        // profile, so installing never changes what any profile loads and a
+        // mod never turns up at the top of another profile's order.
         self.conn.execute(
             "INSERT INTO profile_mods (profile_id, mod_id, enabled, priority)
-             VALUES (?1, ?2, 0, ?3)",
-            params![profile, id, next_priority],
+             SELECT p.id, ?1, 0,
+                    (SELECT COALESCE(MAX(priority), 0) + 10
+                       FROM profile_mods WHERE profile_id = p.id)
+             FROM profiles p",
+            [id],
         )?;
         Ok(id)
     }

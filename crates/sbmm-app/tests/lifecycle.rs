@@ -1497,3 +1497,100 @@ fn a_diagnostics_bundle_carries_the_setup_and_the_logs() {
         "a log that was never written is left out, not faked"
     );
 }
+
+/// Switching profile reconciles the game folder with the other profile's
+/// enabled set and load order, and switching back restores the first exactly.
+#[test]
+fn switching_profiles_swaps_what_is_in_the_game_folder() {
+    let mut fx = Fixture::new();
+    let outfit = fx.install_folder("Outfit", &[("Outfit_P.pak", "outfit")]);
+    let hair = fx.install_folder("Hair", &[("Hair_P.pak", "hair")]);
+    fx.app.set_enabled(&[outfit, hair], true).unwrap();
+    fx.app.apply().unwrap();
+    let everything = fx.game_snapshot();
+    let first = fx
+        .app
+        .profiles()
+        .unwrap()
+        .into_iter()
+        .find(|p| p.active)
+        .unwrap()
+        .id;
+
+    // A fresh profile keeps the order but enables nothing.
+    let clean = fx.app.create_profile("Clean", false).unwrap();
+    fx.app.switch_profile(clean).unwrap();
+    assert!(!fx.game.join("SB/Content/Paks/~mods").exists());
+    assert!(fx.app.snapshot().unwrap().pending.is_empty());
+
+    // A change here does not leak into the other profile.
+    fx.app.set_enabled(&[hair], true).unwrap();
+    fx.app.apply().unwrap();
+    assert!(fx
+        .game
+        .join("SB/Content/Paks/~mods/0020_Hair_P.pak")
+        .exists());
+    assert!(!fx
+        .game
+        .join("SB/Content/Paks/~mods/0010_Outfit_P.pak")
+        .exists());
+
+    fx.app.switch_profile(first).unwrap();
+    assert_eq!(fx.game_snapshot(), everything);
+
+    let profiles = fx.app.profiles().unwrap();
+    assert_eq!(profiles.len(), 2);
+    assert_eq!(
+        profiles
+            .iter()
+            .find(|p| p.id == clean)
+            .unwrap()
+            .enabled_count,
+        1
+    );
+}
+
+#[test]
+fn a_duplicate_carries_the_enabled_set_and_new_mods_join_every_profile_disabled() {
+    let mut fx = Fixture::new();
+    let outfit = fx.install_folder("Outfit", &[("Outfit_P.pak", "outfit")]);
+    fx.app.set_enabled(&[outfit], true).unwrap();
+
+    let copy = fx.app.create_profile("Copy", true).unwrap();
+    // Installed while the first profile is active, it still lands at the end
+    // of the copy's order, disabled.
+    let hair = fx.install_folder("Hair", &[("Hair_P.pak", "hair")]);
+    fx.app.switch_profile(copy).unwrap();
+
+    let mods = fx.app.snapshot().unwrap().mods;
+    let outfit_view = mods.iter().find(|m| m.id == outfit).unwrap();
+    let hair_view = mods.iter().find(|m| m.id == hair).unwrap();
+    assert!(outfit_view.enabled, "a duplicate keeps the enabled set");
+    assert!(!hair_view.enabled);
+    assert!(hair_view.priority > outfit_view.priority);
+}
+
+#[test]
+fn profiles_are_named_sensibly_and_the_active_one_cannot_be_deleted() {
+    let mut fx = Fixture::new();
+    assert!(fx.app.create_profile("  ", false).is_err());
+    let id = fx.app.create_profile("Cosmetic", false).unwrap();
+    assert!(fx.app.create_profile("cosmetic", false).is_err());
+    fx.app.rename_profile(id, "Cosmetics").unwrap();
+    fx.app.rename_profile(id, "Cosmetics").unwrap();
+
+    let active = fx
+        .app
+        .profiles()
+        .unwrap()
+        .into_iter()
+        .find(|p| p.active)
+        .unwrap()
+        .id;
+    assert!(fx.app.delete_profile(active).is_err());
+    fx.app.delete_profile(id).unwrap();
+    assert!(
+        fx.app.delete_profile(active).is_err(),
+        "the last profile left stays"
+    );
+}
