@@ -10,6 +10,7 @@ mod discord;
 mod downloads;
 mod framegen;
 mod insight;
+mod modlist;
 mod safety;
 mod shell;
 mod storage;
@@ -850,6 +851,11 @@ pub fn run() {
             storage::set_watch_dir,
             storage::set_watch_auto_install,
             storage::mark_seen,
+            modlist::export_mod_list,
+            modlist::plan_import,
+            modlist::import_mod_list,
+            modlist::updatable_mods,
+            modlist::update_mods,
         ])
         .run(tauri::generate_context!())
         .expect("failed to start SB Mod Manager");

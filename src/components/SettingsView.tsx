@@ -11,6 +11,7 @@ import { Button, Checkbox, Section } from "./ui";
 import { DeploymentSection } from "./DeploymentSection";
 import { DiagnosticsSection } from "./DiagnosticsSection";
 import { GameConfigSection } from "./ConfigEditor";
+import { ModListSection } from "./ModListSections";
 import { RestorePointsSection, SavesSection } from "./SafetySections";
 import { StorageSection, WatchSection } from "./StorageSections";
 import { Ue4ssSection } from "./Ue4ssSection";
@@ -113,6 +114,8 @@ export function SettingsView() {
         </Section>
 
         <DeploymentSection />
+
+        <ModListSection />
 
         <RestorePointsSection />
 

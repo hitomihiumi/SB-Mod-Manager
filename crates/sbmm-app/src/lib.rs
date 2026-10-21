@@ -11,6 +11,7 @@ pub mod dto;
 pub mod insight;
 pub mod installer;
 pub mod library;
+pub mod modlist;
 pub mod safety;
 pub mod saves;
 pub mod storage;
@@ -1109,12 +1110,13 @@ impl App {
             .unwrap_or("unknown")
             .to_string();
 
+        let origin_nexus = origin.nexus_mod_id;
         let id = self.store.insert_mod(&NewMod {
             name: name.to_string(),
             staging_folder: staging_id.to_string(),
             version: origin.version,
             source: origin.source,
-            nexus_mod_id: origin.nexus_mod_id,
+            nexus_mod_id: origin_nexus,
             nexus_file_id: origin.nexus_file_id,
             primary_type,
             components,
@@ -1131,6 +1133,11 @@ impl App {
         // Its settings as they came, for resets and for carrying edits over
         // to a later version.
         self.keep_pristine(staging_id)?;
+        // An update asked for, or a mod from an imported list, takes the
+        // place it was expected to.
+        if let Some(nexus) = origin_nexus {
+            self.settle_expected(id, nexus)?;
+        }
 
         Ok(id)
     }

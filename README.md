@@ -124,6 +124,17 @@ wrong is the usual reason a mod "doesn't work".
   between them from the mod list; the game folder is brought in line on the
   spot. A new profile keeps the current order with nothing enabled; a
   duplicate keeps the enabled set too.
+- **Mod lists.** Save a profile to a `.sbmm.json` file — its mods in
+  order, which are on, where each came from, tags and load order rules —
+  to share or keep. Opening one sets it up as a new profile: installed mods
+  are put in place, mods from Nexus that are missing are queued and take
+  their place when they arrive, and anything else is listed to get by hand.
+- **Updates everything at once.** After an update check, one button
+  queues the newest file of each outdated mod — the same kind of file as
+  the one installed (main, optional…). Each new version takes the old one's
+  place: enabled where it was, at the same spot in every profile, with its
+  group, rules, tags, notes and your settings edits, and the old version is
+  removed.
 - **Watches your downloads folder.** Point it at the folder the browser
   saves to, and mod archives downloaded by hand from any site are offered
   for install the moment they finish (or installed without asking, if you
