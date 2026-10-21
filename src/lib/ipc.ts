@@ -627,9 +627,48 @@ export const ipc = {
   nexusView: (modId: number) => invoke<NexusView | null>("nexus_view", { modId }),
   refreshNexusDetails: (modId: number, force: boolean) =>
     invoke<NexusView | null>("refresh_nexus_details", { modId, force }),
+  storageReport: () => invoke<StorageReport>("storage_report"),
+  /** Resolves to the bytes freed. */
+  cleanStorage: (what: Cleanup) => invoke<number>("clean_storage", { what }),
+  watchSettings: () => invoke<WatchSettings>("watch_settings"),
+  setWatchDir: (dir: string | null) => invoke<void>("set_watch_dir", { dir }),
+  setWatchAutoInstall: (on: boolean) => invoke<void>("set_watch_auto_install", { on }),
+  markSeen: (keys: string[]) => invoke<void>("mark_seen", { keys }),
 };
 
 export type ShortcutPlace = "desktop" | "startMenu";
+
+/** Where the library's disk space goes. */
+export interface StorageReport {
+  total: number;
+  parts: {
+    /** `mods`, `downloads`, `saves` and `vfs` can be cleaned. */
+    key: string;
+    label: string;
+    path: string;
+    bytes: number;
+    files: number;
+    cleanableBytes: number;
+    cleanableFiles: number;
+  }[];
+  /** Not enabled in any profile, largest first. */
+  unusedMods: { id: number; name: string; bytes: number }[];
+}
+
+export type Cleanup = "orphans" | "downloads" | "saveBackups" | "logs";
+
+/** A mod archive that appeared in the watched downloads folder. */
+export interface FoundArchive {
+  key: string;
+  path: string;
+  name: string;
+  bytes: number;
+}
+
+export interface WatchSettings {
+  dir: string | null;
+  autoInstall: boolean;
+}
 
 /** What one mod changes. */
 export interface ModContents {

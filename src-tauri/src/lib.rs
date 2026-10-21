@@ -12,6 +12,7 @@ mod framegen;
 mod insight;
 mod safety;
 mod shell;
+mod storage;
 mod ue4ss;
 mod upscaler;
 mod vfs;
@@ -744,6 +745,7 @@ pub fn run() {
 
             downloads::restore(app.handle());
             downloads::spawn_driver(app.handle().clone());
+            storage::spawn_watcher(app.handle().clone());
 
             // The window starts hidden so a start that only launches the game
             // never shows it; every other start shows it now.
@@ -842,6 +844,12 @@ pub fn run() {
             insight::sort_by_rules,
             insight::nexus_view,
             insight::refresh_nexus_details,
+            storage::storage_report,
+            storage::clean_storage,
+            storage::watch_settings,
+            storage::set_watch_dir,
+            storage::set_watch_auto_install,
+            storage::mark_seen,
         ])
         .run(tauri::generate_context!())
         .expect("failed to start SB Mod Manager");

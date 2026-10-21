@@ -515,3 +515,47 @@ pub struct VfsListing {
     pub dir: String,
     pub entries: Vec<VfsEntry>,
 }
+
+/// Where the library's disk space goes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageReport {
+    pub total: u64,
+    pub parts: Vec<StoragePart>,
+    /// Mods not enabled in any profile, largest first.
+    pub unused_mods: Vec<UnusedMod>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoragePart {
+    /// Which cleanup applies: `mods` (orphans), `downloads`, `saves`, `vfs`
+    /// (logs); others cannot be cleaned.
+    pub key: String,
+    pub label: String,
+    pub path: String,
+    pub bytes: u64,
+    pub files: usize,
+    /// How much of it cleaning would free.
+    pub cleanable_bytes: u64,
+    pub cleanable_files: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnusedMod {
+    pub id: i64,
+    pub name: String,
+    pub bytes: u64,
+}
+
+/// A mod archive that appeared in the watched downloads folder.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FoundArchive {
+    /// Name and size, which is how it is remembered as offered.
+    pub key: String,
+    pub path: String,
+    pub name: String,
+    pub bytes: u64,
+}
