@@ -75,7 +75,9 @@ interface AppStore {
   uninstall: (id: number) => Promise<void>;
 
   stagePaths: (paths: string[]) => Promise<void>;
-  confirmInstall: (name: string, typeOverride?: ModTypeId) => Promise<void>;
+  confirmInstall: (name: string, typeOverride?: ModTypeId, variants?: string[]) => Promise<void>;
+  /** Ask about an install that arrived from elsewhere — a download that holds several versions. */
+  enqueueStaged: (staged: StagedInstall) => void;
   cancelInstall: () => Promise<void>;
   skipRemaining: () => Promise<void>;
 
@@ -294,7 +296,7 @@ export const useApp = create<AppStore>((set, get) => ({
     await get().refresh();
 
     if (installed > 0) {
-      const waiting = pending.length > 0 ? `, ${pending.length} need a type` : "";
+      const waiting = pending.length > 0 ? `, ${pending.length} need a choice` : "";
       const broke = failed > 0 ? `, ${failed} failed` : "";
       get().toast(
         "success",
@@ -303,12 +305,16 @@ export const useApp = create<AppStore>((set, get) => ({
     }
   },
 
-  async confirmInstall(name, typeOverride) {
+  enqueueStaged(staged) {
+    set((state) => ({ queue: [...state.queue, staged] }));
+  },
+
+  async confirmInstall(name, typeOverride, variants) {
     const staged = get().queue[0];
     if (!staged) return;
     set({ busy: { label: name, done: 0, total: 1 } });
     try {
-      await ipc.confirmInstall(staged.stagingId, name, typeOverride);
+      await ipc.confirmInstall(staged.stagingId, name, typeOverride, variants);
       set((state) => ({ queue: state.queue.slice(1) }));
       await get().refresh();
       get().toast("success", `Installed ${name}.`);

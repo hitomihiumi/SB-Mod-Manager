@@ -129,6 +129,12 @@ const MIGRATIONS: &[&str] = &[
     -- be read is distinguishable from one that genuinely replaces nothing.
     ALTER TABLE mods ADD COLUMN assets_indexed_at TEXT;
     "#,
+    // v5 — which versions of a multi-variant archive the user installed, as a
+    // JSON list of the option labels, so an update of the same mod can be
+    // installed the same way without asking again.
+    r#"
+    ALTER TABLE mods ADD COLUMN variant_choice TEXT;
+    "#,
 ];
 
 pub fn migrate(conn: &Connection) -> Result<()> {

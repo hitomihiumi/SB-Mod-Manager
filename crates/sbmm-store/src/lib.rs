@@ -58,6 +58,8 @@ pub struct ModRecord {
     pub update_checked_at: Option<String>,
     /// Set once the mod's containers have been read for their asset list.
     pub assets_indexed_at: Option<String>,
+    /// The variant options chosen at install, as a JSON list of labels.
+    pub variant_choice: Option<String>,
 }
 
 /// An asset more than one mod provides.
@@ -316,7 +318,8 @@ impl Store {
                     m.nexus_mod_id, m.nexus_file_id, m.group_id, m.primary_type,
                     m.size_bytes, m.image_path, m.notes, m.installed_at,
                     COALESCE(pm.enabled, 0), COALESCE(pm.priority, 0),
-                    m.latest_version, m.update_checked_at, m.assets_indexed_at
+                    m.latest_version, m.update_checked_at, m.assets_indexed_at,
+                    m.variant_choice
              FROM mods m
              LEFT JOIN profile_mods pm
                     ON pm.mod_id = m.id AND pm.profile_id = ?1
@@ -342,9 +345,19 @@ impl Store {
                 latest_version: row.get(15)?,
                 update_checked_at: row.get(16)?,
                 assets_indexed_at: row.get(17)?,
+                variant_choice: row.get(18)?,
             })
         })?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// Remember which variants of its archive a mod was installed with.
+    pub fn set_variant_choice(&self, mod_id: i64, choice: Option<&str>) -> Result<()> {
+        self.conn.execute(
+            "UPDATE mods SET variant_choice = ?2 WHERE id = ?1",
+            params![mod_id, choice],
+        )?;
+        Ok(())
     }
 
     /// Record what a Nexus update check found for one mod.

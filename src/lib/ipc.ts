@@ -186,7 +186,26 @@ export interface StagedInstall {
   suggestedName: string;
   components: DetectedComponent[];
   sizeBytes: number;
+  /** The user has to be asked: a type, or which version to install. */
   needsConfirmation: boolean;
+  /** The versions the archive offers, when it holds several. */
+  variants: VariantChoice | null;
+  /** What was chosen when this mod was installed before. */
+  rememberedVariants: string[];
+}
+
+/** One version of a mod an archive offers. */
+export interface VariantOption {
+  label: string;
+  folder: string;
+  modTypes: ModTypeId[];
+  fileCount: number;
+}
+
+export interface VariantChoice {
+  options: VariantOption[];
+  /** Every option clashes with every other, so exactly one makes sense. */
+  exclusive: boolean;
 }
 
 export interface ApplyReport {
@@ -405,8 +424,18 @@ export const ipc = {
 
   stageArchive: (path: string) => invoke<StagedInstall>("stage_archive", { path }),
   stageFolder: (path: string) => invoke<StagedInstall>("stage_folder", { path }),
-  confirmInstall: (stagingId: string, name: string, typeOverride?: ModTypeId) =>
-    invoke<number>("confirm_install", { stagingId, name, typeOverride: typeOverride ?? null }),
+  confirmInstall: (
+    stagingId: string,
+    name: string,
+    typeOverride?: ModTypeId,
+    variants?: string[],
+  ) =>
+    invoke<number>("confirm_install", {
+      stagingId,
+      name,
+      typeOverride: typeOverride ?? null,
+      variants: variants ?? null,
+    }),
   cancelInstall: (stagingId: string) => invoke<void>("cancel_install", { stagingId }),
 
   setEnabled: (modIds: number[], enabled: boolean) =>

@@ -24,6 +24,14 @@ wrong is the usual reason a mod "doesn't work".
 - **Handles IoStore properly.** Stellar Blade is UE 4.26 with IoStore, so pak
   mods are `.pak`/`.utoc`/`.ucas` triplets that must share a base name and end
   in `_P`. Missing suffixes are fixed, incomplete sets are flagged.
+- **Asks which version, when an archive holds several.** Outfit mods often
+  ship `Black/`, `White/` and `Red/` in one archive, each a complete mod that
+  replaces the same files. Installing all of them means whichever loads last
+  wins, so the manager asks which to install — as Mod Organizer 2's installers
+  do — keeps only that, and remembers the answer: the next version of the same
+  mod, from Nexus or dropped in by hand, installs the same way without asking.
+  Folders that do not clash, like a pack of separate Lua mods, still install
+  together without a question.
 - **Load order that actually applies.** `~mods` is mounted alphanumerically, so
   priority is written into the deployed file names (`0010_Outfit_P.pak`) with
   every file of a set renamed together. Logic mods are left alone, because

@@ -53,6 +53,10 @@ pub enum AppError {
     Vfs(#[from] sbmm_vfs::MappingError),
     #[error("{0}")]
     Invalid(String),
+    /// A download holds several versions of the mod and the user has not
+    /// chosen before; it is staged, waiting to be asked about.
+    #[error("{} holds several versions; choose which to install", .0.suggested_name)]
+    NeedsChoice(Box<StagedInstall>),
 }
 
 impl AppError {
@@ -115,6 +119,10 @@ pub struct App {
     data_dir: PathBuf,
     backend: HardlinkBackend,
     keys: Box<dyn credentials::KeyStore>,
+    /// Where staged installs waiting on the user came from, so a Nexus
+    /// download that stops to ask which variant to install still remembers
+    /// it is a Nexus mod once the user answers.
+    pending_origins: std::collections::HashMap<String, Origin>,
 }
 
 impl App {
@@ -129,6 +137,7 @@ impl App {
             data_dir,
             backend: HardlinkBackend,
             keys: Box::new(credentials::OsKeyStore),
+            pending_origins: std::collections::HashMap::new(),
         };
         std::fs::create_dir_all(app.mods_dir()).map_err(|e| AppError::io(app.mods_dir(), e))?;
         Ok(app)
@@ -385,9 +394,20 @@ impl App {
     ) -> Result<StagedInstall> {
         let tree = FileTree::new(sbmm_archive::walk_relative(&dest));
         let components = detect_components(&tree);
-        let needs_confirmation = components
-            .iter()
-            .any(|c| c.confidence == Confidence::AskUser);
+        let variants = sbmm_core::variant_choice(&tree);
+        // An archive of alternatives always asks: installing every colour of
+        // an outfit at once is never what anyone meant.
+        let needs_confirmation = variants.is_some()
+            || components
+                .iter()
+                .any(|c| c.confidence == Confidence::AskUser);
+        let remembered_variants = match &variants {
+            Some(choice) => self
+                .remembered_variants(&suggested_name, None)?
+                .filter(|chosen| choice.folders_to_drop(chosen).is_some())
+                .unwrap_or_default(),
+            None => Vec::new(),
+        };
 
         Ok(StagedInstall {
             staging_id,
@@ -395,6 +415,8 @@ impl App {
             size_bytes: sbmm_archive::directory_size(&dest) as i64,
             components,
             needs_confirmation,
+            variants,
+            remembered_variants,
         })
     }
 
@@ -405,7 +427,72 @@ impl App {
         name: &str,
         type_override: Option<ModType>,
     ) -> Result<i64> {
-        self.commit_install(staging_id, name, type_override, Origin::manual())
+        self.confirm_install_with(staging_id, name, type_override, None)
+    }
+
+    /// Commit a staged install, keeping only the chosen `variants` (option
+    /// labels) of an archive that offers several.
+    ///
+    /// The other options' folders are deleted from staging before the commit,
+    /// so detection sees only what was chosen and the library does not keep
+    /// colours nobody will use. The choice is remembered on the mod.
+    pub fn confirm_install_with(
+        &mut self,
+        staging_id: &str,
+        name: &str,
+        type_override: Option<ModType>,
+        variants: Option<&[String]>,
+    ) -> Result<i64> {
+        if let Some(chosen) = variants {
+            self.keep_variants(staging_id, chosen)?;
+        }
+        let origin = self
+            .pending_origins
+            .remove(staging_id)
+            .unwrap_or_else(Origin::manual);
+        let id = self.commit_install(staging_id, name, type_override, origin)?;
+        if let Some(chosen) = variants {
+            self.store
+                .set_variant_choice(id, Some(&serde_json::to_string(chosen)?))?;
+        }
+        Ok(id)
+    }
+
+    /// Delete every option folder of a staged multi-variant archive except
+    /// the chosen ones.
+    fn keep_variants(&self, staging_id: &str, chosen: &[String]) -> Result<()> {
+        let dest = self.staging_path(staging_id);
+        let tree = FileTree::new(sbmm_archive::walk_relative(&dest));
+        let Some(choice) = sbmm_core::variant_choice(&tree) else {
+            return Err(AppError::Invalid(
+                "this archive does not offer a choice of versions".into(),
+            ));
+        };
+        let drop = choice.folders_to_drop(chosen).ok_or_else(|| {
+            AppError::Invalid("choose at least one of the versions the archive offers".into())
+        })?;
+        for folder in drop {
+            let path = dest.join(&folder);
+            std::fs::remove_dir_all(&path).map_err(|e| AppError::io(&path, e))?;
+        }
+        Ok(())
+    }
+
+    /// The variants chosen when this mod was last installed: matched by its
+    /// Nexus id when there is one, otherwise by name.
+    fn remembered_variants(
+        &self,
+        name: &str,
+        nexus_mod_id: Option<i64>,
+    ) -> Result<Option<Vec<String>>> {
+        let records = self.store.list_mods()?;
+        let with_choice = || records.iter().filter(|m| m.variant_choice.is_some());
+        let found = nexus_mod_id
+            .and_then(|id| with_choice().find(|m| m.nexus_mod_id == Some(id)))
+            .or_else(|| with_choice().find(|m| m.name.eq_ignore_ascii_case(name.trim())));
+        Ok(found
+            .and_then(|m| m.variant_choice.as_deref())
+            .and_then(|json| serde_json::from_str(json).ok()))
     }
 
     /// Install a file the download queue fetched from Nexus.
@@ -418,12 +505,37 @@ impl App {
         name: &str,
         origin: Origin,
     ) -> Result<i64> {
-        let staged = self.stage_archive(archive)?;
+        let mut staged = self.stage_archive(archive)?;
         let name = if name.trim().is_empty() {
             staged.suggested_name.clone()
         } else {
             name.to_string()
         };
+        if let Some(choice) = &staged.variants {
+            // An update of a mod installed before goes in the way it did then;
+            // anything else waits for the user, keeping where it came from.
+            let remembered = self
+                .remembered_variants(&name, origin.nexus_mod_id)?
+                .filter(|chosen| choice.folders_to_drop(chosen).is_some());
+            match remembered {
+                Some(chosen) => {
+                    self.pending_origins
+                        .insert(staged.staging_id.clone(), origin);
+                    return self.confirm_install_with(
+                        &staged.staging_id,
+                        &name,
+                        None,
+                        Some(&chosen),
+                    );
+                }
+                None => {
+                    staged.suggested_name = name;
+                    self.pending_origins
+                        .insert(staged.staging_id.clone(), origin);
+                    return Err(AppError::NeedsChoice(Box::new(staged)));
+                }
+            }
+        }
         self.commit_install(&staged.staging_id, &name, None, origin)
     }
 
@@ -975,6 +1087,7 @@ impl App {
     }
 
     pub fn cancel_install(&mut self, staging_id: &str) -> Result<()> {
+        self.pending_origins.remove(staging_id);
         let dest = self.staging_path(staging_id);
         if dest.is_dir() {
             std::fs::remove_dir_all(&dest).map_err(|e| AppError::io(&dest, e))?;

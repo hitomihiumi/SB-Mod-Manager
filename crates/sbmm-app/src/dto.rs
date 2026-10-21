@@ -208,8 +208,13 @@ pub struct StagedInstall {
     pub suggested_name: String,
     pub components: Vec<DetectedComponent>,
     pub size_bytes: i64,
-    /// True when at least one component needs the user to pick a type.
+    /// True when the user has to be asked: a component whose type could not
+    /// be worked out, or an archive offering several versions.
     pub needs_confirmation: bool,
+    /// The versions the archive offers, when it is several mods in one.
+    pub variants: Option<sbmm_core::VariantChoice>,
+    /// The options chosen when this mod was installed before, to preselect.
+    pub remembered_variants: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

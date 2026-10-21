@@ -29,7 +29,7 @@ import { SettingsView } from "./components/SettingsView";
 import { SetupWizard } from "./components/SetupWizard";
 import { TitleBar } from "./components/TitleBar";
 import { Button } from "./components/ui";
-import { ipc, type QueueItem } from "./lib/ipc";
+import { ipc, type QueueItem, type StagedInstall } from "./lib/ipc";
 import { useApp, type View } from "./store/useApp";
 
 const NAV: { id: View; label: string; icon: typeof Layers }[] = [
@@ -96,6 +96,11 @@ export default function App() {
           "info",
           `${event.payload.name}: press “Mod Manager Download” on the page that just opened.`,
         );
+      }),
+      // A download holding several versions waits in the same queue as a
+      // dropped archive that needs a choice.
+      listen<StagedInstall>("download-needs-choice", (event) => {
+        useApp.getState().enqueueStaged(event.payload);
       }),
       listen<[string, string]>("download-install-failed", (event) => {
         const [name, reason] = event.payload;

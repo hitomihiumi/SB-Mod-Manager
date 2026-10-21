@@ -1932,3 +1932,137 @@ fn the_real_ue4ss_release_installs_with_its_bundled_mods_switched_on() {
         "one UE4SS mod, not one per bundled mod"
     );
 }
+
+fn write_zip(path: &Path, files: &[(&str, &str)]) {
+    use std::io::Write;
+    let mut zip = zip::ZipWriter::new(fs::File::create(path).unwrap());
+    let options: zip::write::FileOptions<'_, ()> = zip::write::FileOptions::default();
+    for (name, contents) in files {
+        zip.start_file(*name, options).unwrap();
+        zip.write_all(contents.as_bytes()).unwrap();
+    }
+    zip.finish().unwrap();
+}
+
+const TWO_COLOURS: &[(&str, &str)] = &[
+    ("Diving Suit/Black/Outfit_P.pak", "black"),
+    ("Diving Suit/Black/Outfit_P.utoc", "black utoc"),
+    ("Diving Suit/White/Outfit_P.pak", "white"),
+    ("Diving Suit/White/Outfit_P.utoc", "white utoc"),
+    ("Diving Suit/readme.txt", "pick one"),
+];
+
+/// An archive holding several colours asks which, installs only that one,
+/// and remembers the answer for the next time the same mod comes in.
+#[test]
+fn a_multi_variant_archive_installs_only_the_chosen_version() {
+    let mut fx = Fixture::new();
+    let archive = fx.source.join("Diving Suit.zip");
+    write_zip(&archive, TWO_COLOURS);
+
+    let staged = fx.app.stage_archive(&archive).unwrap();
+    assert!(staged.needs_confirmation);
+    let choice = staged.variants.clone().unwrap();
+    assert!(choice.exclusive);
+    assert_eq!(staged.remembered_variants, Vec::<String>::new());
+
+    let id = fx
+        .app
+        .confirm_install_with(
+            &staged.staging_id,
+            "Diving Suit",
+            None,
+            Some(&["White".to_string()]),
+        )
+        .unwrap();
+    fx.app.set_enabled(&[id], true).unwrap();
+    fx.app.apply().unwrap();
+    let paks = fx.game.join("SB/Content/Paks/~mods");
+    assert_eq!(
+        fs::read_to_string(paks.join("0010_Outfit_P.pak")).unwrap(),
+        "white"
+    );
+    assert_eq!(
+        fs::read_dir(&paks).unwrap().count(),
+        2,
+        "one colour's pak and utoc, not both colours"
+    );
+
+    // The same archive again preselects what was chosen.
+    let again = fx.app.stage_archive(&archive).unwrap();
+    assert_eq!(again.remembered_variants, vec!["White".to_string()]);
+    fx.app.cancel_install(&again.staging_id).unwrap();
+
+    assert!(fx
+        .app
+        .confirm_install_with(&again.staging_id, "x", None, Some(&["Red".to_string()]))
+        .is_err());
+}
+
+/// A Nexus download of such an archive waits for the user without losing
+/// that it came from Nexus; its next version installs the same way unasked.
+#[test]
+fn a_downloaded_multi_variant_mod_asks_once_and_then_remembers() {
+    let mut fx = Fixture::new();
+    let first = fx.source.join("Diving Suit-101-1-0.zip");
+    write_zip(&first, TWO_COLOURS);
+
+    let origin = sbmm_app::Origin::nexus(101, 1).with_version(Some("1.0".into()));
+    let staged = match fx.app.install_download(&first, "Diving Suit", origin) {
+        Err(sbmm_app::AppError::NeedsChoice(staged)) => staged,
+        other => panic!("expected to be asked, got {other:?}"),
+    };
+    let id = fx
+        .app
+        .confirm_install_with(
+            &staged.staging_id,
+            &staged.suggested_name,
+            None,
+            Some(&["Black".to_string()]),
+        )
+        .unwrap();
+    let installed = fx
+        .app
+        .snapshot()
+        .unwrap()
+        .mods
+        .into_iter()
+        .find(|m| m.id == id)
+        .unwrap();
+    assert_eq!(installed.nexus_mod_id, Some(101), "it is still a Nexus mod");
+    assert_eq!(installed.version.as_deref(), Some("1.0"));
+
+    let update = fx.source.join("Diving Suit-101-1-1.zip");
+    write_zip(&update, TWO_COLOURS);
+    let origin = sbmm_app::Origin::nexus(101, 2).with_version(Some("1.1".into()));
+    let new_id = fx
+        .app
+        .install_download(&update, "Diving Suit", origin)
+        .expect("the remembered choice applies without asking");
+    fx.app.set_enabled(&[new_id], true).unwrap();
+    fx.app.apply().unwrap();
+    let pak = fx.game.join("SB/Content/Paks/~mods");
+    let contents: Vec<String> = fs::read_dir(&pak)
+        .unwrap()
+        .flatten()
+        .map(|e| fs::read_to_string(e.path()).unwrap())
+        .collect();
+    assert!(contents.contains(&"black".to_string()));
+    assert!(!contents.contains(&"white".to_string()));
+}
+
+#[test]
+fn a_bundle_of_separate_mods_still_installs_whole_without_asking() {
+    let mut fx = Fixture::new();
+    let archive = fx.source.join("Lua pack.zip");
+    write_zip(
+        &archive,
+        &[
+            ("Photo Mode/scripts/main.lua", "-- photo"),
+            ("Quick Sprint/scripts/main.lua", "-- sprint"),
+        ],
+    );
+    let staged = fx.app.stage_archive(&archive).unwrap();
+    assert!(staged.variants.is_none());
+    assert!(!staged.needs_confirmation);
+}

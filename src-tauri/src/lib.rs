@@ -129,6 +129,7 @@ fn confirm_install(
     staging_id: String,
     name: String,
     type_override: Option<String>,
+    variants: Option<Vec<String>>,
 ) -> Result<i64, String> {
     let forced = match type_override {
         Some(id) => {
@@ -136,7 +137,12 @@ fn confirm_install(
         }
         None => None,
     };
-    with_app!(state, |app| app.confirm_install(&staging_id, &name, forced))
+    with_app!(state, |app| app.confirm_install_with(
+        &staging_id,
+        &name,
+        forced,
+        variants.as_deref()
+    ))
 }
 
 #[tauri::command]
