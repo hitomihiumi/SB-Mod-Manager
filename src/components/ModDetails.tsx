@@ -7,6 +7,7 @@ import { formatBytes, formatDate } from "../lib/format";
 import { ipc, modPageUrl, MOD_TYPE_META, type ConfigFile, type ModView } from "../lib/ipc";
 import { useApp } from "../store/useApp";
 import { ConfigEditor } from "./ConfigEditor";
+import { ContentsSection, NexusSection, RulesSection } from "./ModInsight";
 import { Preview } from "./Preview";
 import { Badge } from "./ui";
 
@@ -129,6 +130,8 @@ export function ModDetails({ mod, onClose }: { mod: ModView; onClose: () => void
           )}
         </section>
 
+        <NexusSection mod={mod} />
+
         <section>
           <h4 className="mb-1.5 text-[12px] font-medium">Tags</h4>
           <div className="flex flex-wrap gap-1.5">
@@ -205,6 +208,10 @@ export function ModDetails({ mod, onClose }: { mod: ModView; onClose: () => void
             </ul>
           )}
         </section>
+
+        <ContentsSection mod={mod} />
+
+        <RulesSection mod={mod} />
       </div>
 
       {editing && (

@@ -341,13 +341,18 @@ impl<T: Transport> NexusClient<T> {
     }
 
     fn headers(&self) -> Vec<(String, String)> {
-        vec![
-            ("apikey".into(), self.api_key.clone()),
+        let mut headers = vec![
             ("Application-Name".into(), self.app_name.clone()),
             ("Application-Version".into(), self.app_version.clone()),
             ("Accept".into(), "application/json".into()),
             ("Content-Type".into(), "application/json".into()),
-        ]
+        ];
+        // Mod pages can be read without an account; an empty key is left
+        // out rather than sent.
+        if !self.api_key.is_empty() {
+            headers.insert(0, ("apikey".into(), self.api_key.clone()));
+        }
+        headers
     }
 
     fn record_limits(&self, response: &HttpResponse) {

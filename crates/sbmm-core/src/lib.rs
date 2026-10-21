@@ -11,6 +11,7 @@ pub mod loadorder;
 pub mod model;
 pub mod paths;
 pub mod plan;
+pub mod rules;
 pub mod tree;
 pub mod variants;
 

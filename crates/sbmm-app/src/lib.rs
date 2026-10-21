@@ -8,6 +8,7 @@ pub mod config;
 pub mod credentials;
 pub mod diagnostics;
 pub mod dto;
+pub mod insight;
 pub mod installer;
 pub mod library;
 pub mod safety;
@@ -1178,6 +1179,8 @@ impl App {
         let virtual_mode = self.deployment_mode()? == DeploymentMode::Virtual;
         let file_conflicts = self.file_conflict_counts(&records)?;
         let ue4ss_loads = self.ue4ss_presence(&records)?.loads();
+        let mut nexus_missing = self.missing_nexus_requirements(&records)?;
+        let mut misordered = self.misordered(&records)?;
         for record in &records {
             let components = self.store.components_for(record.id)?;
             let planned = self.deploy_plan_for(record, &components)?;
@@ -1217,14 +1220,17 @@ impl App {
                 latest_version: newer_version(&record.version, &record.latest_version),
                 nexus_mod_id: record.nexus_mod_id,
                 file_conflicts: file_conflicts.get(&record.id).cloned(),
-                missing_requirements: if record.enabled
-                    && !ue4ss_loads
-                    && ue4ss::requires_ue4ss(&components)
-                {
-                    vec!["UE4SS".to_string()]
-                } else {
-                    Vec::new()
+                missing_requirements: {
+                    let mut missing =
+                        if record.enabled && !ue4ss_loads && ue4ss::requires_ue4ss(&components) {
+                            vec!["UE4SS".to_string()]
+                        } else {
+                            Vec::new()
+                        };
+                    missing.extend(nexus_missing.remove(&record.id).unwrap_or_default());
+                    missing
                 },
+                misordered: misordered.remove(&record.id).unwrap_or_default(),
                 folder: record.staging_folder.clone(),
                 image: record.image_path.clone(),
                 notes: record.notes.clone(),

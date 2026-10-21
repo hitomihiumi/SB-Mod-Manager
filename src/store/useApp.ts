@@ -73,6 +73,8 @@ interface AppStore {
 
   toggle: (ids: number[], enabled: boolean) => Promise<void>;
   reorder: (ids: number[]) => Promise<void>;
+  /** Reorder to obey the load order rules; `adding` adds one first. */
+  sortByRules: (adding?: { before: number; after: number }) => Promise<void>;
   applyChanges: () => Promise<void>;
   /** Put deployed files changed outside the manager back. */
   repairDrift: () => Promise<void>;
@@ -239,6 +241,26 @@ export const useApp = create<AppStore>((set, get) => ({
       await ipc.setOrder(ids);
       await get().refresh();
       if (get().snapshot?.autoApply) await get().applyChanges();
+    } catch (error) {
+      get().toast("error", String(error));
+    }
+  },
+
+  async sortByRules(adding) {
+    try {
+      const moved = adding
+        ? await ipc.addOrderRule(adding.before, adding.after)
+        : await ipc.sortByRules();
+      await get().refresh();
+      if (moved > 0 && get().snapshot?.autoApply) await get().applyChanges();
+      get().toast(
+        "success",
+        moved > 0
+          ? `Load order sorted: ${moved} mod${moved === 1 ? "" : "s"} moved.`
+          : adding
+            ? "Rule added; the order already obeys it."
+            : "The order already obeys every rule.",
+      );
     } catch (error) {
       get().toast("error", String(error));
     }

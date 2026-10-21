@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { ArrowDown, ArrowUp, GripVertical, ListOrdered } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowDownUp, ArrowUp, GripVertical, ListOrdered } from "lucide-react";
 import { useState } from "react";
 
 import type { ModView } from "../lib/ipc";
@@ -7,16 +7,25 @@ import { useApp } from "../store/useApp";
 import { Button, Empty } from "./ui";
 
 /**
- * Only loose paks in `~mods` are resolved by name order, so those are the only
- * ones worth ordering here. Logic mods are resolved by UE4SS itself.
+ * The mods whose place in the order matters: loose paks in `~mods`, which
+ * mount by name order, and any mod sharing loose files with another or
+ * named in a load order rule, since the later one wins. Logic mods are
+ * resolved by UE4SS itself.
  */
 export function LoadOrderView() {
   const snapshot = useApp((s) => s.snapshot);
   const reorder = useApp((s) => s.reorder);
+  const sortByRules = useApp((s) => s.sortByRules);
   const [dragging, setDragging] = useState<number | null>(null);
 
   const all = snapshot?.mods ?? [];
-  const ordered = all.filter((m) => m.componentTypes.includes("genericPak"));
+  const ordered = all.filter(
+    (m) =>
+      m.componentTypes.includes("genericPak") ||
+      m.fileConflicts !== null ||
+      m.misordered.length > 0,
+  );
+  const misordered = all.filter((m) => m.misordered.length > 0).length;
 
   if (ordered.length === 0) {
     return (
@@ -53,10 +62,21 @@ export function LoadOrderView() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      {misordered > 0 && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-warn/30 bg-warn/10 px-4 py-2 text-[12px]">
+          <AlertTriangle size={14} className="shrink-0 text-warn" />
+          <span className="flex-1">
+            The order breaks load order rules for {misordered} mod{misordered === 1 ? "" : "s"}.
+          </span>
+          <Button size="sm" variant="primary" onClick={() => void sortByRules()}>
+            <ArrowDownUp size={12} /> Sort by rules
+          </Button>
+        </div>
+      )}
       <div className="flex h-12 shrink-0 items-center border-b border-line px-4">
         <p className="text-[12px] text-ink-muted">
-          Mods higher in this list load first. Files are renamed with a numeric prefix so the
-          game mounts them in this order.
+          Mods higher in this list load first, and a later mod wins where two change the same
+          thing. Paks are renamed with a numeric prefix so the game mounts them in this order.
         </p>
       </div>
 
@@ -84,6 +104,11 @@ export function LoadOrderView() {
                 {String(index + 1).padStart(3, "0")}
               </span>
               <span className="min-w-0 flex-1 truncate text-[13px]">{mod.name}</span>
+              {mod.misordered.length > 0 && (
+                <span className="truncate text-[11px] text-warn" title={mod.misordered.join("; ")}>
+                  {mod.misordered[0]}
+                </span>
+              )}
               {!mod.enabled && <span className="text-[11px] text-ink-muted">disabled</span>}
               <Button
                 size="sm"

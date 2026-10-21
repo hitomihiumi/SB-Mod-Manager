@@ -192,6 +192,82 @@ pub struct ModView {
     pub image: Option<String>,
     pub notes: Option<String>,
     pub tags: Vec<String>,
+    /// What the load order rules this mod breaks ask of it.
+    pub misordered: Vec<String>,
+}
+
+/// What one mod changes, for the details panel.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModContents {
+    /// Paths it puts in the game folder (the first 500).
+    pub files: Vec<String>,
+    pub file_count: usize,
+    /// Its paks have been read; without that `areas` is empty, not "none".
+    pub indexed: bool,
+    /// Distinct assets its paks replace.
+    pub asset_count: usize,
+    /// Where those assets are, largest first.
+    pub areas: Vec<AssetArea>,
+    /// Other mods changing the same assets or files.
+    pub clashes: Vec<ModClash>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetArea {
+    /// Two folders under `Content`, e.g. `Characters/Eve`.
+    pub area: String,
+    pub count: usize,
+    /// A few asset names from it.
+    pub examples: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModClash {
+    pub mod_id: i64,
+    pub name: String,
+    /// Assets and files both change.
+    pub shared: usize,
+    pub enabled: bool,
+    /// This mod is later in the load order, so its versions are the ones used.
+    pub wins: bool,
+}
+
+/// A load order rule, by name.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderRuleView {
+    pub id: i64,
+    pub before_id: i64,
+    pub before: String,
+    pub after_id: i64,
+    pub after: String,
+    /// The current order breaks it.
+    pub broken: bool,
+}
+
+/// What Nexus says about an installed mod.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NexusView {
+    pub nexus_mod_id: i64,
+    /// `None` until fetched.
+    pub details: Option<sbmm_nexus::ModDetails>,
+    pub fetched_at: Option<String>,
+    pub requirements: Vec<RequirementView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequirementView {
+    #[serde(flatten)]
+    pub requirement: sbmm_nexus::Requirement,
+    /// `enabled`, `disabled`, `missing`, or `external` when it cannot be checked.
+    pub state: String,
+    /// The installed mod that satisfies it, if any.
+    pub installed_as: Option<i64>,
 }
 
 /// One settings file in the editor's list.

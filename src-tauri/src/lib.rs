@@ -9,6 +9,7 @@ mod config;
 mod discord;
 mod downloads;
 mod framegen;
+mod insight;
 mod safety;
 mod shell;
 mod ue4ss;
@@ -834,6 +835,13 @@ pub fn run() {
             config::set_mod_tags,
             config::mod_images,
             config::set_mod_image,
+            insight::mod_contents,
+            insight::order_rules,
+            insight::add_order_rule,
+            insight::delete_order_rule,
+            insight::sort_by_rules,
+            insight::nexus_view,
+            insight::refresh_nexus_details,
         ])
         .run(tauri::generate_context!())
         .expect("failed to start SB Mod Manager");

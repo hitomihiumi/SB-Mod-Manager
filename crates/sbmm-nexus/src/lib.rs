@@ -10,6 +10,7 @@
 
 pub mod client;
 pub mod collection;
+pub mod details;
 pub mod http;
 pub mod nxm;
 pub mod queue;
@@ -17,6 +18,7 @@ pub mod ratelimit;
 
 pub use client::{Account, ModFile, ModInfo, NexusClient, NexusError, Transport, UpdatedMod};
 pub use collection::{Collection, CollectionMod, ManualMod, Revision};
+pub use details::{ModDetails, Requirement};
 pub use http::{Fetcher, Progress, ReqwestTransport};
 pub use nxm::{NxmCollection, NxmError, NxmFile, NxmLink};
 pub use queue::{DownloadState, Queue, QueueItem, SharedQueue, Sink};
