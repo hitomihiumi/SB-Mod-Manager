@@ -124,6 +124,16 @@ wrong is the usual reason a mod "doesn't work".
   between them from the mod list; the game folder is brought in line on the
   spot. A new profile keeps the current order with nothing enabled; a
   duplicate keeps the enabled set too.
+- **Watches your downloads folder.** Point it at the folder the browser
+  saves to, and mod archives downloaded by hand from any site are offered
+  for install the moment they finish (or installed without asking, if you
+  prefer). What was in the folder before is left alone, and each archive is
+  offered once.
+- **Keeps the library lean.** Settings → Disk space shows where the
+  library's space goes and frees what nothing needs: extracted archives no
+  installed mod owns, downloaded archives not in flight, older automatic
+  save backups and logs. Mods not enabled in any profile are listed by size.
+  Game files set aside are never offered — disabling a mod puts them back.
 - **Shows what a mod changes.** The details panel lists where a mod's
   assets land (read from its pak and utoc indexes and grouped by folder,
   e.g. `Characters/Eve`), the files it puts in the game, and every other

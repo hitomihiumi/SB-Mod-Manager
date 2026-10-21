@@ -13,6 +13,7 @@ pub mod installer;
 pub mod library;
 pub mod safety;
 pub mod saves;
+pub mod storage;
 pub mod ue4ss;
 
 use std::collections::BTreeMap;

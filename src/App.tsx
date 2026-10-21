@@ -30,7 +30,7 @@ import { SettingsView } from "./components/SettingsView";
 import { SetupWizard } from "./components/SetupWizard";
 import { TitleBar } from "./components/TitleBar";
 import { Button } from "./components/ui";
-import { ipc, type QueueItem, type StagedInstall } from "./lib/ipc";
+import { ipc, type FoundArchive, type QueueItem, type StagedInstall } from "./lib/ipc";
 import { useApp, type View } from "./store/useApp";
 
 const NAV: { id: View; label: string; icon: typeof Layers }[] = [
@@ -108,6 +108,10 @@ export default function App() {
         toast("error", name ? `${name}: ${reason}` : reason);
       }),
       listen<[string, string]>("nxm-rejected", (event) => toast("error", event.payload[1])),
+      // A mod archive finished downloading into the watched folder.
+      listen<FoundArchive[]>("watch-found", (event) => {
+        void useApp.getState().foundArchives(event.payload);
+      }),
       // A shortcut or a second start asked for a profile or the game.
       listen("notices", () => void useApp.getState().takeNotices()),
       // A collection link from the browser goes to the collections screen,
@@ -213,6 +217,7 @@ export default function App() {
         </div>
       )}
 
+      <FoundBar />
       <InstallDialog />
       <Toasts />
     </div>
@@ -267,6 +272,33 @@ function ApplyBar() {
           <CheckCircle2 size={13} /> Apply
         </Button>
       )}
+    </div>
+  );
+}
+
+/** Mod archives the browser just finished downloading, offered for install. */
+function FoundBar() {
+  const found = useApp((s) => s.found);
+  const answerFound = useApp((s) => s.answerFound);
+  if (found.length === 0) return null;
+  const names = found.map((a) => a.name);
+  return (
+    <div className="fixed bottom-14 left-1/2 z-40 flex w-[min(640px,90vw)] -translate-x-1/2 items-center gap-3 rounded-lg border border-accent/40 bg-raised px-3 py-2.5 shadow-lg">
+      <Download size={15} className="shrink-0 text-accent-soft" />
+      <p className="min-w-0 flex-1 text-[12px] leading-relaxed">
+        {found.length === 1 ? "New mod archive" : `${found.length} new mod archives`} in your
+        downloads folder:{" "}
+        <span className="text-ink-soft" title={names.join("\n")}>
+          {names.slice(0, 2).join(", ")}
+          {names.length > 2 ? ` and ${names.length - 2} more` : ""}
+        </span>
+      </p>
+      <Button size="sm" onClick={() => void answerFound(false)}>
+        Ignore
+      </Button>
+      <Button size="sm" variant="primary" onClick={() => void answerFound(true)}>
+        Install
+      </Button>
     </div>
   );
 }

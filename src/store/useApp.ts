@@ -6,6 +6,7 @@ import {
   type ModTypeId,
   type ModView,
   type ConflictReport,
+  type FoundArchive,
   type QueueItem,
   type StagedInstall,
 } from "../lib/ipc";
@@ -45,6 +46,8 @@ interface AppStore {
   downloads: QueueItem[];
   /** A collection link that arrived from the browser, waiting to be looked up. */
   pendingCollection: string | null;
+  /** Archives that appeared in the watched downloads folder, not yet answered. */
+  found: FoundArchive[];
   /** Which enabled mods replace the same assets. Null until first read. */
   conflicts: ConflictReport | null;
   toasts: Toast[];
@@ -90,6 +93,10 @@ interface AppStore {
   skipRemaining: () => Promise<void>;
 
   chooseGame: (path: string) => Promise<void>;
+  /** New archives in the watched folder: installed straight away, or offered. */
+  foundArchives: (archives: FoundArchive[]) => Promise<void>;
+  /** Install the offered archives, or with `install` false turn them down. */
+  answerFound: (install: boolean) => Promise<void>;
   toast: (kind: Toast["kind"], message: string) => void;
   dismissToast: (id: number) => void;
 }
@@ -108,6 +115,7 @@ export const useApp = create<AppStore>((set, get) => ({
   downloads: [],
   pendingCollection: null,
   conflicts: null,
+  found: [],
   toasts: [],
 
   async init() {
@@ -432,6 +440,25 @@ export const useApp = create<AppStore>((set, get) => ({
     } catch (error) {
       get().toast("error", String(error));
     }
+  },
+
+  async foundArchives(archives) {
+    const fresh = archives.filter((a) => !get().found.some((f) => f.key === a.key));
+    if (fresh.length === 0) return;
+    const settings = await ipc.watchSettings().catch(() => null);
+    if (settings?.autoInstall) {
+      await ipc.markSeen(fresh.map((a) => a.key)).catch(() => {});
+      await get().stagePaths(fresh.map((a) => a.path));
+    } else {
+      set((state) => ({ found: [...state.found, ...fresh] }));
+    }
+  },
+
+  async answerFound(install) {
+    const found = get().found;
+    set({ found: [] });
+    await ipc.markSeen(found.map((a) => a.key)).catch(() => {});
+    if (install) await get().stagePaths(found.map((a) => a.path));
   },
 
   toast(kind, message) {

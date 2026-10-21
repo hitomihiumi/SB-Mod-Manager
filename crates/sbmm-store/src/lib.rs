@@ -666,6 +666,15 @@ impl Store {
         Ok(())
     }
 
+    /// Mods enabled in at least one profile.
+    pub fn mods_enabled_anywhere(&self) -> Result<std::collections::BTreeSet<i64>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT DISTINCT mod_id FROM profile_mods WHERE enabled = 1")?;
+        let rows = stmt.query_map([], |r| r.get(0))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
     pub fn enabled_mod_ids(&self) -> Result<Vec<i64>> {
         let profile = self.active_profile()?;
         let mut stmt = self.conn.prepare(

@@ -12,6 +12,7 @@ import { DeploymentSection } from "./DeploymentSection";
 import { DiagnosticsSection } from "./DiagnosticsSection";
 import { GameConfigSection } from "./ConfigEditor";
 import { RestorePointsSection, SavesSection } from "./SafetySections";
+import { StorageSection, WatchSection } from "./StorageSections";
 import { Ue4ssSection } from "./Ue4ssSection";
 import { FramegenSection } from "./FramegenSection";
 import { UpscalerSection } from "./UpscalerSection";
@@ -123,6 +124,8 @@ export function SettingsView() {
 
         <NexusSection />
 
+        <WatchSection />
+
         <DiscordSection />
 
         <UpscalerSection />
@@ -164,6 +167,8 @@ export function SettingsView() {
             <PathRow label="Backups of replaced game files" path={folders?.backups} />
           </div>
         </Section>
+
+        <StorageSection />
 
         <DiagnosticsSection />
 

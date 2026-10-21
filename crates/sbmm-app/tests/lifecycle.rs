@@ -2849,3 +2849,89 @@ fn nexus_requirements_are_checked_against_what_is_installed() {
         .unwrap()
         .contains(&"_nexus.jpg".to_string()));
 }
+
+// -- stage 10: disk space and the watched downloads folder -----------------
+
+/// Back-date a file or folder past the "may still be in use" window.
+fn age(path: &Path) {
+    let an_hour_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+    fs::File::open(path)
+        .unwrap()
+        .set_modified(an_hour_ago)
+        .unwrap();
+}
+
+#[test]
+fn cleaning_frees_only_what_nothing_needs() {
+    use sbmm_app::storage::Cleanup;
+    let mut fx = Fixture::new();
+    let kept = fx.install_folder("Outfit", &[("Outfit_P.pak", "outfit")]);
+    let used = fx.install_folder("Hair", &[("Hair_P.pak", "hair")]);
+    fx.app.set_enabled(&[used], true).unwrap();
+
+    let mods = fx.app.folders().unwrap().mods;
+    let leftover = Path::new(&mods).join("Cancelled Install");
+    fs::create_dir_all(&leftover).unwrap();
+    fs::write(leftover.join("big.pak"), vec![0u8; 4096]).unwrap();
+    age(&leftover);
+    // An install still waiting for an answer is too new to touch.
+    let waiting = Path::new(&mods).join("Waiting");
+    fs::create_dir_all(&waiting).unwrap();
+    fs::write(waiting.join("x.pak"), "x").unwrap();
+
+    let downloads = fx.app.downloads_dir();
+    fs::create_dir_all(&downloads).unwrap();
+    fs::write(downloads.join("old.zip"), vec![0u8; 1000]).unwrap();
+    age(&downloads.join("old.zip"));
+    fs::write(downloads.join("just-now.zip"), "new").unwrap();
+
+    let report = fx.app.storage_report().unwrap();
+    let part = |key: &str| report.parts.iter().find(|p| p.key == key).unwrap().clone();
+    assert_eq!(part("mods").cleanable_bytes, 4096);
+    assert_eq!(part("downloads").cleanable_bytes, 1000);
+    let unused: Vec<i64> = report.unused_mods.iter().map(|m| m.id).collect();
+    assert_eq!(unused, [kept], "never enabled anywhere");
+
+    assert_eq!(fx.app.clean(Cleanup::Orphans).unwrap(), 4096);
+    assert_eq!(fx.app.clean(Cleanup::Downloads).unwrap(), 1000);
+    assert!(!leftover.exists());
+    assert!(waiting.exists());
+    assert!(downloads.join("just-now.zip").exists());
+    // The installed mods are untouched.
+    fx.app.apply().unwrap();
+    assert!(fx.game_snapshot().keys().any(|k| k.contains("Hair_P")));
+}
+
+#[test]
+fn a_watched_folder_offers_each_new_archive_once() {
+    let mut fx = Fixture::new();
+    let browser = fx.source.join("Downloads");
+    fs::create_dir_all(&browser).unwrap();
+    fs::write(browser.join("from last year.zip"), "old").unwrap();
+    fs::write(browser.join("notes.txt"), "not a mod").unwrap();
+
+    fx.app.set_watch_dir(Some(&browser)).unwrap();
+    assert!(
+        fx.app.new_watched_archives().unwrap().is_empty(),
+        "what was there is seen"
+    );
+
+    fs::write(browser.join("Planet Diving Suit-101-1-3.7z"), "new").unwrap();
+    let found = fx.app.new_watched_archives().unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].name, "Planet Diving Suit-101-1-3.7z");
+
+    fx.app.mark_seen(&[found[0].key.clone()]).unwrap();
+    assert!(fx.app.new_watched_archives().unwrap().is_empty());
+    // The same name with other contents is a new download.
+    fs::write(
+        browser.join("Planet Diving Suit-101-1-3.7z"),
+        "newer, larger",
+    )
+    .unwrap();
+    assert_eq!(fx.app.new_watched_archives().unwrap().len(), 1);
+
+    fx.app.set_watch_dir(None).unwrap();
+    assert!(fx.app.new_watched_archives().unwrap().is_empty());
+    assert!(fx.app.set_watch_dir(Some(&browser.join("nope"))).is_err());
+}
