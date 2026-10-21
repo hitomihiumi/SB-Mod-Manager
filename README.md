@@ -124,6 +124,24 @@ wrong is the usual reason a mod "doesn't work".
   between them from the mod list; the game folder is brought in line on the
   spot. A new profile keeps the current order with nothing enabled; a
   duplicate keeps the enabled set too.
+- **Notices game updates.** The installed build is remembered — Steam's
+  build id, or the executable for other installs — and when it changes the
+  mod list says so, with how many modded files the update replaced or
+  removed, until it is acknowledged.
+- **Repairs files changed behind its back.** Deployed files that were
+  deleted or replaced are put back with one click, and nothing found in
+  their place is thrown away: a settings file edited in the game folder
+  becomes the mod's own copy, and a file a game update restored becomes the
+  one disabling the mod puts back — not the stale copy from before the
+  update.
+- **Restore points.** Every time changes reach the game, the profile's
+  enabled set and load order are kept (the last 30, plus any the user names),
+  and any of them can be gone back to. Going back keeps the setup being left
+  as a point too, so it can be undone.
+- **Save backups.** The saves folder (`%LOCALAPPDATA%\SB\Saved\SaveGames`,
+  or one chosen in Settings) is zipped before each launch when something in
+  it changed, and on request. Restoring one first backs up the saves it
+  replaces.
 - **Profile shortcuts and a command line.** As with Mod Organizer 2, a
   shortcut on the desktop or in the Start menu can start the game with a
   chosen profile without opening the manager:

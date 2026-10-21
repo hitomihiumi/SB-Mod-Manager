@@ -30,6 +30,85 @@ pub struct AppSnapshot {
     pub overwrite: OverwriteView,
     /// Whether UE4SS will be loaded, and which mods need it.
     pub ue4ss: Ue4ssStatus,
+    /// The game changed build since the user last acknowledged it.
+    pub game_update: Option<GameUpdate>,
+}
+
+/// The game was updated under the mods.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GameUpdate {
+    pub previous: sbmm_game::GameBuild,
+    pub current: sbmm_game::GameBuild,
+    /// Deployed files the update replaced or removed.
+    pub drifted: usize,
+}
+
+/// What putting drifted files back did.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepairReport {
+    /// Removed files linked in again.
+    pub relinked: usize,
+    /// Files replaced by something else, now kept as the backup.
+    pub displaced: usize,
+    /// Settings files edited in the game folder, the edit taken into the mod.
+    pub adopted: usize,
+    /// Files changed through the link; only the record was updated.
+    pub recorded: usize,
+    pub failed: Vec<ApplyFailure>,
+}
+
+/// A restore point as the settings list shows it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestorePointView {
+    pub id: i64,
+    /// UTC, ISO 8601.
+    pub created_at: String,
+    pub label: String,
+    pub automatic: bool,
+    pub game_build: Option<String>,
+    /// Mods enabled at the time.
+    pub enabled: usize,
+    /// Of those, how many have been uninstalled since and cannot come back.
+    pub uninstalled: usize,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreReport {
+    pub applied: ApplyReport,
+    /// Mods the point had enabled that are no longer installed.
+    pub uninstalled: usize,
+}
+
+/// The game's saves and their backups.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavesView {
+    /// Where the saves are looked for; `None` off Windows with no choice made.
+    pub dir: Option<String>,
+    /// The folder was chosen by the user rather than the default.
+    pub custom_dir: bool,
+    pub exists: bool,
+    /// Files in the saves folder now.
+    pub files: usize,
+    pub backup_on_launch: bool,
+    /// Newest first.
+    pub backups: Vec<SaveBackupView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveBackupView {
+    /// The file name, which is also its id.
+    pub file: String,
+    /// Seconds since the Unix epoch.
+    pub created_at: u64,
+    /// `auto`, `manual` or `before-restore`.
+    pub kind: String,
+    pub bytes: u64,
 }
 
 /// UE4SS at a glance.

@@ -8,6 +8,7 @@ mod collections;
 mod discord;
 mod downloads;
 mod framegen;
+mod safety;
 mod shell;
 mod ue4ss;
 mod upscaler;
@@ -813,6 +814,18 @@ pub fn run() {
             shell::take_notices,
             shell::profile_command,
             shell::create_profile_shortcut,
+            safety::acknowledge_game_update,
+            safety::repair_drift,
+            safety::restore_points,
+            safety::create_restore_point,
+            safety::delete_restore_point,
+            safety::restore_to_point,
+            safety::saves,
+            safety::back_up_saves,
+            safety::restore_saves,
+            safety::delete_save_backup,
+            safety::set_saves_dir,
+            safety::set_backup_saves_on_launch,
         ])
         .run(tauri::generate_context!())
         .expect("failed to start SB Mod Manager");

@@ -129,6 +129,31 @@ pub struct GroupRecord {
     pub collapsed: bool,
 }
 
+/// One mod's place in a restore point.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PointEntry {
+    pub mod_id: i64,
+    pub enabled: bool,
+    pub priority: i64,
+}
+
+/// A profile's enabled set and load order at one moment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestorePointRecord {
+    pub id: i64,
+    pub profile_id: i64,
+    /// UTC, ISO 8601.
+    pub created_at: String,
+    pub label: String,
+    /// Taken by the manager rather than asked for.
+    pub automatic: bool,
+    /// The game build at the time, when it was known.
+    pub game_build: Option<String>,
+    pub entries: Vec<PointEntry>,
+}
+
 pub struct Store {
     conn: Connection,
 }
@@ -167,6 +192,12 @@ impl Store {
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             params![key, value],
         )?;
+        Ok(())
+    }
+
+    pub fn delete_setting(&self, key: &str) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM settings WHERE key = ?1", [key])?;
         Ok(())
     }
 
@@ -740,6 +771,80 @@ impl Store {
         Ok(())
     }
 
+    // -- restore points ----------------------------------------------------
+
+    pub fn add_restore_point(
+        &self,
+        profile_id: i64,
+        label: &str,
+        automatic: bool,
+        game_build: Option<&str>,
+        entries: &[PointEntry],
+    ) -> Result<i64> {
+        self.conn.execute(
+            "INSERT INTO restore_points (profile_id, label, automatic, game_build, state)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                profile_id,
+                label,
+                automatic as i64,
+                game_build,
+                serde_json::to_string(entries)?
+            ],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// A profile's points, newest first.
+    pub fn restore_points(&self, profile_id: i64) -> Result<Vec<RestorePointRecord>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, profile_id, created_at, label, automatic, game_build, state
+             FROM restore_points WHERE profile_id = ?1 ORDER BY id DESC",
+        )?;
+        let rows = stmt.query_map([profile_id], |r| {
+            Ok((
+                RestorePointRecord {
+                    id: r.get(0)?,
+                    profile_id: r.get(1)?,
+                    created_at: r.get(2)?,
+                    label: r.get(3)?,
+                    automatic: r.get::<_, i64>(4)? != 0,
+                    game_build: r.get(5)?,
+                    entries: Vec::new(),
+                },
+                r.get::<_, String>(6)?,
+            ))
+        })?;
+        let mut points = Vec::new();
+        for row in rows {
+            let (mut point, state) = row?;
+            point.entries = serde_json::from_str(&state)?;
+            points.push(point);
+        }
+        Ok(points)
+    }
+
+    pub fn delete_restore_point(&self, id: i64) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM restore_points WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    /// Keep only the newest `keep` automatic points of a profile; the ones the
+    /// user made stay until deleted.
+    pub fn prune_automatic_points(&self, profile_id: i64, keep: usize) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM restore_points
+             WHERE profile_id = ?1 AND automatic = 1 AND id NOT IN (
+                 SELECT id FROM restore_points
+                 WHERE profile_id = ?1 AND automatic = 1
+                 ORDER BY id DESC LIMIT ?2
+             )",
+            params![profile_id, keep as i64],
+        )?;
+        Ok(())
+    }
+
     // -- learned detection overrides ---------------------------------------
 
     pub fn remember_detection(&self, pattern: &str, mod_type: &str) -> Result<()> {
@@ -780,6 +885,43 @@ mod tests {
             size_bytes: 42,
             image_path: None,
         }
+    }
+
+    #[test]
+    fn restore_points_round_trip_and_only_automatic_ones_are_pruned() {
+        let store = Store::open_in_memory().unwrap();
+        let profile = store.active_profile().unwrap();
+        let entries = vec![PointEntry {
+            mod_id: 7,
+            enabled: true,
+            priority: 10,
+        }];
+        let mine = store
+            .add_restore_point(
+                profile,
+                "Before the big update",
+                false,
+                Some("1870"),
+                &entries,
+            )
+            .unwrap();
+        for n in 0..5 {
+            store
+                .add_restore_point(profile, &format!("Applied {n}"), true, None, &entries)
+                .unwrap();
+        }
+        store.prune_automatic_points(profile, 2).unwrap();
+
+        let points = store.restore_points(profile).unwrap();
+        let labels: Vec<_> = points.iter().map(|p| p.label.as_str()).collect();
+        assert_eq!(labels, ["Applied 4", "Applied 3", "Before the big update"]);
+        let kept = points.iter().find(|p| p.id == mine).unwrap();
+        assert_eq!(kept.entries, entries);
+        assert_eq!(kept.game_build.as_deref(), Some("1870"));
+        assert!(kept.created_at.ends_with('Z'));
+
+        store.delete_restore_point(mine).unwrap();
+        assert_eq!(store.restore_points(profile).unwrap().len(), 2);
     }
 
     #[test]

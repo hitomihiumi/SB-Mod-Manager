@@ -12,5 +12,5 @@ pub mod manifest;
 pub mod ue4ss;
 
 pub use backend::{DeployBackend, DeployError, Drift, DriftKind};
-pub use hardlink::{prune_dirs, HardlinkBackend};
+pub use hardlink::{prune_dirs, repair, HardlinkBackend, Repair, Repaired};
 pub use manifest::{DeployedFile, Manifest};

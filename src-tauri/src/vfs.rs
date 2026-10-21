@@ -71,6 +71,11 @@ pub async fn launch(app_handle: &tauri::AppHandle) -> Result<String, String> {
         .deployment_mode()
         .and_then(|mode| Ok((mode, app.game()?))))?;
     let game = game.ok_or("choose the game folder first")?;
+    // A mod that goes wrong in game can take the saves with it.
+    crate::with_app!(state, |app| {
+        app.back_up_saves_before_launch();
+        Ok::<_, sbmm_app::AppError>(())
+    })?;
 
     if mode == DeploymentMode::Hardlink {
         // Steam's own launch keeps the overlay, cloud saves and playtime.

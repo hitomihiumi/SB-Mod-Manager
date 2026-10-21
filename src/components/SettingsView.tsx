@@ -10,6 +10,7 @@ import { useApp } from "../store/useApp";
 import { Button, Checkbox, Section } from "./ui";
 import { DeploymentSection } from "./DeploymentSection";
 import { DiagnosticsSection } from "./DiagnosticsSection";
+import { RestorePointsSection, SavesSection } from "./SafetySections";
 import { Ue4ssSection } from "./Ue4ssSection";
 import { FramegenSection } from "./FramegenSection";
 import { UpscalerSection } from "./UpscalerSection";
@@ -110,6 +111,10 @@ export function SettingsView() {
         </Section>
 
         <DeploymentSection />
+
+        <RestorePointsSection />
+
+        <SavesSection />
 
         <Ue4ssSection />
 

@@ -9,6 +9,8 @@ pub mod diagnostics;
 pub mod dto;
 pub mod installer;
 pub mod library;
+pub mod safety;
+pub mod saves;
 pub mod ue4ss;
 
 use std::collections::BTreeMap;
@@ -299,13 +301,17 @@ impl App {
         let restore = game.is_some() && !enabled.is_empty();
         if restore {
             self.store.set_enabled(&enabled, false)?;
-            self.apply()?;
+            self.reconcile()?;
         }
 
         library::move_tree(&old_root.join("mods"), &new_root.join("mods"))?;
         library::move_tree(&old_root.join("backups"), &new_root.join("backups"))?;
         library::move_tree(&old_root.join("downloads"), &new_root.join("downloads"))?;
         library::move_tree(&old_root.join("overwrite"), &new_root.join("overwrite"))?;
+        library::move_tree(
+            &old_root.join("save-backups"),
+            &new_root.join("save-backups"),
+        )?;
 
         self.store
             .set_setting(SETTING_LIBRARY_ROOT, &new_root.to_string_lossy())?;
@@ -313,7 +319,7 @@ impl App {
 
         let redeployed = if restore {
             self.store.set_enabled(&enabled, true)?;
-            self.apply()?
+            self.reconcile()?
         } else {
             ApplyReport::default()
         };
@@ -1218,12 +1224,14 @@ impl App {
             })
             .collect();
 
+        let drift = self.drift()?;
         Ok(AppSnapshot {
             game: self.game()?,
             mods,
             groups,
             pending,
-            drift: self.drift()?,
+            drift: drift.clone(),
+            game_update: self.game_update(drift.len())?,
             auto_apply: self.auto_apply()?,
             nexus: self.nexus_account()?,
             update_channel: self.update_channel()?,
@@ -1400,11 +1408,21 @@ impl App {
 
     // -- applying ----------------------------------------------------------
 
+    /// Reconcile the game folder with the desired enabled set, and keep the
+    /// result as a restore point when anything changed.
+    pub fn apply(&mut self) -> Result<ApplyReport> {
+        let report = self.reconcile()?;
+        if !report.deployed.is_empty() || !report.removed.is_empty() {
+            self.record_automatic_point(&safety::describe(&report))?;
+        }
+        Ok(report)
+    }
+
     /// Reconcile the game folder with the desired enabled set.
     ///
     /// Each mod is handled independently so one bad mod cannot stop the rest,
     /// and any mod that fails is reported rather than silently skipped.
-    pub fn apply(&mut self) -> Result<ApplyReport> {
+    fn reconcile(&mut self) -> Result<ApplyReport> {
         let ctx = self.deploy_context()?;
         let mut report = ApplyReport::default();
 
@@ -1642,7 +1660,7 @@ impl App {
         let game = self.game()?.is_some();
         if game && !enabled.is_empty() {
             self.store.set_enabled(&enabled, false)?;
-            let cleared = self.apply();
+            let cleared = self.reconcile();
             // Whatever happened, the user's choices are not lost.
             self.store.set_enabled(&enabled, true)?;
             cleared?;

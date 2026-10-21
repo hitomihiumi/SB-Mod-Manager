@@ -74,6 +74,8 @@ interface AppStore {
   toggle: (ids: number[], enabled: boolean) => Promise<void>;
   reorder: (ids: number[]) => Promise<void>;
   applyChanges: () => Promise<void>;
+  /** Put deployed files changed outside the manager back. */
+  repairDrift: () => Promise<void>;
   uninstall: (id: number) => Promise<void>;
 
   stagePaths: (paths: string[]) => Promise<void>;
@@ -261,6 +263,36 @@ export const useApp = create<AppStore>((set, get) => ({
         );
       } else if (changed > 0) {
         get().toast("success", `Applied ${changed} change${changed === 1 ? "" : "s"}.`);
+      }
+      await get().refresh();
+    } catch (error) {
+      get().toast("error", String(error));
+    } finally {
+      set({ busy: null });
+    }
+  },
+
+  async repairDrift() {
+    set({ busy: { label: "Repairing files", done: 0, total: 1 } });
+    try {
+      const report = await ipc.repairDrift();
+      const fixed = report.relinked + report.displaced + report.adopted + report.recorded;
+      if (report.failed.length > 0) {
+        get().toast(
+          "error",
+          `${report.failed.length} file(s) could not be repaired: ` +
+            report.failed.map((f) => `${f.name} — ${f.reason}`).join("; "),
+        );
+      } else {
+        const notes = [
+          report.displaced > 0 &&
+            `${report.displaced} replaced by the game kept as its own file again`,
+          report.adopted > 0 && `${report.adopted} settings edit${report.adopted === 1 ? "" : "s"} kept in the mod`,
+        ].filter(Boolean);
+        get().toast(
+          "success",
+          `Repaired ${fixed} file${fixed === 1 ? "" : "s"}${notes.length ? ` (${notes.join(", ")})` : ""}.`,
+        );
       }
       await get().refresh();
     } catch (error) {

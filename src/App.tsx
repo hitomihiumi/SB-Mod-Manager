@@ -14,6 +14,7 @@ import {
   Play,
   Settings,
   Swords,
+  Wrench,
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -222,6 +223,7 @@ export default function App() {
 function ApplyBar() {
   const snapshot = useApp((s) => s.snapshot);
   const applyChanges = useApp((s) => s.applyChanges);
+  const repairDrift = useApp((s) => s.repairDrift);
 
   const pending = snapshot?.pending ?? [];
   const drift = snapshot?.drift ?? [];
@@ -250,9 +252,21 @@ function ApplyBar() {
         </>
       )}
       <div className="ml-auto" />
-      <Button variant="primary" size="sm" onClick={() => void applyChanges()}>
-        <CheckCircle2 size={13} /> Apply
-      </Button>
+      {drift.length > 0 && (
+        <Button
+          variant="outline"
+          size="sm"
+          title="Put the mods' files back. Whatever replaced them is kept: settings edits join the mod, anything else is restored when the mod is disabled."
+          onClick={() => void repairDrift()}
+        >
+          <Wrench size={13} /> Repair
+        </Button>
+      )}
+      {pending.length > 0 && (
+        <Button variant="primary" size="sm" onClick={() => void applyChanges()}>
+          <CheckCircle2 size={13} /> Apply
+        </Button>
+      )}
     </div>
   );
 }

@@ -2302,3 +2302,195 @@ fn previews_are_only_pictures_from_inside_the_library() {
         .preview_data_url(&staging, "C:/Windows/x.png")
         .is_err());
 }
+
+// -- stage 7: getting back from things going wrong -------------------------
+
+/// The first build seen is remembered quietly; a later one is reported until
+/// the user acknowledges it.
+#[test]
+fn a_game_update_is_reported_until_acknowledged() {
+    let mut fx = Fixture::new();
+    assert!(fx.app.snapshot().unwrap().game_update.is_none());
+
+    fs::write(
+        fx.game.join("SB/Binaries/Win64/SB-Win64-Shipping.exe"),
+        "a patched executable",
+    )
+    .unwrap();
+    let update = fx.app.snapshot().unwrap().game_update.expect("reported");
+    assert_ne!(update.previous, update.current);
+
+    fx.app.acknowledge_game_update().unwrap();
+    assert!(fx.app.snapshot().unwrap().game_update.is_none());
+}
+
+/// Files an update put back, and files deleted, are repaired; the game's new
+/// file is what disabling the mod restores.
+#[test]
+fn drifted_files_are_repaired_without_losing_the_games_new_file() {
+    let mut fx = Fixture::new();
+    let chunk = fx.game.join("SB/Content/Movies/Intro.mp4");
+    fs::create_dir_all(chunk.parent().unwrap()).unwrap();
+    fs::write(&chunk, "vanilla").unwrap();
+    let id = fx.install_folder(
+        "Intro Replacer",
+        &[
+            ("Movies/Intro.mp4", "modded"),
+            ("Movies/Extra.mp4", "extra"),
+        ],
+    );
+    fx.app.set_enabled(&[id], true).unwrap();
+    fx.app.apply().unwrap();
+    assert_eq!(fs::read_to_string(&chunk).unwrap(), "modded");
+
+    fs::remove_file(&chunk).unwrap();
+    fs::write(&chunk, "vanilla, patched").unwrap();
+    let extra: Vec<PathBuf> = fx
+        .store()
+        .deployed_files_for(id)
+        .unwrap()
+        .into_iter()
+        .map(|(target, _, _)| fx.game.join(target))
+        .filter(|p| p.to_string_lossy().contains("Extra"))
+        .collect();
+    fs::remove_file(&extra[0]).unwrap();
+    assert_eq!(fx.app.snapshot().unwrap().drift.len(), 2);
+
+    let report = fx.app.repair_drift().unwrap();
+    assert_eq!((report.displaced, report.relinked), (1, 1), "{report:?}");
+    assert!(report.failed.is_empty());
+    assert!(fx.app.snapshot().unwrap().drift.is_empty());
+    assert_eq!(fs::read_to_string(&chunk).unwrap(), "modded");
+
+    fx.app.set_enabled(&[id], false).unwrap();
+    fx.app.apply().unwrap();
+    assert_eq!(fs::read_to_string(&chunk).unwrap(), "vanilla, patched");
+}
+
+/// Every apply that changes something leaves a point; going back to one
+/// re-applies it and can itself be undone.
+#[test]
+fn a_restore_point_puts_the_mod_list_back() {
+    let mut fx = Fixture::new();
+    let a = fx.install_folder("Outfit", &[("Outfit_P.pak", "a")]);
+    let b = fx.install_folder("Hair", &[("Hair_P.pak", "b")]);
+
+    fx.app.set_enabled(&[a], true).unwrap();
+    fx.app.apply().unwrap();
+    // Applying with nothing changed adds no point.
+    fx.app.apply().unwrap();
+    fx.app.set_enabled(&[b], true).unwrap();
+    fx.app.set_order(&[b, a]).unwrap();
+    fx.app.apply().unwrap();
+
+    let points = fx.app.restore_points().unwrap();
+    assert_eq!(points.len(), 2, "{points:?}");
+    assert!(points.iter().all(|p| p.automatic));
+    let only_outfit = points[1].clone();
+    assert_eq!(only_outfit.enabled, 1);
+    assert!(
+        only_outfit.label.contains("Outfit"),
+        "{}",
+        only_outfit.label
+    );
+
+    let report = fx.app.restore_to_point(only_outfit.id).unwrap();
+    assert_eq!(report.uninstalled, 0);
+    assert_eq!(report.applied.removed, ["Hair"]);
+    let mods = fx.app.snapshot().unwrap().mods;
+    let enabled: Vec<&str> = mods
+        .iter()
+        .filter(|m| m.enabled)
+        .map(|m| m.name.as_str())
+        .collect();
+    assert_eq!(enabled, ["Outfit"]);
+    assert!(!fx.game_snapshot().keys().any(|k| k.contains("Hair")));
+
+    // The setup left behind was already the newest point, so going forward
+    // again is one more restore away and no duplicate was taken.
+    let points = fx.app.restore_points().unwrap();
+    assert_eq!(points.len(), 2, "{points:?}");
+    assert_eq!(points[0].enabled, 2);
+
+    // A setup changed but never applied is kept before going back.
+    fx.app.set_enabled(&[b], true).unwrap();
+    fx.app.restore_to_point(only_outfit.id).unwrap();
+    let points = fx.app.restore_points().unwrap();
+    assert!(
+        points[0].label.starts_with("Before going back"),
+        "{points:?}"
+    );
+
+    let manual = fx.app.create_restore_point("Known good").unwrap();
+    assert!(fx.app.create_restore_point("  ").is_err());
+    fx.app.delete_restore_point(manual).unwrap();
+}
+
+/// Saves are zipped on request and before launches when they changed, and
+/// a restore backs up what it replaces.
+#[test]
+fn saves_are_backed_up_and_restored() {
+    use sbmm_app::saves::BackupKind;
+    let mut fx = Fixture::new();
+    let saves = fx.source.join("SaveGames");
+    fs::create_dir_all(saves.join("76561198000000000")).unwrap();
+    fs::write(
+        saves.join("76561198000000000/StellarBladeSave00.sav"),
+        "chapter 1",
+    )
+    .unwrap();
+    fx.app.set_saves_dir(Some(&saves)).unwrap();
+
+    let first = fx.app.back_up_saves(BackupKind::Manual).unwrap().unwrap();
+    assert_eq!(first.kind, "manual");
+    assert!(
+        fx.app
+            .back_up_saves(BackupKind::Automatic)
+            .unwrap()
+            .is_none(),
+        "nothing changed since the last backup"
+    );
+
+    fs::write(
+        saves.join("76561198000000000/StellarBladeSave00.sav"),
+        "chapter 2, now corrupted",
+    )
+    .unwrap();
+    fx.app.back_up_saves_before_launch();
+    let view = fx.app.saves().unwrap();
+    assert_eq!(view.files, 1);
+    assert_eq!(view.backups.len(), 2);
+    assert_eq!(view.backups[0].kind, "auto");
+
+    fx.app.restore_saves(&first.file).unwrap();
+    assert_eq!(
+        fs::read_to_string(saves.join("76561198000000000/StellarBladeSave00.sav")).unwrap(),
+        "chapter 1"
+    );
+    let kinds = |fx: &Fixture| -> Vec<String> {
+        fx.app
+            .saves()
+            .unwrap()
+            .backups
+            .into_iter()
+            .map(|b| b.kind)
+            .collect()
+    };
+    // What was replaced was already in the newest backup, so no copy of it.
+    assert_eq!(kinds(&fx), ["auto", "manual"]);
+
+    // Saves written since the last backup are kept before a restore.
+    fs::write(
+        saves.join("76561198000000000/StellarBladeSave01.sav"),
+        "new slot",
+    )
+    .unwrap();
+    fx.app.restore_saves(&first.file).unwrap();
+    assert_eq!(kinds(&fx), ["before-restore", "auto", "manual"]);
+    assert!(!saves
+        .join("76561198000000000/StellarBladeSave01.sav")
+        .exists());
+
+    assert!(fx.app.restore_saves("../sbmm.db").is_err());
+    fx.app.delete_save_backup(&first.file).unwrap();
+}

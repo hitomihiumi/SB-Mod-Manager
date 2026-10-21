@@ -19,6 +19,7 @@ import { ipc, modPageUrl, MOD_TYPE_META, type GroupView, type ModView } from "..
 import { useApp, visibleMods } from "../store/useApp";
 import { OverwriteBar } from "./OverwriteBar";
 import { ProfileSwitcher } from "./ProfileSwitcher";
+import { GameUpdateBanner } from "./SafetySections";
 import { Ue4ssBanner } from "./Ue4ssSection";
 import { Badge, Button, Checkbox, Empty } from "./ui";
 
@@ -125,6 +126,7 @@ export function ModsView({ onAdd }: { onAdd: () => void }) {
         }}
       />
 
+      <GameUpdateBanner />
       <Ue4ssBanner />
 
       {rows.length === 0 ? (

@@ -290,3 +290,77 @@ fn a_failed_deployment_leaves_nothing_behind() {
         "a partial deployment must roll itself back"
     );
 }
+
+/// Repair puts the mod back without losing anything found in its place.
+#[test]
+fn repair_restores_the_mod_and_keeps_what_replaced_it() {
+    let fx = Fixture::new();
+    fx.write_game("SB/Content/Paks/pakchunk0.pak", "game v1");
+    fx.write_staged("chunk.pak", "modded");
+    fx.write_staged("missing.pak", "mine");
+    fx.write_staged("dlssg_sm86.ini", "fg=0\n");
+    let backend = HardlinkBackend;
+    let plan = fx.plan(
+        1,
+        &[
+            ("chunk.pak", "SB/Content/Paks/pakchunk0.pak"),
+            ("missing.pak", "SB/Content/Paks/~mods/missing.pak"),
+            ("dlssg_sm86.ini", "SB/Binaries/Win64/dlssg_sm86.ini"),
+        ],
+    );
+    let manifest = backend.deploy(&fx.ctx(), &plan).unwrap();
+
+    // A game update puts its own (new) file back, something deletes a pak
+    // and its folder, and an editor saves the settings file as a new file.
+    let chunk = fx.game.join("SB/Content/Paks/pakchunk0.pak");
+    fs::remove_file(&chunk).unwrap();
+    fs::write(&chunk, "game v2, longer").unwrap();
+    fs::remove_dir_all(fx.game.join("SB/Content/Paks/~mods")).unwrap();
+    let ini = fx.game.join("SB/Binaries/Win64/dlssg_sm86.ini");
+    fs::remove_file(&ini).unwrap();
+    fs::write(&ini, "fg=1 # mine\n").unwrap();
+    assert_eq!(backend.verify(&fx.ctx(), &manifest).unwrap().len(), 3);
+
+    let mut repaired = Vec::new();
+    let mut hows = Vec::new();
+    for file in &manifest.files {
+        let done = sbmm_deploy::repair(&fx.ctx(), &plan, file).unwrap();
+        hows.push(done.how);
+        repaired.push(done.file);
+    }
+    use sbmm_deploy::Repair;
+    assert_eq!(hows, [Repair::Displaced, Repair::Relinked, Repair::Adopted]);
+    let repaired = sbmm_deploy::Manifest {
+        files: repaired,
+        created_dirs: manifest.created_dirs.clone(),
+    };
+    assert!(backend.verify(&fx.ctx(), &repaired).unwrap().is_empty());
+    assert_eq!(fs::read_to_string(&chunk).unwrap(), "modded");
+    assert_eq!(
+        fs::read_to_string(fx.staging.join("dlssg_sm86.ini")).unwrap(),
+        "fg=1 # mine\n",
+        "the edit is now the mod's own"
+    );
+
+    // Disabling restores the updated game file, not the stale one.
+    backend.undeploy(&fx.ctx(), &repaired).unwrap();
+    assert_eq!(fs::read_to_string(&chunk).unwrap(), "game v2, longer");
+}
+
+/// A file changed through its link changed the mod too; only the record moves.
+#[test]
+fn an_edit_through_the_link_is_only_recorded() {
+    let fx = Fixture::new();
+    fx.write_staged("a.ini", "x=1\n");
+    let backend = HardlinkBackend;
+    let plan = fx.plan(1, &[("a.ini", "SB/Binaries/Win64/a.ini")]);
+    let manifest = backend.deploy(&fx.ctx(), &plan).unwrap();
+    // Write the staged copy: through a hard link that is the game's file
+    // too, and on a copy-only filesystem the game file is rewritten to match.
+    fs::write(fx.staging.join("a.ini"), "x=22\n").unwrap();
+    fs::write(fx.game.join("SB/Binaries/Win64/a.ini"), "x=22\n").unwrap();
+
+    let done = sbmm_deploy::repair(&fx.ctx(), &plan, &manifest.files[0]).unwrap();
+    assert_eq!(done.how, sbmm_deploy::Repair::Recorded);
+    assert_eq!(done.file.size, 5);
+}

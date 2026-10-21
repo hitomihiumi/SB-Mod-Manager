@@ -115,6 +115,8 @@ export interface AppSnapshot {
   profiles: ProfileView[];
   overwrite: OverwriteView;
   ue4ss: Ue4ssStatus;
+  /** The game changed build since the user last acknowledged it. */
+  gameUpdate: GameUpdate | null;
 }
 
 /** A named set of enabled mods and a load order. */
@@ -584,9 +586,80 @@ export const ipc = {
     invoke<string>("create_profile_shortcut", { profileId, place, launch }),
   /** Messages about command-line requests, each handed over once. */
   takeNotices: () => invoke<Notice[]>("take_notices"),
+  acknowledgeGameUpdate: () => invoke<void>("acknowledge_game_update"),
+  repairDrift: () => invoke<RepairReport>("repair_drift"),
+  restorePoints: () => invoke<RestorePoint[]>("restore_points"),
+  createRestorePoint: (label: string) => invoke<number>("create_restore_point", { label }),
+  deleteRestorePoint: (id: number) => invoke<void>("delete_restore_point", { id }),
+  restoreToPoint: (id: number) => invoke<RestoreReport>("restore_to_point", { id }),
+  saves: () => invoke<Saves>("saves"),
+  backUpSaves: () => invoke<SaveBackup | null>("back_up_saves"),
+  restoreSaves: (file: string) => invoke<void>("restore_saves", { file }),
+  deleteSaveBackup: (file: string) => invoke<void>("delete_save_backup", { file }),
+  /** Null goes back to where the game keeps its saves. */
+  setSavesDir: (dir: string | null) => invoke<void>("set_saves_dir", { dir }),
+  setBackupSavesOnLaunch: (on: boolean) => invoke<void>("set_backup_saves_on_launch", { on }),
 };
 
 export type ShortcutPlace = "desktop" | "startMenu";
+
+/** What identifies an installed build of the game. */
+export interface GameBuild {
+  /** Steam's build id, when Steam installed the game. */
+  buildId: string | null;
+  exeSize: number | null;
+  /** Seconds since the Unix epoch. */
+  exeModified: number | null;
+}
+
+export interface GameUpdate {
+  previous: GameBuild;
+  current: GameBuild;
+  /** Deployed files the update replaced or removed. */
+  drifted: number;
+}
+
+export interface RepairReport {
+  relinked: number;
+  displaced: number;
+  adopted: number;
+  recorded: number;
+  failed: ApplyReport["failed"];
+}
+
+export interface RestorePoint {
+  id: number;
+  /** UTC, ISO 8601. */
+  createdAt: string;
+  label: string;
+  automatic: boolean;
+  gameBuild: string | null;
+  enabled: number;
+  /** Mods it had enabled that are no longer installed. */
+  uninstalled: number;
+}
+
+export interface RestoreReport {
+  applied: ApplyReport;
+  uninstalled: number;
+}
+
+export interface SaveBackup {
+  file: string;
+  /** Seconds since the Unix epoch. */
+  createdAt: number;
+  kind: "auto" | "manual" | "before-restore";
+  bytes: number;
+}
+
+export interface Saves {
+  dir: string | null;
+  customDir: boolean;
+  exists: boolean;
+  files: number;
+  backupOnLaunch: boolean;
+  backups: SaveBackup[];
+}
 
 /** The outcome of a request from the command line or a shortcut. */
 export interface Notice {
