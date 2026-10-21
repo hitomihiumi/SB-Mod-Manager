@@ -25,8 +25,12 @@ pub struct LaunchOptions {
     /// `sbmm_vfs_hook.dll`.
     pub hook: PathBuf,
     pub mapping: PathBuf,
-    /// Where the hook writes what it did, when set.
+    /// Where the hook, running inside the game, writes what it did.
     pub log: Option<PathBuf>,
+    /// Where the launcher itself records each step and any failure. Written
+    /// from the manager's process, so it exists even when the hook never
+    /// loads — which is exactly the case the hook's own log cannot cover.
+    pub diagnostics: Option<PathBuf>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -35,7 +39,7 @@ pub enum LaunchError {
     Unsupported,
     #[error("{step} failed (Windows error {code})")]
     Os { step: &'static str, code: u32 },
-    #[error("the game did not load the virtual file system hook")]
+    #[error("the game did not load the virtual file system hook (see the launch log)")]
     HookNotLoaded,
     #[error("the virtual file system hook could not start (code {0}); see the hook log")]
     HookFailed(u32),
@@ -167,6 +171,38 @@ mod windows {
         text.encode_utf16().chain(std::iter::once(0)).collect()
     }
 
+    /// A plain text log of the launch, written from the manager's process so
+    /// it survives the hook never loading. Opening it is best-effort: a launch
+    /// is never blocked because its log could not be written.
+    pub(super) struct Diag(Option<std::fs::File>);
+
+    impl Diag {
+        fn open(path: &Option<std::path::PathBuf>) -> Diag {
+            let file = path.as_ref().and_then(|path| {
+                if let Some(parent) = path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(path)
+                    .ok()
+            });
+            Diag(file)
+        }
+
+        pub(super) fn log(&mut self, message: impl AsRef<str>) {
+            if let Some(file) = self.0.as_mut() {
+                use std::io::Write;
+                let stamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis())
+                    .unwrap_or(0);
+                let _ = writeln!(file, "[{stamp}] {}", message.as_ref());
+            }
+        }
+    }
+
     fn os_error(step: &'static str) -> LaunchError {
         LaunchError::Os {
             step,
@@ -197,6 +233,23 @@ mod windows {
     }
 
     pub fn launch(options: &LaunchOptions) -> Result<u32, LaunchError> {
+        let mut diag = Diag::open(&options.diagnostics);
+        diag.log(format!("launching {}", options.executable.display()));
+        diag.log(format!("hook: {}", options.hook.display()));
+        diag.log(format!("mapping: {}", options.mapping.display()));
+        match launch_inner(options, &mut diag) {
+            Ok(pid) => {
+                diag.log(format!("started, process {pid}"));
+                Ok(pid)
+            }
+            Err(error) => {
+                diag.log(format!("FAILED: {error}"));
+                Err(error)
+            }
+        }
+    }
+
+    fn launch_inner(options: &LaunchOptions, diag: &mut Diag) -> Result<u32, LaunchError> {
         let mut extra = options.environment.clone();
         extra.push((
             MAPPING_VARIABLE.into(),
@@ -235,18 +288,25 @@ mod windows {
         if created == 0 {
             return Err(os_error("starting the game"));
         }
+        diag.log(format!(
+            "game created suspended, process {}",
+            process.dwProcessId
+        ));
         let _process_handle = Owned(process.hProcess);
         let _thread_handle = Owned(process.hThread);
         let mut abort = Abort(process.hProcess);
 
-        let base = load_hook(process.hProcess, process.dwProcessId, &options.hook)?;
+        let base = load_hook(process.hProcess, process.dwProcessId, &options.hook, diag)?;
+        diag.log(format!("hook loaded at 0x{base:x}"));
         let init = remote_export(base, &options.hook)?;
+        diag.log(format!("init export at 0x{init:x}; calling it"));
         let code = run_remote(
             process.hProcess,
             init,
             std::ptr::null_mut(),
             "starting the hook",
         )?;
+        diag.log(format!("hook init returned {code}"));
         if code != 0 {
             return Err(LaunchError::HookFailed(code));
         }
@@ -254,12 +314,22 @@ mod windows {
         if unsafe { ResumeThread(process.hThread) } == u32::MAX {
             return Err(os_error("resuming the game"));
         }
+        diag.log("game resumed");
         abort.0 = std::ptr::null_mut();
         Ok(process.dwProcessId)
     }
 
     /// `LoadLibraryW(hook)` inside the game. Returns the DLL's base there.
-    fn load_hook(process: HANDLE, pid: u32, hook: &Path) -> Result<usize, LaunchError> {
+    fn load_hook(
+        process: HANDLE,
+        pid: u32,
+        hook: &Path,
+        diag: &mut Diag,
+    ) -> Result<usize, LaunchError> {
+        if !hook.is_file() {
+            diag.log("the hook DLL is not on disk");
+            return Err(LaunchError::HookNotLoaded);
+        }
         let path = wide(&hook.to_string_lossy());
         let bytes = path.len() * 2;
         // SAFETY: plain allocation and copy into the target process.
@@ -300,8 +370,12 @@ mod windows {
         let result = run_remote(process, load_library as usize, remote, "loading the hook");
         unsafe { VirtualFreeEx(process, remote, 0, MEM_RELEASE) };
         // The thread's exit code is the module handle cut to 32 bits: good
-        // enough to tell success from failure, not to use as an address.
-        if result? == 0 {
+        // enough to tell success from failure, not to use as an address. Zero
+        // means LoadLibraryW itself failed inside the game — most often a
+        // missing dependency of the hook DLL.
+        let low = result?;
+        diag.log(format!("remote LoadLibraryW returned 0x{low:x}"));
+        if low == 0 {
             return Err(LaunchError::HookNotLoaded);
         }
 
@@ -309,7 +383,13 @@ mod windows {
             .file_name()
             .map(|n| n.to_string_lossy().to_lowercase())
             .unwrap_or_default();
-        module_base(pid, &name).ok_or(LaunchError::HookNotLoaded)
+        match module_base(pid, &name) {
+            Some(base) => Ok(base),
+            None => {
+                diag.log(format!("{name} is not among the game's loaded modules"));
+                Err(LaunchError::HookNotLoaded)
+            }
+        }
     }
 
     /// Where a module is loaded in another process, by file name.
@@ -451,6 +531,7 @@ mod tests {
             hook: "hook.dll".into(),
             mapping: "mapping.json".into(),
             log: None,
+            diagnostics: None,
         };
         assert!(matches!(launch(&options), Err(LaunchError::Unsupported)));
     }

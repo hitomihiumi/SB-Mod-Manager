@@ -1079,6 +1079,50 @@ fn launching_under_the_virtual_file_system_writes_a_current_mapping() {
     assert!(vfs.overlay().file(&pak).is_some());
 }
 
+/// The Files view shows the merged tree: a mod's file where a mod wins, the
+/// game's own where nothing touches it, and the losing mod named as hidden.
+#[test]
+fn the_virtual_file_tree_names_the_winner_and_what_it_hides() {
+    let mut fx = Fixture::new();
+    let movie = fx.game.join("SB/Content/Movies/Intro.mp4");
+    fs::create_dir_all(movie.parent().unwrap()).unwrap();
+    fs::write(&movie, "original").unwrap();
+
+    let a = fx.install_folder("Intro A", &[("Movies/Intro.mp4", "a")]);
+    let b = fx.install_folder("Intro B", &[("Movies/Intro.mp4", "b")]);
+    fx.app.set_enabled(&[a, b], true).unwrap();
+    fx.app.set_order(&[a, b]).unwrap();
+
+    // Navigate down to the Movies folder.
+    let root = fx.app.vfs_tree("").unwrap();
+    assert!(root.entries.iter().any(|e| e.name == "SB" && e.is_dir));
+
+    let movies = fx.app.vfs_tree("SB/Content/Movies").unwrap();
+    let intro = movies
+        .entries
+        .iter()
+        .find(|e| e.name == "Intro.mp4")
+        .unwrap();
+    assert_eq!(intro.origin, "mod");
+    assert_eq!(
+        intro.provided_by, "Intro B",
+        "the mod lower in the order wins"
+    );
+    assert_eq!(intro.shadowed_by, vec!["Intro A".to_string()]);
+    assert!(intro.source.is_some());
+
+    // A game file nothing replaces is attributed to the game.
+    fs::write(fx.game.join("SB/Content/Movies/Logo.mp4"), "logo").unwrap();
+    let movies = fx.app.vfs_tree("SB/Content/Movies").unwrap();
+    let logo = movies
+        .entries
+        .iter()
+        .find(|e| e.name == "Logo.mp4")
+        .unwrap();
+    assert_eq!(logo.origin, "game");
+    assert!(logo.shadowed_by.is_empty());
+}
+
 /// Files the game writes under the virtual file system go to overwrite and are
 /// there again next time, without ever touching the game folder.
 #[test]
@@ -1408,4 +1452,1237 @@ fn mods_installed_before_the_index_existed_are_caught_up() {
 /// Naive substring search over the raw database bytes.
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {
     haystack.windows(needle.len()).any(|w| w == needle)
+}
+
+/// The diagnostics bundle holds a summary of the setup and the logs that
+/// exist, so a bug report needs one attachment rather than a hunt by path.
+#[test]
+fn a_diagnostics_bundle_carries_the_setup_and_the_logs() {
+    use std::io::Read;
+
+    let mut fx = Fixture::new();
+    let outfit = fx.install_folder("Outfit", &[("Outfit_P.pak", "outfit")]);
+    fx.app.set_enabled(&[outfit], true).unwrap();
+    fx.app.apply().unwrap();
+
+    let vfs = fx.app.vfs_dir();
+    fs::create_dir_all(&vfs).unwrap();
+    fs::write(vfs.join("launch.log"), "FAILED: hook not loaded\n").unwrap();
+    let framegen_logs = fx.game.join("SB/Binaries/Win64/dlssg_sm86/logs");
+    fs::create_dir_all(&framegen_logs).unwrap();
+    fs::write(framegen_logs.join("loader_1.jsonl"), "{}\n").unwrap();
+
+    let dest = fx.source.join("diagnostics.zip");
+    fx.app
+        .write_diagnostics(&dest, &[("Manager".into(), "0.2.0".into())])
+        .unwrap();
+
+    let mut zip = zip::ZipArchive::new(fs::File::open(&dest).unwrap()).unwrap();
+    let mut read = |name: &str| {
+        let mut text = String::new();
+        zip.by_name(name)
+            .unwrap()
+            .read_to_string(&mut text)
+            .unwrap();
+        text
+    };
+    let summary = read("summary.txt");
+    assert!(summary.contains("Manager: 0.2.0"));
+    assert!(summary.contains("Deployment: hard links"));
+    assert!(summary.contains("[x]") && summary.contains("Outfit"));
+    assert_eq!(read("vfs/launch.log"), "FAILED: hook not loaded\n");
+    assert_eq!(read("framegen/loader_1.jsonl"), "{}\n");
+    assert!(
+        zip.by_name("vfs/hook.log").is_err(),
+        "a log that was never written is left out, not faked"
+    );
+}
+
+/// Switching profile reconciles the game folder with the other profile's
+/// enabled set and load order, and switching back restores the first exactly.
+#[test]
+fn switching_profiles_swaps_what_is_in_the_game_folder() {
+    let mut fx = Fixture::new();
+    let outfit = fx.install_folder("Outfit", &[("Outfit_P.pak", "outfit")]);
+    let hair = fx.install_folder("Hair", &[("Hair_P.pak", "hair")]);
+    fx.app.set_enabled(&[outfit, hair], true).unwrap();
+    fx.app.apply().unwrap();
+    let everything = fx.game_snapshot();
+    let first = fx
+        .app
+        .profiles()
+        .unwrap()
+        .into_iter()
+        .find(|p| p.active)
+        .unwrap()
+        .id;
+
+    // A fresh profile keeps the order but enables nothing.
+    let clean = fx.app.create_profile("Clean", false).unwrap();
+    fx.app.switch_profile(clean).unwrap();
+    assert!(!fx.game.join("SB/Content/Paks/~mods").exists());
+    assert!(fx.app.snapshot().unwrap().pending.is_empty());
+
+    // A change here does not leak into the other profile.
+    fx.app.set_enabled(&[hair], true).unwrap();
+    fx.app.apply().unwrap();
+    assert!(fx
+        .game
+        .join("SB/Content/Paks/~mods/0020_Hair_P.pak")
+        .exists());
+    assert!(!fx
+        .game
+        .join("SB/Content/Paks/~mods/0010_Outfit_P.pak")
+        .exists());
+
+    fx.app.switch_profile(first).unwrap();
+    assert_eq!(fx.game_snapshot(), everything);
+
+    let profiles = fx.app.profiles().unwrap();
+    assert_eq!(profiles.len(), 2);
+    assert_eq!(
+        profiles
+            .iter()
+            .find(|p| p.id == clean)
+            .unwrap()
+            .enabled_count,
+        1
+    );
+}
+
+#[test]
+fn a_duplicate_carries_the_enabled_set_and_new_mods_join_every_profile_disabled() {
+    let mut fx = Fixture::new();
+    let outfit = fx.install_folder("Outfit", &[("Outfit_P.pak", "outfit")]);
+    fx.app.set_enabled(&[outfit], true).unwrap();
+
+    let copy = fx.app.create_profile("Copy", true).unwrap();
+    // Installed while the first profile is active, it still lands at the end
+    // of the copy's order, disabled.
+    let hair = fx.install_folder("Hair", &[("Hair_P.pak", "hair")]);
+    fx.app.switch_profile(copy).unwrap();
+
+    let mods = fx.app.snapshot().unwrap().mods;
+    let outfit_view = mods.iter().find(|m| m.id == outfit).unwrap();
+    let hair_view = mods.iter().find(|m| m.id == hair).unwrap();
+    assert!(outfit_view.enabled, "a duplicate keeps the enabled set");
+    assert!(!hair_view.enabled);
+    assert!(hair_view.priority > outfit_view.priority);
+}
+
+#[test]
+fn profiles_are_named_sensibly_and_the_active_one_cannot_be_deleted() {
+    let mut fx = Fixture::new();
+    assert!(fx.app.create_profile("  ", false).is_err());
+    let id = fx.app.create_profile("Cosmetic", false).unwrap();
+    assert!(fx.app.create_profile("cosmetic", false).is_err());
+    fx.app.rename_profile(id, "Cosmetics").unwrap();
+    fx.app.rename_profile(id, "Cosmetics").unwrap();
+
+    let active = fx
+        .app
+        .profiles()
+        .unwrap()
+        .into_iter()
+        .find(|p| p.active)
+        .unwrap()
+        .id;
+    assert!(fx.app.delete_profile(active).is_err());
+    fx.app.delete_profile(id).unwrap();
+    assert!(
+        fx.app.delete_profile(active).is_err(),
+        "the last profile left stays"
+    );
+}
+
+/// A shortcut names its profile, so the name is found however it is cased.
+#[test]
+fn a_profile_is_found_by_the_name_a_shortcut_carries() {
+    let mut fx = Fixture::new();
+    let id = fx.app.create_profile("Фото режим", false).unwrap();
+    assert_eq!(fx.app.profile_named("  фото РЕЖИМ ").unwrap().id, id);
+    let missing = fx.app.profile_named("Vanilla").unwrap_err().to_string();
+    assert!(missing.contains("“Vanilla”"), "{missing}");
+    assert!(
+        missing.contains("“Фото режим”"),
+        "names the ones there are: {missing}"
+    );
+}
+
+/// The mod list flags loose-file clashes the way Mod Organizer 2 does: the
+/// mod further down wins, the one above loses, and a mod whose every file is
+/// taken is called out as doing nothing.
+#[test]
+fn file_conflicts_are_flagged_per_mod_and_listed_for_the_files_view() {
+    let mut fx = Fixture::new();
+    let a = fx.install_folder("Intro A", &[("Movies/Intro.mp4", "a")]);
+    let b = fx.install_folder(
+        "Intro B",
+        &[("Movies/Intro.mp4", "b"), ("Movies/Credits.mp4", "credits")],
+    );
+    let pak = fx.install_folder("Outfit", &[("Outfit_P.pak", "outfit")]);
+    fx.app.set_enabled(&[a, b, pak], true).unwrap();
+    fx.app.set_order(&[a, b, pak]).unwrap();
+
+    let mods = fx.app.snapshot().unwrap().mods;
+    let flags = |id: i64| {
+        mods.iter()
+            .find(|m| m.id == id)
+            .unwrap()
+            .file_conflicts
+            .clone()
+    };
+    let a_flags = flags(a).unwrap();
+    assert_eq!((a_flags.wins, a_flags.loses), (0, 1));
+    assert!(a_flags.redundant, "Intro A's only file is taken by Intro B");
+    let b_flags = flags(b).unwrap();
+    assert_eq!((b_flags.wins, b_flags.loses), (1, 0));
+    assert!(!b_flags.redundant);
+    assert_eq!(
+        flags(pak),
+        None,
+        "a pak's name carries its order, so it clashes with nothing"
+    );
+
+    // Disabling the winner leaves nothing to clash with.
+    fx.app.set_enabled(&[b], false).unwrap();
+    let mods = fx.app.snapshot().unwrap().mods;
+    assert!(mods.iter().all(|m| m.file_conflicts.is_none()));
+    fx.app.set_enabled(&[b], true).unwrap();
+
+    let for_a = fx.app.vfs_conflicts(Some(a)).unwrap();
+    assert_eq!(for_a.len(), 1);
+    assert_eq!(for_a[0].path, "SB/Content/Movies/Intro.mp4");
+    assert_eq!(for_a[0].provided_by, "Intro B");
+    assert_eq!(for_a[0].shadowed_by, vec!["Intro A".to_string()]);
+    assert!(fx.app.vfs_conflicts(Some(pak)).unwrap().is_empty());
+    assert_eq!(fx.app.vfs_conflicts(None).unwrap().len(), 1);
+}
+
+/// What the game created under the virtual file system becomes a mod of its
+/// own, enabled where overwrite sat, so the game sees exactly the same files.
+#[test]
+fn overwrite_becomes_a_mod_without_changing_what_the_game_sees() {
+    use sbmm_app::dto::DeploymentMode;
+
+    let mut fx = Fixture::new();
+    fx.app.set_deployment_mode(DeploymentMode::Virtual).unwrap();
+    assert!(fx.app.create_mod_from_overwrite("Nothing").is_err());
+
+    let overwrite = fx.app.overwrite_dir();
+    let created = overwrite.join("SB/Binaries/Win64/ue4ss/Mods/Skip/config.ini");
+    fs::create_dir_all(created.parent().unwrap()).unwrap();
+    fs::write(&created, "skip=1").unwrap();
+    assert_eq!(fx.app.snapshot().unwrap().overwrite.files, 1);
+
+    let before = virtual_view(&fx.game, fx.app.vfs_mapping().unwrap());
+    let untouched = fx.game_snapshot();
+    assert!(fx.app.create_mod_from_overwrite("  ").is_err());
+    let id = fx.app.create_mod_from_overwrite("Skip settings").unwrap();
+
+    assert_eq!(fx.app.snapshot().unwrap().overwrite.files, 0);
+    assert!(fs::read_dir(&overwrite).unwrap().next().is_none());
+    let new_mod = fx
+        .app
+        .snapshot()
+        .unwrap()
+        .mods
+        .into_iter()
+        .find(|m| m.id == id)
+        .unwrap();
+    assert!(new_mod.enabled);
+    assert_eq!(
+        virtual_view(&fx.game, fx.app.vfs_mapping().unwrap()),
+        before,
+        "the game sees the same file, now from the mod"
+    );
+    fx.app.apply().unwrap();
+    assert_eq!(fx.game_snapshot(), untouched, "nothing physical was needed");
+}
+
+#[test]
+fn clearing_overwrite_empties_it_and_keeps_the_folder() {
+    let mut fx = Fixture::new();
+    let overwrite = fx.app.overwrite_dir();
+    fs::create_dir_all(overwrite.join("SB/Saved")).unwrap();
+    fs::write(overwrite.join("SB/Saved/a.log"), "a").unwrap();
+    fs::write(overwrite.join("b.log"), "b").unwrap();
+
+    assert_eq!(fx.app.clear_overwrite().unwrap(), 2);
+    assert!(overwrite.is_dir());
+    assert!(fs::read_dir(&overwrite).unwrap().next().is_none());
+}
+
+/// A zip shaped like the Stellar Blade UE4SS release: a version-named wrapper
+/// around the proxy and the runtime, with UE4SS's own `mods.txt`.
+fn ue4ss_release(path: &Path, settings: &str) {
+    use std::io::Write;
+    let file = fs::File::create(path).unwrap();
+    let mut zip = zip::ZipWriter::new(file);
+    let options: zip::write::FileOptions<'_, ()> = zip::write::FileOptions::default();
+    for (name, contents) in [
+        ("UE4SS_v3.1.0-6/dwmapi.dll", "MZ proxy"),
+        ("UE4SS_v3.1.0-6/ue4ss/UE4SS.dll", "MZ runtime"),
+        ("UE4SS_v3.1.0-6/ue4ss/UE4SS-settings.ini", settings),
+        (
+            "UE4SS_v3.1.0-6/ue4ss/Mods/mods.txt",
+            "ActorDumperMod : 0\nBPModLoaderMod : 1\n",
+        ),
+        (
+            "UE4SS_v3.1.0-6/ue4ss/Mods/BPModLoaderMod/Scripts/main.lua",
+            "-- bpml",
+        ),
+        (
+            "UE4SS_v3.1.0-6/ue4ss/Mods/BPModLoaderMod/load_order.txt",
+            "",
+        ),
+        (
+            "UE4SS_v3.1.0-6/ue4ss/Mods/ActorDumperMod/Scripts/main.lua",
+            "-- dumper",
+        ),
+    ] {
+        zip.start_file(name, options).unwrap();
+        zip.write_all(contents.as_bytes()).unwrap();
+    }
+    zip.finish().unwrap();
+}
+
+/// A mod that needs UE4SS says so until UE4SS is there, and installing it
+/// keeps UE4SS's own bundled mods switched on beside the user's.
+#[test]
+fn a_mod_needing_ue4ss_is_flagged_until_ue4ss_is_installed() {
+    let mut fx = Fixture::new();
+    let skip = fx.install_folder(
+        "Cutscene Skip",
+        &[("CutsceneSkip/scripts/main.lua", "-- lua")],
+    );
+    let outfit = fx.install_folder("Outfit", &[("Outfit_P.pak", "outfit")]);
+    fx.app.set_enabled(&[skip, outfit], true).unwrap();
+
+    let snap = fx.app.snapshot().unwrap();
+    assert_eq!(snap.ue4ss.state, "missing");
+    assert_eq!(snap.ue4ss.needed_by, vec!["Cutscene Skip".to_string()]);
+    let missing = |snap: &sbmm_app::dto::AppSnapshot, id: i64| {
+        snap.mods
+            .iter()
+            .find(|m| m.id == id)
+            .unwrap()
+            .missing_requirements
+            .clone()
+    };
+    assert_eq!(missing(&snap, skip), vec!["UE4SS".to_string()]);
+    assert!(missing(&snap, outfit).is_empty(), "a pak needs nothing");
+
+    let archive = fx.source.join("UE4SS_v3.1.0-6.zip");
+    ue4ss_release(&archive, "[General]\nConsole=0\n");
+    fx.app.install_ue4ss(&archive, "3.1.0-6").unwrap();
+
+    let snap = fx.app.snapshot().unwrap();
+    assert_eq!(snap.ue4ss.state, "managed");
+    assert_eq!(snap.ue4ss.version.as_deref(), Some("3.1.0-6"));
+    assert!(missing(&snap, skip).is_empty());
+
+    let win64 = fx.game.join("SB/Binaries/Win64");
+    assert!(win64.join("dwmapi.dll").is_file());
+    assert!(win64.join("ue4ss/UE4SS.dll").is_file());
+    let mods_txt = fs::read_to_string(win64.join("ue4ss/Mods/mods.txt")).unwrap();
+    assert!(mods_txt.contains("BPModLoaderMod : 1"), "{mods_txt}");
+    assert!(mods_txt.contains("ActorDumperMod : 0"), "{mods_txt}");
+    assert!(mods_txt.contains("CutsceneSkip : 1"), "{mods_txt}");
+
+    // Switching the UE4SS mod off brings the warning back.
+    fx.app
+        .set_enabled(&[snap.ue4ss.mod_id.unwrap()], false)
+        .unwrap();
+    let snap = fx.app.snapshot().unwrap();
+    assert_eq!(snap.ue4ss.state, "disabled");
+    assert_eq!(missing(&snap, skip), vec!["UE4SS".to_string()]);
+}
+
+/// Updating replaces the previous install rather than stacking a second
+/// one, and keeps the user's UE4SS settings.
+#[test]
+fn updating_ue4ss_keeps_the_users_settings() {
+    let mut fx = Fixture::new();
+    let first = fx.source.join("first.zip");
+    ue4ss_release(&first, "[General]\nConsole=0\n");
+    let id = fx.app.install_ue4ss(&first, "3.1.0-5").unwrap();
+
+    // The user turns the console on, in the deployed file.
+    let settings = fx.game.join("SB/Binaries/Win64/ue4ss/UE4SS-settings.ini");
+    fs::write(&settings, "[General]\nConsole=1\n").unwrap();
+
+    let second = fx.source.join("second.zip");
+    ue4ss_release(&second, "[General]\nConsole=0\n");
+    let new_id = fx.app.install_ue4ss(&second, "3.1.0-6").unwrap();
+    assert_ne!(id, new_id);
+
+    assert_eq!(
+        fs::read_to_string(&settings).unwrap(),
+        "[General]\nConsole=1\n"
+    );
+    let ue4ss_mods: Vec<_> = fx
+        .app
+        .snapshot()
+        .unwrap()
+        .mods
+        .into_iter()
+        .filter(|m| m.source == "ue4ss")
+        .collect();
+    assert_eq!(ue4ss_mods.len(), 1);
+    assert_eq!(ue4ss_mods[0].version.as_deref(), Some("3.1.0-6"));
+}
+
+#[test]
+fn a_hand_placed_ue4ss_counts_and_a_wrong_archive_is_refused() {
+    let mut fx = Fixture::new();
+    let skip = fx.install_folder("Skip", &[("Skip/scripts/main.lua", "-- lua")]);
+    fx.app.set_enabled(&[skip], true).unwrap();
+
+    let dll = fx.game.join("SB/Binaries/Win64/ue4ss/UE4SS.dll");
+    fs::create_dir_all(dll.parent().unwrap()).unwrap();
+    fs::write(&dll, "MZ").unwrap();
+    let snap = fx.app.snapshot().unwrap();
+    assert_eq!(snap.ue4ss.state, "manual");
+    assert!(snap.mods.iter().all(|m| m.missing_requirements.is_empty()));
+
+    let not_ue4ss = fx.source.join("outfit.zip");
+    {
+        use std::io::Write;
+        let mut zip = zip::ZipWriter::new(fs::File::create(&not_ue4ss).unwrap());
+        let options: zip::write::FileOptions<'_, ()> = zip::write::FileOptions::default();
+        zip.start_file("Outfit_P.pak", options).unwrap();
+        zip.write_all(b"pak").unwrap();
+        zip.finish().unwrap();
+    }
+    let before = fx.app.snapshot().unwrap().mods.len();
+    assert!(fx.app.install_ue4ss(&not_ue4ss, "1.0").is_err());
+    assert_eq!(fx.app.snapshot().unwrap().mods.len(), before);
+}
+
+/// Under the virtual file system `mods.txt` is generated, and it has to start
+/// from UE4SS's own, or BPModLoaderMod — and with it every logic mod — would
+/// silently stop loading.
+#[test]
+fn the_generated_mods_txt_keeps_ue4ss_bundled_mods_switched_on() {
+    use sbmm_app::dto::DeploymentMode;
+
+    let mut fx = Fixture::new();
+    fx.app.set_deployment_mode(DeploymentMode::Virtual).unwrap();
+    let archive = fx.source.join("ue4ss.zip");
+    ue4ss_release(&archive, "");
+    fx.app.install_ue4ss(&archive, "3.1.0-6").unwrap();
+    let skip = fx.install_folder("Skip", &[("Skip/scripts/main.lua", "-- lua")]);
+    fx.app.set_enabled(&[skip], true).unwrap();
+
+    let vfs = sbmm_vfs::Mapping::load(&fx.app.write_vfs_mapping().unwrap())
+        .unwrap()
+        .into_vfs();
+    let path = sbmm_vfs::VPath::from_relative("SB/Binaries/Win64/ue4ss/Mods/mods.txt").unwrap();
+    let file = vfs.overlay().file(&path).unwrap();
+    assert_eq!(file.origin, sbmm_vfs::Origin::Generated);
+    let text = fs::read_to_string(&file.source).unwrap();
+    assert!(text.contains("BPModLoaderMod : 1"), "{text}");
+    assert!(text.contains("ActorDumperMod : 0"), "{text}");
+    assert!(text.contains("Skip : 1"), "{text}");
+    assert!(
+        !fx.game
+            .join("SB/Binaries/Win64/ue4ss/Mods/mods.txt")
+            .exists(),
+        "the real one is never written under the virtual file system"
+    );
+}
+
+/// With automatic apply off, installing UE4SS puts UE4SS in and nothing else
+/// the user has staged.
+#[test]
+fn installing_ue4ss_leaves_staged_changes_staged() {
+    let mut fx = Fixture::new();
+    fx.app.set_auto_apply(false).unwrap();
+    let outfit = fx.install_folder("Outfit", &[("Outfit_P.pak", "outfit")]);
+    fx.app.set_enabled(&[outfit], true).unwrap();
+
+    let archive = fx.source.join("ue4ss.zip");
+    ue4ss_release(&archive, "");
+    fx.app.install_ue4ss(&archive, "3.1.0-6").unwrap();
+
+    assert!(fx.game.join("SB/Binaries/Win64/ue4ss/UE4SS.dll").is_file());
+    assert!(!fx.game.join("SB/Content/Paks/~mods").exists());
+    let pending = fx.app.snapshot().unwrap().pending;
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].name, "Outfit");
+}
+
+/// The real Stellar Blade UE4SS release, installed end to end. The archive is
+/// not part of the suite: download `UE4SS_v3.1.0-6.zip` and point
+/// `SBMM_UE4SS_ARCHIVE` at it to run this.
+#[test]
+fn the_real_ue4ss_release_installs_with_its_bundled_mods_switched_on() {
+    let Some(archive) = std::env::var_os("SBMM_UE4SS_ARCHIVE").map(PathBuf::from) else {
+        eprintln!("SBMM_UE4SS_ARCHIVE is not set; skipping");
+        return;
+    };
+    let mut fx = Fixture::new();
+    let skip = fx.install_folder("Skip", &[("Skip/scripts/main.lua", "-- lua")]);
+    fx.app.set_enabled(&[skip], true).unwrap();
+    fx.app.install_ue4ss(&archive, "3.1.0-6").unwrap();
+
+    let win64 = fx.game.join("SB/Binaries/Win64");
+    assert!(win64.join("dwmapi.dll").is_file());
+    assert!(win64.join("ue4ss/UE4SS.dll").is_file());
+    assert!(win64
+        .join("ue4ss/Mods/BPModLoaderMod/Scripts/main.lua")
+        .is_file());
+    let mods_txt = fs::read_to_string(win64.join("ue4ss/Mods/mods.txt")).unwrap();
+    assert!(mods_txt.contains("BPModLoaderMod : 1"), "{mods_txt}");
+    assert!(mods_txt.contains("Keybinds : 1"), "{mods_txt}");
+    assert!(mods_txt.contains("Skip : 1"), "{mods_txt}");
+    let snap = fx.app.snapshot().unwrap();
+    assert_eq!(snap.ue4ss.state, "managed");
+    assert!(snap.mods.iter().all(|m| m.missing_requirements.is_empty()));
+    assert_eq!(
+        snap.mods.iter().filter(|m| m.source == "ue4ss").count(),
+        1,
+        "one UE4SS mod, not one per bundled mod"
+    );
+}
+
+fn write_zip(path: &Path, files: &[(&str, &str)]) {
+    use std::io::Write;
+    let mut zip = zip::ZipWriter::new(fs::File::create(path).unwrap());
+    let options: zip::write::FileOptions<'_, ()> = zip::write::FileOptions::default();
+    for (name, contents) in files {
+        zip.start_file(*name, options).unwrap();
+        zip.write_all(contents.as_bytes()).unwrap();
+    }
+    zip.finish().unwrap();
+}
+
+const TWO_COLOURS: &[(&str, &str)] = &[
+    ("Diving Suit/Black/Outfit_P.pak", "black"),
+    ("Diving Suit/Black/Outfit_P.utoc", "black utoc"),
+    ("Diving Suit/White/Outfit_P.pak", "white"),
+    ("Diving Suit/White/Outfit_P.utoc", "white utoc"),
+    ("Diving Suit/readme.txt", "pick one"),
+];
+
+/// An archive holding several colours asks which, installs only that one,
+/// and remembers the answer for the next time the same mod comes in.
+#[test]
+fn a_multi_variant_archive_installs_only_the_chosen_version() {
+    let mut fx = Fixture::new();
+    let archive = fx.source.join("Diving Suit.zip");
+    write_zip(&archive, TWO_COLOURS);
+
+    let staged = fx.app.stage_archive(&archive).unwrap();
+    assert!(staged.needs_confirmation);
+    let choice = staged.variants.clone().unwrap();
+    assert!(choice.exclusive);
+    assert_eq!(staged.remembered_variants, Vec::<String>::new());
+
+    let id = fx
+        .app
+        .confirm_install_with(
+            &staged.staging_id,
+            "Diving Suit",
+            None,
+            Some(&["White".to_string()]),
+        )
+        .unwrap();
+    fx.app.set_enabled(&[id], true).unwrap();
+    fx.app.apply().unwrap();
+    let paks = fx.game.join("SB/Content/Paks/~mods");
+    assert_eq!(
+        fs::read_to_string(paks.join("0010_Outfit_P.pak")).unwrap(),
+        "white"
+    );
+    assert_eq!(
+        fs::read_dir(&paks).unwrap().count(),
+        2,
+        "one colour's pak and utoc, not both colours"
+    );
+
+    // The same archive again preselects what was chosen.
+    let again = fx.app.stage_archive(&archive).unwrap();
+    assert_eq!(again.remembered_variants, vec!["White".to_string()]);
+    fx.app.cancel_install(&again.staging_id).unwrap();
+
+    assert!(fx
+        .app
+        .confirm_install_with(&again.staging_id, "x", None, Some(&["Red".to_string()]))
+        .is_err());
+}
+
+/// A Nexus download of such an archive waits for the user without losing
+/// that it came from Nexus; its next version installs the same way unasked.
+#[test]
+fn a_downloaded_multi_variant_mod_asks_once_and_then_remembers() {
+    let mut fx = Fixture::new();
+    let first = fx.source.join("Diving Suit-101-1-0.zip");
+    write_zip(&first, TWO_COLOURS);
+
+    let origin = sbmm_app::Origin::nexus(101, 1).with_version(Some("1.0".into()));
+    let staged = match fx.app.install_download(&first, "Diving Suit", origin) {
+        Err(sbmm_app::AppError::NeedsChoice(staged)) => staged,
+        other => panic!("expected to be asked, got {other:?}"),
+    };
+    let id = fx
+        .app
+        .confirm_install_with(
+            &staged.staging_id,
+            &staged.suggested_name,
+            None,
+            Some(&["Black".to_string()]),
+        )
+        .unwrap();
+    let installed = fx
+        .app
+        .snapshot()
+        .unwrap()
+        .mods
+        .into_iter()
+        .find(|m| m.id == id)
+        .unwrap();
+    assert_eq!(installed.nexus_mod_id, Some(101), "it is still a Nexus mod");
+    assert_eq!(installed.version.as_deref(), Some("1.0"));
+
+    let update = fx.source.join("Diving Suit-101-1-1.zip");
+    write_zip(&update, TWO_COLOURS);
+    let origin = sbmm_app::Origin::nexus(101, 2).with_version(Some("1.1".into()));
+    let new_id = fx
+        .app
+        .install_download(&update, "Diving Suit", origin)
+        .expect("the remembered choice applies without asking");
+    fx.app.set_enabled(&[new_id], true).unwrap();
+    fx.app.apply().unwrap();
+    let pak = fx.game.join("SB/Content/Paks/~mods");
+    let contents: Vec<String> = fs::read_dir(&pak)
+        .unwrap()
+        .flatten()
+        .map(|e| fs::read_to_string(e.path()).unwrap())
+        .collect();
+    assert!(contents.contains(&"black".to_string()));
+    assert!(!contents.contains(&"white".to_string()));
+}
+
+#[test]
+fn a_bundle_of_separate_mods_still_installs_whole_without_asking() {
+    let mut fx = Fixture::new();
+    let archive = fx.source.join("Lua pack.zip");
+    write_zip(
+        &archive,
+        &[
+            ("Photo Mode/scripts/main.lua", "-- photo"),
+            ("Quick Sprint/scripts/main.lua", "-- sprint"),
+        ],
+    );
+    let staged = fx.app.stage_archive(&archive).unwrap();
+    assert!(staged.variants.is_none());
+    assert!(!staged.needs_confirmation);
+}
+
+const FOMOD_CONFIG: &str = r#"<?xml version="1.0" encoding="UTF-16"?>
+<config>
+  <moduleName>Planet Diving Suit</moduleName>
+  <moduleImage path="fomod\images\header.jpg"/>
+  <requiredInstallFiles><file source="Core\Shared_P.pak" destination=""/></requiredInstallFiles>
+  <installSteps order="Explicit">
+    <installStep name="Colour"><optionalFileGroups order="Explicit">
+      <group name="Colour" type="SelectExactlyOne"><plugins order="Explicit">
+        <plugin name="Black">
+          <description>The original.</description>
+          <image path="fomod\images\black.jpg"/>
+          <files><folder source="Black" destination=""/></files>
+          <conditionFlags><flag name="colour">black</flag></conditionFlags>
+          <typeDescriptor><type name="Optional"/></typeDescriptor>
+        </plugin>
+        <plugin name="White">
+          <description>Snow white.</description>
+          <files><folder source="White" destination=""/></files>
+          <conditionFlags><flag name="colour">white</flag></conditionFlags>
+          <typeDescriptor><type name="Recommended"/></typeDescriptor>
+        </plugin>
+      </plugins></group>
+    </optionalFileGroups></installStep>
+    <installStep name="Extras">
+      <visible><flagDependency flag="colour" value="white"/></visible>
+      <optionalFileGroups order="Explicit"><group name="Extras" type="SelectAny"><plugins order="Explicit">
+        <plugin name="Gloves"><description>Gloves.</description>
+          <files><file source="Extras\Gloves_P.pak" destination=""/></files>
+          <typeDescriptor><type name="Optional"/></typeDescriptor></plugin>
+      </plugins></group></optionalFileGroups>
+    </installStep>
+  </installSteps>
+</config>"#;
+
+/// A FOMOD archive, its script in UTF-16 as the old tools wrote it.
+fn fomod_archive(path: &Path) {
+    use std::io::Write;
+    let mut config = vec![0xFF, 0xFE];
+    for unit in FOMOD_CONFIG.encode_utf16() {
+        config.extend(unit.to_le_bytes());
+    }
+    let mut zip = zip::ZipWriter::new(fs::File::create(path).unwrap());
+    let options: zip::write::FileOptions<'_, ()> = zip::write::FileOptions::default();
+    zip.start_file("Suit/fomod/ModuleConfig.xml", options)
+        .unwrap();
+    zip.write_all(&config).unwrap();
+    for (name, contents) in [
+        ("Suit/fomod/images/header.jpg", "header picture"),
+        ("Suit/fomod/images/black.jpg", "black picture"),
+        ("Suit/Core/Shared_P.pak", "shared"),
+        ("Suit/Black/Outfit_P.pak", "black"),
+        ("Suit/White/Outfit_P.pak", "white"),
+        ("Suit/Extras/Gloves_P.pak", "gloves"),
+    ] {
+        zip.start_file(name, options).unwrap();
+        zip.write_all(contents.as_bytes()).unwrap();
+    }
+    zip.finish().unwrap();
+}
+
+fn deployed_paks(game: &Path) -> Vec<String> {
+    let mut found: Vec<String> = fs::read_dir(game.join("SB/Content/Paks/~mods"))
+        .map(|dir| {
+            dir.flatten()
+                .map(|e| fs::read_to_string(e.path()).unwrap())
+                .collect()
+        })
+        .unwrap_or_default();
+    found.sort();
+    found
+}
+
+/// A FOMOD runs as a wizard: the answers decide what is installed, a step
+/// shows only when an earlier answer calls for it, and the chosen option's
+/// picture becomes the mod's.
+#[test]
+fn a_fomod_installs_what_its_wizard_was_answered() {
+    let mut fx = Fixture::new();
+    let archive = fx.source.join("Planet Diving Suit.zip");
+    fomod_archive(&archive);
+
+    let staged = fx.app.stage_archive(&archive).unwrap();
+    assert!(staged.needs_confirmation);
+    assert!(
+        staged.variants.is_none(),
+        "the FOMOD asks; nothing else does"
+    );
+    let view = staged.fomod.clone().expect("the installer is found");
+    assert_eq!(view.root, "Suit");
+    assert_eq!(view.installer.name, "Planet Diving Suit");
+    assert_eq!(view.selection, vec![[0, 0, 1]], "White is recommended");
+    assert!(!view.remembered);
+    assert!(staged
+        .previews
+        .contains(&"Suit/fomod/images/black.jpg".to_string()));
+
+    let black = fx
+        .app
+        .fomod_state(&staged.staging_id, &[[0, 0, 0]])
+        .unwrap();
+    assert_eq!(black.visible, vec![true, false]);
+    assert!(black.problems.is_empty());
+    let both = fx
+        .app
+        .fomod_state(&staged.staging_id, &[[0, 0, 0], [0, 0, 1]])
+        .unwrap();
+    assert_eq!(both.problems.len(), 1);
+    assert!(fx
+        .app
+        .confirm_install_fomod(&staged.staging_id, "Suit", &[[0, 0, 0], [0, 0, 1]])
+        .is_err());
+
+    // Black, with a stale tick on the hidden gloves step.
+    let id = fx
+        .app
+        .confirm_install_fomod(&staged.staging_id, "Suit", &[[0, 0, 0], [1, 0, 0]])
+        .unwrap();
+    fx.app.set_enabled(&[id], true).unwrap();
+    fx.app.apply().unwrap();
+    assert_eq!(deployed_paks(&fx.game), vec!["black", "shared"]);
+
+    let preview = fx
+        .app
+        .preview_data_url(&staged.staging_id, "_preview.jpg")
+        .unwrap();
+    assert!(preview.starts_with("data:image/jpeg;base64,"));
+
+    // The same archive again opens on last time's answers.
+    let again = fx.app.stage_archive(&archive).unwrap();
+    let view = again.fomod.unwrap();
+    assert!(view.remembered);
+    assert_eq!(view.selection, vec![[0, 0, 0], [1, 0, 0]]);
+    fx.app.cancel_install(&again.staging_id).unwrap();
+}
+
+/// From Nexus, a FOMOD waits for the wizard the first time, and installs the
+/// next version with the same answers without asking.
+#[test]
+fn a_downloaded_fomod_asks_once_and_then_remembers() {
+    let mut fx = Fixture::new();
+    let first = fx.source.join("Suit-202-1-0.zip");
+    fomod_archive(&first);
+    let staged = match fx.app.install_download(
+        &first,
+        "Planet Diving Suit",
+        sbmm_app::Origin::nexus(202, 1).with_version(Some("1.0".into())),
+    ) {
+        Err(sbmm_app::AppError::NeedsChoice(staged)) => staged,
+        other => panic!("expected the wizard, got {other:?}"),
+    };
+    let id = fx
+        .app
+        .confirm_install_fomod(
+            &staged.staging_id,
+            &staged.suggested_name,
+            &[[0, 0, 1], [1, 0, 0]],
+        )
+        .unwrap();
+    let installed = fx
+        .app
+        .snapshot()
+        .unwrap()
+        .mods
+        .into_iter()
+        .find(|m| m.id == id)
+        .unwrap();
+    assert_eq!(installed.nexus_mod_id, Some(202));
+
+    let update = fx.source.join("Suit-202-1-1.zip");
+    fomod_archive(&update);
+    let new_id = fx
+        .app
+        .install_download(
+            &update,
+            "Planet Diving Suit",
+            sbmm_app::Origin::nexus(202, 2).with_version(Some("1.1".into())),
+        )
+        .expect("remembered answers install it");
+    fx.app.set_enabled(&[id], false).unwrap();
+    fx.app.set_enabled(&[new_id], true).unwrap();
+    fx.app.apply().unwrap();
+    assert_eq!(deployed_paks(&fx.game), vec!["gloves", "shared", "white"]);
+}
+
+#[test]
+fn previews_are_only_pictures_from_inside_the_library() {
+    let mut fx = Fixture::new();
+    let id = fx.install_folder(
+        "Pictured",
+        &[
+            ("Outfit_P.pak", "pak"),
+            ("preview.png", "png"),
+            ("notes.txt", "hi"),
+        ],
+    );
+    let folder = fx
+        .store()
+        .list_mods()
+        .unwrap()
+        .into_iter()
+        .find(|m| m.id == id)
+        .unwrap();
+    assert_eq!(folder.image_path.as_deref(), Some("preview.png"));
+    let staging = folder.staging_folder;
+
+    assert!(fx
+        .app
+        .preview_data_url(&staging, "preview.png")
+        .unwrap()
+        .starts_with("data:image/png;base64,"));
+    assert!(
+        fx.app.preview_data_url(&staging, "notes.txt").is_err(),
+        "not a picture"
+    );
+    assert!(fx.app.preview_data_url(&staging, "../../sbmm.db").is_err());
+    assert!(fx.app.preview_data_url("..", "x.png").is_err());
+    assert!(fx
+        .app
+        .preview_data_url(&staging, "C:/Windows/x.png")
+        .is_err());
+}
+
+// -- stage 7: getting back from things going wrong -------------------------
+
+/// The first build seen is remembered quietly; a later one is reported until
+/// the user acknowledges it.
+#[test]
+fn a_game_update_is_reported_until_acknowledged() {
+    let mut fx = Fixture::new();
+    assert!(fx.app.snapshot().unwrap().game_update.is_none());
+
+    fs::write(
+        fx.game.join("SB/Binaries/Win64/SB-Win64-Shipping.exe"),
+        "a patched executable",
+    )
+    .unwrap();
+    let update = fx.app.snapshot().unwrap().game_update.expect("reported");
+    assert_ne!(update.previous, update.current);
+
+    fx.app.acknowledge_game_update().unwrap();
+    assert!(fx.app.snapshot().unwrap().game_update.is_none());
+}
+
+/// Files an update put back, and files deleted, are repaired; the game's new
+/// file is what disabling the mod restores.
+#[test]
+fn drifted_files_are_repaired_without_losing_the_games_new_file() {
+    let mut fx = Fixture::new();
+    let chunk = fx.game.join("SB/Content/Movies/Intro.mp4");
+    fs::create_dir_all(chunk.parent().unwrap()).unwrap();
+    fs::write(&chunk, "vanilla").unwrap();
+    let id = fx.install_folder(
+        "Intro Replacer",
+        &[
+            ("Movies/Intro.mp4", "modded"),
+            ("Movies/Extra.mp4", "extra"),
+        ],
+    );
+    fx.app.set_enabled(&[id], true).unwrap();
+    fx.app.apply().unwrap();
+    assert_eq!(fs::read_to_string(&chunk).unwrap(), "modded");
+
+    fs::remove_file(&chunk).unwrap();
+    fs::write(&chunk, "vanilla, patched").unwrap();
+    let extra: Vec<PathBuf> = fx
+        .store()
+        .deployed_files_for(id)
+        .unwrap()
+        .into_iter()
+        .map(|(target, _, _)| fx.game.join(target))
+        .filter(|p| p.to_string_lossy().contains("Extra"))
+        .collect();
+    fs::remove_file(&extra[0]).unwrap();
+    assert_eq!(fx.app.snapshot().unwrap().drift.len(), 2);
+
+    let report = fx.app.repair_drift().unwrap();
+    assert_eq!((report.displaced, report.relinked), (1, 1), "{report:?}");
+    assert!(report.failed.is_empty());
+    assert!(fx.app.snapshot().unwrap().drift.is_empty());
+    assert_eq!(fs::read_to_string(&chunk).unwrap(), "modded");
+
+    fx.app.set_enabled(&[id], false).unwrap();
+    fx.app.apply().unwrap();
+    assert_eq!(fs::read_to_string(&chunk).unwrap(), "vanilla, patched");
+}
+
+/// Every apply that changes something leaves a point; going back to one
+/// re-applies it and can itself be undone.
+#[test]
+fn a_restore_point_puts_the_mod_list_back() {
+    let mut fx = Fixture::new();
+    let a = fx.install_folder("Outfit", &[("Outfit_P.pak", "a")]);
+    let b = fx.install_folder("Hair", &[("Hair_P.pak", "b")]);
+
+    fx.app.set_enabled(&[a], true).unwrap();
+    fx.app.apply().unwrap();
+    // Applying with nothing changed adds no point.
+    fx.app.apply().unwrap();
+    fx.app.set_enabled(&[b], true).unwrap();
+    fx.app.set_order(&[b, a]).unwrap();
+    fx.app.apply().unwrap();
+
+    let points = fx.app.restore_points().unwrap();
+    assert_eq!(points.len(), 2, "{points:?}");
+    assert!(points.iter().all(|p| p.automatic));
+    let only_outfit = points[1].clone();
+    assert_eq!(only_outfit.enabled, 1);
+    assert!(
+        only_outfit.label.contains("Outfit"),
+        "{}",
+        only_outfit.label
+    );
+
+    let report = fx.app.restore_to_point(only_outfit.id).unwrap();
+    assert_eq!(report.uninstalled, 0);
+    assert_eq!(report.applied.removed, ["Hair"]);
+    let mods = fx.app.snapshot().unwrap().mods;
+    let enabled: Vec<&str> = mods
+        .iter()
+        .filter(|m| m.enabled)
+        .map(|m| m.name.as_str())
+        .collect();
+    assert_eq!(enabled, ["Outfit"]);
+    assert!(!fx.game_snapshot().keys().any(|k| k.contains("Hair")));
+
+    // The setup left behind was already the newest point, so going forward
+    // again is one more restore away and no duplicate was taken.
+    let points = fx.app.restore_points().unwrap();
+    assert_eq!(points.len(), 2, "{points:?}");
+    assert_eq!(points[0].enabled, 2);
+
+    // A setup changed but never applied is kept before going back.
+    fx.app.set_enabled(&[b], true).unwrap();
+    fx.app.restore_to_point(only_outfit.id).unwrap();
+    let points = fx.app.restore_points().unwrap();
+    assert!(
+        points[0].label.starts_with("Before going back"),
+        "{points:?}"
+    );
+
+    let manual = fx.app.create_restore_point("Known good").unwrap();
+    assert!(fx.app.create_restore_point("  ").is_err());
+    fx.app.delete_restore_point(manual).unwrap();
+}
+
+/// Saves are zipped on request and before launches when they changed, and
+/// a restore backs up what it replaces.
+#[test]
+fn saves_are_backed_up_and_restored() {
+    use sbmm_app::saves::BackupKind;
+    let mut fx = Fixture::new();
+    let saves = fx.source.join("SaveGames");
+    fs::create_dir_all(saves.join("76561198000000000")).unwrap();
+    fs::write(
+        saves.join("76561198000000000/StellarBladeSave00.sav"),
+        "chapter 1",
+    )
+    .unwrap();
+    fx.app.set_saves_dir(Some(&saves)).unwrap();
+
+    let first = fx.app.back_up_saves(BackupKind::Manual).unwrap().unwrap();
+    assert_eq!(first.kind, "manual");
+    assert!(
+        fx.app
+            .back_up_saves(BackupKind::Automatic)
+            .unwrap()
+            .is_none(),
+        "nothing changed since the last backup"
+    );
+
+    fs::write(
+        saves.join("76561198000000000/StellarBladeSave00.sav"),
+        "chapter 2, now corrupted",
+    )
+    .unwrap();
+    fx.app.back_up_saves_before_launch();
+    let view = fx.app.saves().unwrap();
+    assert_eq!(view.files, 1);
+    assert_eq!(view.backups.len(), 2);
+    assert_eq!(view.backups[0].kind, "auto");
+
+    fx.app.restore_saves(&first.file).unwrap();
+    assert_eq!(
+        fs::read_to_string(saves.join("76561198000000000/StellarBladeSave00.sav")).unwrap(),
+        "chapter 1"
+    );
+    let kinds = |fx: &Fixture| -> Vec<String> {
+        fx.app
+            .saves()
+            .unwrap()
+            .backups
+            .into_iter()
+            .map(|b| b.kind)
+            .collect()
+    };
+    // What was replaced was already in the newest backup, so no copy of it.
+    assert_eq!(kinds(&fx), ["auto", "manual"]);
+
+    // Saves written since the last backup are kept before a restore.
+    fs::write(
+        saves.join("76561198000000000/StellarBladeSave01.sav"),
+        "new slot",
+    )
+    .unwrap();
+    fx.app.restore_saves(&first.file).unwrap();
+    assert_eq!(kinds(&fx), ["before-restore", "auto", "manual"]);
+    assert!(!saves
+        .join("76561198000000000/StellarBladeSave01.sav")
+        .exists());
+
+    assert!(fx.app.restore_saves("../sbmm.db").is_err());
+    fx.app.delete_save_backup(&first.file).unwrap();
+}
+
+// -- stage 8: settings files, notes, tags and pictures ---------------------
+
+/// Editing a mod's INI edits what the game reads, keeps the deployment
+/// record honest, and the installed copy is there to reset to.
+#[test]
+fn a_mods_settings_file_is_edited_where_the_game_reads_it() {
+    use sbmm_app::config::ConfigScope;
+    let mut fx = Fixture::new();
+    let id = fx.install_folder(
+        "Photo Mode",
+        &[
+            ("PhotoMode/Scripts/main.lua", "print('hi')"),
+            ("PhotoMode/config.ini", "[Camera]\nFov=90\n"),
+            ("PhotoMode/enabled.txt", ""),
+        ],
+    );
+    fx.app.set_enabled(&[id], true).unwrap();
+    fx.app.apply().unwrap();
+
+    let scope = ConfigScope::Mod { mod_id: id };
+    let files: Vec<String> = fx
+        .app
+        .config_files(scope)
+        .unwrap()
+        .into_iter()
+        .map(|f| f.path)
+        .collect();
+    assert!(
+        files.contains(&"PhotoMode/config.ini".to_string()),
+        "{files:?}"
+    );
+
+    fx.app
+        .write_config(scope, "PhotoMode/config.ini", "[Camera]\nFov=110\n")
+        .unwrap();
+    let deployed = fx
+        .game
+        .join("SB/Binaries/Win64/ue4ss/Mods/PhotoMode/config.ini");
+    assert_eq!(
+        fs::read_to_string(&deployed).unwrap(),
+        "[Camera]\nFov=110\n"
+    );
+    assert!(
+        fx.app.snapshot().unwrap().drift.is_empty(),
+        "the record follows the edit"
+    );
+
+    let text = fx.app.read_config(scope, "PhotoMode/config.ini").unwrap();
+    assert_eq!(text.original.as_deref(), Some("[Camera]\nFov=90\n"));
+    let edited = fx.app.config_files(scope).unwrap();
+    assert!(edited
+        .iter()
+        .any(|f| f.path == "PhotoMode/config.ini" && f.edited));
+
+    // Only settings files inside the mod can be reached.
+    assert!(fx.app.read_config(scope, "../../sbmm.db").is_err());
+    assert!(fx
+        .app
+        .write_config(scope, "PhotoMode/Scripts/../../x.pak", "")
+        .is_err());
+}
+
+/// Reinstalling or updating frame generation keeps what the user changed in
+/// dlssg_sm86.ini, and takes the new version's defaults for the rest.
+#[test]
+fn frame_generation_keeps_the_users_ini_across_a_reinstall() {
+    use sbmm_upscaler::framegen::Proxy;
+    let mut fx = Fixture::new();
+    let ini = fx.game.join("SB/Binaries/Win64/dlssg_sm86.ini");
+
+    let first = fake_framegen_release(&fx.source.join("first"));
+    fx.app
+        .install_framegen(&first, Proxy::Version, "0.4.0")
+        .unwrap();
+    // The user switches it off, in the game folder like the README says.
+    fs::write(&ini, "[General]\nEnabled=0\n").unwrap();
+
+    let second = fake_framegen_release(&fx.source.join("second"));
+    fs::write(
+        second.root.join("dlssg_sm86.ini"),
+        "[General]\nEnabled=1\nLogLevel=2\n",
+    )
+    .unwrap();
+    fx.app
+        .install_framegen(&second, Proxy::Version, "0.5.0")
+        .unwrap();
+
+    assert_eq!(
+        fs::read_to_string(&ini).unwrap(),
+        "[General]\nEnabled=0\nLogLevel=2\n"
+    );
+    // And the new version's own file is what a reset goes back to.
+    let id = fx.app.framegen_installed().unwrap().unwrap().mod_id;
+    let text = fx
+        .app
+        .read_config(
+            sbmm_app::config::ConfigScope::Mod { mod_id: id },
+            "SB/Binaries/Win64/dlssg_sm86.ini",
+        )
+        .unwrap();
+    assert_eq!(
+        text.original.as_deref(),
+        Some("[General]\nEnabled=1\nLogLevel=2\n")
+    );
+}
+
+/// The game's own INI files, with the first version found kept to reset to.
+#[test]
+fn the_games_settings_files_can_be_edited_and_reset() {
+    use sbmm_app::config::ConfigScope;
+    let mut fx = Fixture::new();
+    let config = fx.source.join("Config");
+    fs::create_dir_all(config.join("WindowsNoEditor")).unwrap();
+    // Unreal writes these as UTF-16 often enough.
+    let utf16: Vec<u8> = [0xFF, 0xFE]
+        .into_iter()
+        .chain(
+            "[/Script/Engine.RendererSettings]\r\nr.Tonemapper.Sharpen=0\r\n"
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes),
+        )
+        .collect();
+    fs::write(config.join("WindowsNoEditor/Engine.ini"), &utf16).unwrap();
+    fs::write(config.join("WindowsNoEditor/notes.txt"), "not a setting").unwrap();
+    // SAFETY: the only test that sets this variable.
+    unsafe { std::env::set_var("SBMM_GAME_CONFIG_DIR", &config) };
+
+    let files = fx.app.config_files(ConfigScope::Game).unwrap();
+    assert_eq!(files.len(), 1, "only INI files: {files:?}");
+    let path = &files[0].path;
+    assert_eq!(path, "WindowsNoEditor/Engine.ini");
+
+    let text = fx.app.read_config(ConfigScope::Game, path).unwrap();
+    assert!(text.text.contains("Sharpen=0"));
+    assert_eq!(text.original, None);
+    let edited = text.text.replace("Sharpen=0", "Sharpen=1");
+    fx.app
+        .write_config(ConfigScope::Game, path, &edited)
+        .unwrap();
+
+    let bytes = fs::read(config.join("WindowsNoEditor/Engine.ini")).unwrap();
+    assert_eq!(&bytes[..2], &[0xFF, 0xFE], "still UTF-16");
+    let again = fx.app.read_config(ConfigScope::Game, path).unwrap();
+    assert!(again.text.contains("Sharpen=1"));
+    assert!(again.original.unwrap().contains("Sharpen=0"));
+    unsafe { std::env::remove_var("SBMM_GAME_CONFIG_DIR") };
+}
+
+#[test]
+fn a_mod_carries_notes_tags_and_a_chosen_picture() {
+    let mut fx = Fixture::new();
+    let id = fx.install_folder(
+        "Outfit",
+        &[
+            ("Outfit_P.pak", "pak"),
+            ("images/cover.png", "png"),
+            ("images/back.jpg", "jpg"),
+        ],
+    );
+    let images = fx.app.mod_images(id).unwrap();
+    assert_eq!(images.len(), 2);
+    let installed = fx.app.snapshot().unwrap().mods[0].image.clone();
+    assert_eq!(installed.as_deref(), Some("images/cover.png"));
+
+    fx.app.set_mod_image(id, Some("images/back.jpg")).unwrap();
+    assert!(fx.app.set_mod_image(id, Some("Outfit_P.pak")).is_err());
+    fx.app
+        .set_mod_notes(id, "  Goes with the white hair  ")
+        .unwrap();
+    fx.app
+        .set_mod_tags(
+            id,
+            &[
+                "outfit".into(),
+                " Outfit ".into(),
+                "".into(),
+                "white".into(),
+            ],
+        )
+        .unwrap();
+
+    let view = fx.app.snapshot().unwrap().mods.remove(0);
+    assert_eq!(view.image.as_deref(), Some("images/back.jpg"));
+    assert_eq!(view.notes.as_deref(), Some("Goes with the white hair"));
+    assert_eq!(view.tags, ["outfit", "white"]);
+
+    fx.app.set_mod_notes(id, " ").unwrap();
+    fx.app.set_mod_image(id, None).unwrap();
+    let view = fx.app.snapshot().unwrap().mods.remove(0);
+    assert_eq!((view.notes, view.image), (None, None));
 }

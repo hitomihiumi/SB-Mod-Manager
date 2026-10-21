@@ -129,6 +129,35 @@ const MIGRATIONS: &[&str] = &[
     -- be read is distinguishable from one that genuinely replaces nothing.
     ALTER TABLE mods ADD COLUMN assets_indexed_at TEXT;
     "#,
+    // v5 — which versions of a multi-variant archive the user installed, as a
+    // JSON list of the option labels, so an update of the same mod can be
+    // installed the same way without asking again.
+    r#"
+    ALTER TABLE mods ADD COLUMN variant_choice TEXT;
+    "#,
+    // v6 — restore points: a profile's enabled set and load order as they
+    // were at a moment, to go back to after a change that did not work out.
+    //
+    // `state` is a JSON list of `{modId, enabled, priority}` rather than rows,
+    // because a point is only ever written and read whole, and mods it names
+    // may since have been uninstalled.
+    r#"
+    CREATE TABLE restore_points (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        label      TEXT NOT NULL,
+        automatic  INTEGER NOT NULL DEFAULT 0,
+        game_build TEXT,
+        state      TEXT NOT NULL
+    );
+    CREATE INDEX idx_restore_points_profile ON restore_points(profile_id, id);
+    "#,
+    // v7 — the user's own labels for a mod, as a JSON list, beside the notes
+    // and picture columns v1 already has.
+    r#"
+    ALTER TABLE mods ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';
+    "#,
 ];
 
 pub fn migrate(conn: &Connection) -> Result<()> {

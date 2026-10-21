@@ -10,6 +10,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  StickyNote,
   Trash2,
 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
@@ -17,6 +18,11 @@ import { useMemo, useRef, useState } from "react";
 import { formatBytes } from "../lib/format";
 import { ipc, modPageUrl, MOD_TYPE_META, type GroupView, type ModView } from "../lib/ipc";
 import { useApp, visibleMods } from "../store/useApp";
+import { OverwriteBar } from "./OverwriteBar";
+import { ProfileSwitcher } from "./ProfileSwitcher";
+import { ModDetails } from "./ModDetails";
+import { GameUpdateBanner } from "./SafetySections";
+import { Ue4ssBanner } from "./Ue4ssSection";
 import { Badge, Button, Checkbox, Empty } from "./ui";
 
 const ROW_HEIGHT = 38;
@@ -94,6 +100,10 @@ export function ModsView({ onAdd }: { onAdd: () => void }) {
     setLastClicked(mod.id);
   }
 
+  // One mod selected shows its details beside the list.
+  const detailed =
+    selection.length === 1 ? (snapshot?.mods.find((m) => m.id === selection[0]) ?? null) : null;
+
   /** Bulk actions act on the selection when there is one, otherwise on everything shown. */
   const bulkTargets = selection.length > 0 ? selection : mods.map((m) => m.id);
 
@@ -122,6 +132,11 @@ export function ModsView({ onAdd }: { onAdd: () => void }) {
         }}
       />
 
+      <GameUpdateBanner />
+      <Ue4ssBanner />
+
+      <div className="flex min-h-0 flex-1">
+        <div className="flex min-w-0 flex-1 flex-col">
       {rows.length === 0 ? (
         <Empty
           icon={<Package size={20} />}
@@ -166,6 +181,12 @@ export function ModsView({ onAdd }: { onAdd: () => void }) {
           </div>
         </div>
       )}
+
+        </div>
+        {detailed && <ModDetails mod={detailed} onClose={() => setSelection([])} />}
+      </div>
+
+      {snapshot.overwrite.files > 0 && <OverwriteBar />}
     </div>
   );
 }
@@ -194,6 +215,8 @@ function Toolbar({
   const scope = selectionCount > 0 ? `${selectionCount} selected` : `all ${totalShown}`;
   return (
     <div className="flex h-12 shrink-0 items-center gap-2 border-b border-line px-3">
+      <ProfileSwitcher />
+      <div className="mx-1 h-5 w-px bg-line" />
       <div className="relative">
         <Search
           size={13}
@@ -203,7 +226,7 @@ function Toolbar({
           value={search}
           onChange={(event) => setSearch(event.target.value)}
           placeholder="Search mods"
-          className="h-8 w-56 rounded-md border border-line bg-base pr-2 pl-7 text-[12px] placeholder:text-ink-muted focus:border-accent-soft focus:outline-none"
+          className="h-8 w-36 rounded-md border border-line bg-base pr-2 pl-7 text-[12px] placeholder:text-ink-muted focus:border-accent-soft focus:outline-none xl:w-56"
         />
       </div>
 
@@ -270,7 +293,7 @@ function CheckUpdatesButton() {
   return (
     <Button size="sm" disabled={checking} onClick={() => void check()} title="Check Nexus for newer versions">
       <RefreshCw size={13} className={checking ? "animate-spin" : undefined} />
-      {checking ? "Checking…" : "Check updates"}
+      <span className="hidden xl:inline">{checking ? "Checking…" : "Check updates"}</span>
     </Button>
   );
 }
@@ -384,11 +407,42 @@ function ModRow({
         {mod.name}
       </button>
 
+      {mod.tags.slice(0, 2).map((tag) => (
+        <span
+          key={tag}
+          className="shrink-0 rounded-full border border-line px-1.5 text-[10px] leading-4 text-ink-soft"
+        >
+          {tag}
+        </span>
+      ))}
+      {mod.tags.length > 2 && (
+        <span className="shrink-0 text-[10px] text-ink-muted" title={mod.tags.slice(2).join(", ")}>
+          +{mod.tags.length - 2}
+        </span>
+      )}
+      {mod.notes && (
+        <StickyNote size={12} className="shrink-0 text-ink-muted" aria-label="Has notes">
+          <title>{mod.notes}</title>
+        </StickyNote>
+      )}
+
       {mod.warnings.length > 0 && (
         <AlertTriangle size={13} className="shrink-0 text-warn" aria-label="Has warnings">
           <title>{mod.warnings.join("\n")}</title>
         </AlertTriangle>
       )}
+
+      {mod.missingRequirements.map((requirement) => (
+        <Badge
+          key={requirement}
+          tone="danger"
+          title={`This mod does nothing without ${requirement}, and the game will not load it. Install it from Settings.`}
+        >
+          Needs {requirement}
+        </Badge>
+      ))}
+
+      {mod.fileConflicts && <FileConflictFlag mod={mod} />}
 
       {/* Enabled, but a mod further down the order replaces some of it. */}
       {overridden && overridden.losing > 0 && (
@@ -449,5 +503,45 @@ function ModRow({
         <Trash2 size={13} />
       </button>
     </div>
+  );
+}
+
+/**
+ * Loose files this mod shares with other enabled mods, flagged the way Mod
+ * Organizer 2 does. Clicking opens the Files view on exactly those paths.
+ */
+function FileConflictFlag({ mod }: { mod: ModView }) {
+  const showFileConflicts = useApp((s) => s.showFileConflicts);
+  const conflicts = mod.fileConflicts;
+  if (!conflicts) return null;
+
+  const { wins, loses, redundant } = conflicts;
+  const [tone, label, detail]: ["accent" | "warn" | "danger", string, string] = redundant
+    ? [
+        "danger",
+        "Redundant",
+        `Every file of this mod (${loses}) is replaced by mods later in the load order, so it does nothing.`,
+      ]
+    : wins > 0 && loses > 0
+      ? [
+          "warn",
+          `±${wins}/${loses}`,
+          `Replaces ${wins} file(s) of earlier mods, and loses ${loses} to later ones.`,
+        ]
+      : wins > 0
+        ? ["accent", `+${wins}`, `Replaces ${wins} file(s) from mods earlier in the load order.`]
+        : ["warn", `−${loses}`, `${loses} file(s) are replaced by mods later in the load order.`];
+
+  return (
+    <button
+      onClick={(event) => {
+        event.stopPropagation();
+        showFileConflicts(mod.id, mod.name);
+      }}
+      title={`${detail} Click to see which.`}
+      className="shrink-0"
+    >
+      <Badge tone={tone}>{label}</Badge>
+    </button>
   );
 }

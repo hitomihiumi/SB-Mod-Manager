@@ -44,6 +44,42 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm build
 
+  # The virtual file system end to end on real Windows: the launcher starts a
+  # stand-in for the game under the hook and checks what it saw. Built the way
+  # the app embeds the hook — release, static C runtime — so this is the DLL
+  # users get, not a debug cousin of it.
+  vfs:
+    name: Virtual file system on Windows
+    runs-on: windows-latest
+    env:
+      RUSTFLAGS: -C target-feature=+crt-static
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: vfs
+
+      - name: Build the hook, launcher and probe
+        run: cargo build --release -p sbmm-vfs-hook -p sbmm-vfs --examples --lib
+
+      - name: Run the game stand-in under the virtual file system
+        shell: pwsh
+        run: |
+          # Next to each other, as the launcher expects; the run folder is
+          # outside the checkout so nothing the test writes can leak into it.
+          $bin = "$env:RUNNER_TEMP\vfs-bin"
+          New-Item -ItemType Directory -Force $bin | Out-Null
+          Copy-Item target\release\sbmm_vfs_hook.dll, `
+                    target\release\examples\vfs_probe.exe, `
+                    target\release\examples\vfs_launch.exe $bin
+          & "$bin\vfs_launch.exe" "$env:RUNNER_TEMP\vfs-run"
+          exit $LASTEXITCODE
+
+      # Profile shortcuts go through the Windows shell's own link object.
+      - name: Shortcuts through the Windows shell
+        run: cargo test --release -p sbmm-shell
+
   # The Tauri crate needs WebView2, so it only builds on the target platform.
   app:
     name: Windows app

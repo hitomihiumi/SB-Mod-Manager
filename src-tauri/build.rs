@@ -38,17 +38,34 @@ fn build_vfs_hook() {
     let mut cargo = Command::new(env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
     cargo
         .current_dir(&root)
-        .args(["build", "-p", "sbmm-vfs-hook", "--target", &target, "--target-dir"])
+        .args([
+            "build",
+            "-p",
+            "sbmm-vfs-hook",
+            "--target",
+            &target,
+            "--target-dir",
+        ])
         .arg(&target_dir);
     if release {
         cargo.arg("--release");
     }
     // Settings meant for this build would otherwise leak into the nested one.
-    for variable in ["CARGO_TARGET_DIR", "CARGO_ENCODED_RUSTFLAGS", "RUSTFLAGS"] {
+    for variable in ["CARGO_TARGET_DIR", "CARGO_ENCODED_RUSTFLAGS"] {
         cargo.env_remove(variable);
     }
-    let status = cargo.status().expect("cargo can be run from a build script");
-    assert!(status.success(), "building the virtual file system hook failed");
+    // Link the C runtime statically so the injected DLL loads inside the game
+    // without the Visual C++ redistributable being present — a missing
+    // vcruntime/ucrt is the usual reason an injected DLL fails to load. This
+    // replaces, rather than inherits, any RUSTFLAGS from the parent build.
+    cargo.env("RUSTFLAGS", "-C target-feature=+crt-static");
+    let status = cargo
+        .status()
+        .expect("cargo can be run from a build script");
+    assert!(
+        status.success(),
+        "building the virtual file system hook failed"
+    );
 
     let built = target_dir
         .join(&target)

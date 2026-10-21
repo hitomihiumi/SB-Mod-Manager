@@ -4,9 +4,15 @@
 //! which keeps it compilable and testable on any platform; `src-tauri` is only
 //! a set of thin command wrappers around this type.
 
+pub mod config;
 pub mod credentials;
+pub mod diagnostics;
 pub mod dto;
+pub mod installer;
 pub mod library;
+pub mod safety;
+pub mod saves;
+pub mod ue4ss;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -15,7 +21,7 @@ use sbmm_core::model::{Confidence, DetectedComponent, ModType};
 use sbmm_core::plan::{self, build_plan, DeployPlan};
 use sbmm_core::{detect_components, FileTree};
 use sbmm_deploy::backend::DeployContext;
-use sbmm_deploy::{ue4ss, DeployBackend, HardlinkBackend, Manifest};
+use sbmm_deploy::{ue4ss as mods_txt, DeployBackend, HardlinkBackend, Manifest};
 use sbmm_game::GameInstall;
 use sbmm_store::{ModRecord, NewMod, Store};
 
@@ -49,6 +55,12 @@ pub enum AppError {
     Encode(#[from] serde_json::Error),
     #[error(transparent)]
     Vfs(#[from] sbmm_vfs::MappingError),
+    #[error("{0}")]
+    Invalid(String),
+    /// A download holds several versions of the mod and the user has not
+    /// chosen before; it is staged, waiting to be asked about.
+    #[error("{} holds several versions; choose which to install", .0.suggested_name)]
+    NeedsChoice(Box<StagedInstall>),
 }
 
 impl AppError {
@@ -111,6 +123,10 @@ pub struct App {
     data_dir: PathBuf,
     backend: HardlinkBackend,
     keys: Box<dyn credentials::KeyStore>,
+    /// Where staged installs waiting on the user came from, so a Nexus
+    /// download that stops to ask which variant to install still remembers
+    /// it is a Nexus mod once the user answers.
+    pending_origins: std::collections::HashMap<String, Origin>,
 }
 
 impl App {
@@ -125,6 +141,7 @@ impl App {
             data_dir,
             backend: HardlinkBackend,
             keys: Box::new(credentials::OsKeyStore),
+            pending_origins: std::collections::HashMap::new(),
         };
         std::fs::create_dir_all(app.mods_dir()).map_err(|e| AppError::io(app.mods_dir(), e))?;
         Ok(app)
@@ -285,13 +302,16 @@ impl App {
         let restore = game.is_some() && !enabled.is_empty();
         if restore {
             self.store.set_enabled(&enabled, false)?;
-            self.apply()?;
+            self.reconcile()?;
         }
 
         library::move_tree(&old_root.join("mods"), &new_root.join("mods"))?;
         library::move_tree(&old_root.join("backups"), &new_root.join("backups"))?;
         library::move_tree(&old_root.join("downloads"), &new_root.join("downloads"))?;
         library::move_tree(&old_root.join("overwrite"), &new_root.join("overwrite"))?;
+        for folder in ["save-backups", "pristine", "config-backups"] {
+            library::move_tree(&old_root.join(folder), &new_root.join(folder))?;
+        }
 
         self.store
             .set_setting(SETTING_LIBRARY_ROOT, &new_root.to_string_lossy())?;
@@ -299,7 +319,7 @@ impl App {
 
         let redeployed = if restore {
             self.store.set_enabled(&enabled, true)?;
-            self.apply()?
+            self.reconcile()?
         } else {
             ApplyReport::default()
         };
@@ -381,9 +401,28 @@ impl App {
     ) -> Result<StagedInstall> {
         let tree = FileTree::new(sbmm_archive::walk_relative(&dest));
         let components = detect_components(&tree);
-        let needs_confirmation = components
-            .iter()
-            .any(|c| c.confidence == Confidence::AskUser);
+        // A FOMOD says itself what to ask; guessing at variants on top of it
+        // would ask twice.
+        let fomod = self.fomod_view(&staging_id, &suggested_name, None)?;
+        let variants = if fomod.is_some() {
+            None
+        } else {
+            sbmm_core::variant_choice(&tree)
+        };
+        // An archive of alternatives always asks: installing every colour of
+        // an outfit at once is never what anyone meant.
+        let needs_confirmation = variants.is_some()
+            || fomod.is_some()
+            || components
+                .iter()
+                .any(|c| c.confidence == Confidence::AskUser);
+        let remembered_variants = match &variants {
+            Some(choice) => self
+                .remembered_variants(&suggested_name, None)?
+                .filter(|chosen| choice.folders_to_drop(chosen).is_some())
+                .unwrap_or_default(),
+            None => Vec::new(),
+        };
 
         Ok(StagedInstall {
             staging_id,
@@ -391,6 +430,10 @@ impl App {
             size_bytes: sbmm_archive::directory_size(&dest) as i64,
             components,
             needs_confirmation,
+            variants,
+            remembered_variants,
+            fomod,
+            previews: installer::previews(&dest),
         })
     }
 
@@ -401,7 +444,72 @@ impl App {
         name: &str,
         type_override: Option<ModType>,
     ) -> Result<i64> {
-        self.commit_install(staging_id, name, type_override, Origin::manual())
+        self.confirm_install_with(staging_id, name, type_override, None)
+    }
+
+    /// Commit a staged install, keeping only the chosen `variants` (option
+    /// labels) of an archive that offers several.
+    ///
+    /// The other options' folders are deleted from staging before the commit,
+    /// so detection sees only what was chosen and the library does not keep
+    /// colours nobody will use. The choice is remembered on the mod.
+    pub fn confirm_install_with(
+        &mut self,
+        staging_id: &str,
+        name: &str,
+        type_override: Option<ModType>,
+        variants: Option<&[String]>,
+    ) -> Result<i64> {
+        if let Some(chosen) = variants {
+            self.keep_variants(staging_id, chosen)?;
+        }
+        let origin = self
+            .pending_origins
+            .remove(staging_id)
+            .unwrap_or_else(Origin::manual);
+        let id = self.commit_install(staging_id, name, type_override, origin)?;
+        if let Some(chosen) = variants {
+            self.store
+                .set_variant_choice(id, Some(&serde_json::to_string(chosen)?))?;
+        }
+        Ok(id)
+    }
+
+    /// Delete every option folder of a staged multi-variant archive except
+    /// the chosen ones.
+    fn keep_variants(&self, staging_id: &str, chosen: &[String]) -> Result<()> {
+        let dest = self.staging_path(staging_id);
+        let tree = FileTree::new(sbmm_archive::walk_relative(&dest));
+        let Some(choice) = sbmm_core::variant_choice(&tree) else {
+            return Err(AppError::Invalid(
+                "this archive does not offer a choice of versions".into(),
+            ));
+        };
+        let drop = choice.folders_to_drop(chosen).ok_or_else(|| {
+            AppError::Invalid("choose at least one of the versions the archive offers".into())
+        })?;
+        for folder in drop {
+            let path = dest.join(&folder);
+            std::fs::remove_dir_all(&path).map_err(|e| AppError::io(&path, e))?;
+        }
+        Ok(())
+    }
+
+    /// The variants chosen when this mod was last installed: matched by its
+    /// Nexus id when there is one, otherwise by name.
+    fn remembered_variants(
+        &self,
+        name: &str,
+        nexus_mod_id: Option<i64>,
+    ) -> Result<Option<Vec<String>>> {
+        let records = self.store.list_mods()?;
+        let with_choice = || records.iter().filter(|m| m.variant_choice.is_some());
+        let found = nexus_mod_id
+            .and_then(|id| with_choice().find(|m| m.nexus_mod_id == Some(id)))
+            .or_else(|| with_choice().find(|m| m.name.eq_ignore_ascii_case(name.trim())));
+        Ok(found
+            .and_then(|m| m.variant_choice.as_deref())
+            .and_then(|json| serde_json::from_str(json).ok()))
     }
 
     /// Install a file the download queue fetched from Nexus.
@@ -414,12 +522,50 @@ impl App {
         name: &str,
         origin: Origin,
     ) -> Result<i64> {
-        let staged = self.stage_archive(archive)?;
+        let mut staged = self.stage_archive(archive)?;
         let name = if name.trim().is_empty() {
             staged.suggested_name.clone()
         } else {
             name.to_string()
         };
+        if staged.fomod.is_some() {
+            // An update installs with last time's answers; a first install
+            // waits for the wizard, remembering where it came from.
+            self.pending_origins
+                .insert(staged.staging_id.clone(), origin.clone());
+            if let Some(id) =
+                self.fomod_with_remembered(&staged.staging_id, &name, origin.nexus_mod_id)?
+            {
+                return Ok(id);
+            }
+            staged.suggested_name = name;
+            return Err(AppError::NeedsChoice(Box::new(staged)));
+        }
+        if let Some(choice) = &staged.variants {
+            // An update of a mod installed before goes in the way it did then;
+            // anything else waits for the user, keeping where it came from.
+            let remembered = self
+                .remembered_variants(&name, origin.nexus_mod_id)?
+                .filter(|chosen| choice.folders_to_drop(chosen).is_some());
+            match remembered {
+                Some(chosen) => {
+                    self.pending_origins
+                        .insert(staged.staging_id.clone(), origin);
+                    return self.confirm_install_with(
+                        &staged.staging_id,
+                        &name,
+                        None,
+                        Some(&chosen),
+                    );
+                }
+                None => {
+                    staged.suggested_name = name;
+                    self.pending_origins
+                        .insert(staged.staging_id.clone(), origin);
+                    return Err(AppError::NeedsChoice(Box::new(staged)));
+                }
+            }
+        }
         self.commit_install(&staged.staging_id, &name, None, origin)
     }
 
@@ -845,9 +991,16 @@ impl App {
         proxy: sbmm_upscaler::framegen::Proxy,
         version: &str,
     ) -> Result<i64> {
-        if let Some(previous) = self.framegen_installed()? {
-            self.uninstall(previous.mod_id)?;
-        }
+        // The user's dlssg_sm86.ini edits outlive a reinstall or update.
+        let kept = match self.framegen_installed()? {
+            Some(previous) => {
+                let folder = self.record(previous.mod_id)?.staging_folder;
+                let kept = self.keep_settings(&folder);
+                self.uninstall(previous.mod_id)?;
+                Some(kept)
+            }
+            None => None,
+        };
 
         let staging_root = self.staging_path(FRAMEGEN_STAGING);
         let binaries = Path::new(sbmm_core::paths::BINARIES_WIN64);
@@ -892,6 +1045,12 @@ impl App {
             size_bytes: sbmm_archive::directory_size(&staging_root) as i64,
             image_path: None,
         })?;
+        match &kept {
+            Some(kept) => {
+                self.restore_settings(FRAMEGEN_STAGING, kept)?;
+            }
+            None => self.keep_pristine(FRAMEGEN_STAGING)?,
+        }
 
         // Same reasoning as the upscalers: a staged frame generator does
         // nothing, so it goes in now and only this mod is deployed.
@@ -958,7 +1117,8 @@ impl App {
             primary_type,
             components,
             size_bytes: sbmm_archive::directory_size(&dest) as i64,
-            image_path: None,
+            // The best picture the archive carried, shown as the mod's.
+            image_path: installer::previews(&dest).into_iter().next(),
         })?;
 
         // Read what it replaces now, while the containers are to hand. A
@@ -966,11 +1126,15 @@ impl App {
         // installed either way, it just has no conflict picture yet, and
         // `index_missing_assets` will come back to it.
         let _ = self.index_mod_assets(id);
+        // Its settings as they came, for resets and for carrying edits over
+        // to a later version.
+        self.keep_pristine(staging_id)?;
 
         Ok(id)
     }
 
     pub fn cancel_install(&mut self, staging_id: &str) -> Result<()> {
+        self.pending_origins.remove(staging_id);
         let dest = self.staging_path(staging_id);
         if dest.is_dir() {
             std::fs::remove_dir_all(&dest).map_err(|e| AppError::io(&dest, e))?;
@@ -988,6 +1152,7 @@ impl App {
         if staging.is_dir() {
             std::fs::remove_dir_all(&staging).map_err(|e| AppError::io(&staging, e))?;
         }
+        self.forget_pristine(&record.staging_folder);
         self.store.delete_mod(mod_id)?;
         Ok(())
     }
@@ -1011,6 +1176,8 @@ impl App {
         let mut pending = Vec::new();
 
         let virtual_mode = self.deployment_mode()? == DeploymentMode::Virtual;
+        let file_conflicts = self.file_conflict_counts(&records)?;
+        let ue4ss_loads = self.ue4ss_presence(&records)?.loads();
         for record in &records {
             let components = self.store.components_for(record.id)?;
             let planned = self.deploy_plan_for(record, &components)?;
@@ -1049,6 +1216,19 @@ impl App {
                 warnings: components.iter().flat_map(|c| c.warnings.clone()).collect(),
                 latest_version: newer_version(&record.version, &record.latest_version),
                 nexus_mod_id: record.nexus_mod_id,
+                file_conflicts: file_conflicts.get(&record.id).cloned(),
+                missing_requirements: if record.enabled
+                    && !ue4ss_loads
+                    && ue4ss::requires_ue4ss(&components)
+                {
+                    vec!["UE4SS".to_string()]
+                } else {
+                    Vec::new()
+                },
+                folder: record.staging_folder.clone(),
+                image: record.image_path.clone(),
+                notes: record.notes.clone(),
+                tags: record.tags.clone(),
             });
         }
 
@@ -1065,17 +1245,22 @@ impl App {
             })
             .collect();
 
+        let drift = self.drift()?;
         Ok(AppSnapshot {
             game: self.game()?,
             mods,
             groups,
             pending,
-            drift: self.drift()?,
+            drift: drift.clone(),
+            game_update: self.game_update(drift.len())?,
             auto_apply: self.auto_apply()?,
             nexus: self.nexus_account()?,
             update_channel: self.update_channel()?,
             discord_rpc: self.discord_rpc()?,
             deployment_mode: self.deployment_mode()?,
+            profiles: self.store.list_profiles()?,
+            overwrite: self.overwrite_summary(),
+            ue4ss: self.ue4ss_status()?,
         })
     }
 
@@ -1156,18 +1341,152 @@ impl App {
         Ok(())
     }
 
+    /// The user's note on a mod; blank clears it.
+    pub fn set_mod_notes(&mut self, mod_id: i64, notes: &str) -> Result<()> {
+        let notes = notes.trim();
+        self.store
+            .set_notes(mod_id, (!notes.is_empty()).then_some(notes))?;
+        Ok(())
+    }
+
+    /// The user's labels for a mod, tidied: trimmed, without blanks or
+    /// repeats in any case, and short enough to show as a chip.
+    pub fn set_mod_tags(&mut self, mod_id: i64, tags: &[String]) -> Result<()> {
+        let mut tidy: Vec<String> = Vec::new();
+        for tag in tags {
+            let tag: String = tag.trim().chars().take(32).collect();
+            if !tag.is_empty() && !tidy.iter().any(|t| t.to_lowercase() == tag.to_lowercase()) {
+                tidy.push(tag);
+            }
+        }
+        self.store.set_tags(mod_id, &tidy)?;
+        Ok(())
+    }
+
+    /// Pictures in a mod's folder, to choose its picture from.
+    pub fn mod_images(&self, mod_id: i64) -> Result<Vec<String>> {
+        let record = self.record(mod_id)?;
+        Ok(installer::previews(
+            &self.staging_path(&record.staging_folder),
+        ))
+    }
+
+    /// Choose one of the mod's own pictures, or none.
+    pub fn set_mod_image(&mut self, mod_id: i64, image: Option<&str>) -> Result<()> {
+        if let Some(image) = image {
+            if !self.mod_images(mod_id)?.iter().any(|i| i == image) {
+                return Err(AppError::Invalid(format!(
+                    "{image} is not one of the mod's pictures"
+                )));
+            }
+        }
+        self.store.set_image(mod_id, image)?;
+        Ok(())
+    }
+
     pub fn rename_mod(&mut self, mod_id: i64, name: &str) -> Result<()> {
         self.store.rename_mod(mod_id, name)?;
         Ok(())
     }
 
+    // -- profiles ----------------------------------------------------------
+
+    pub fn profiles(&self) -> Result<Vec<sbmm_store::ProfileRecord>> {
+        Ok(self.store.list_profiles()?)
+    }
+
+    /// The profile a command line or shortcut names. Case is ignored in any
+    /// script, since the name was typed or carried over from a rename.
+    pub fn profile_named(&self, name: &str) -> Result<sbmm_store::ProfileRecord> {
+        let wanted = name.trim().to_lowercase();
+        let profiles = self.store.list_profiles()?;
+        let names = profiles
+            .iter()
+            .map(|p| format!("“{}”", p.name))
+            .collect::<Vec<_>>()
+            .join(", ");
+        profiles
+            .into_iter()
+            .find(|p| p.name.to_lowercase() == wanted)
+            .ok_or_else(|| {
+                AppError::Invalid(format!(
+                    "there is no profile called “{}” (there are {names})",
+                    name.trim()
+                ))
+            })
+    }
+
+    /// A new profile from the active one: its load order always, its enabled
+    /// set too when `copy_enabled` (a duplicate), otherwise nothing enabled.
+    pub fn create_profile(&mut self, name: &str, copy_enabled: bool) -> Result<i64> {
+        let name = self.valid_profile_name(name, None)?;
+        Ok(self.store.create_profile(&name, None, copy_enabled)?)
+    }
+
+    pub fn rename_profile(&mut self, id: i64, name: &str) -> Result<()> {
+        let name = self.valid_profile_name(name, Some(id))?;
+        Ok(self.store.rename_profile(id, &name)?)
+    }
+
+    pub fn delete_profile(&mut self, id: i64) -> Result<()> {
+        Ok(self.store.delete_profile(id)?)
+    }
+
+    /// Make another profile active and bring the game folder in line with it.
+    ///
+    /// Enabled state and load order are per profile while the deployment
+    /// record is not, so the ordinary reconciliation does the switch: it
+    /// removes what the new profile does not enable, adds what it does, and
+    /// renames paks whose position changed. Under the virtual file system
+    /// that touches only the files that have to be real; the rest follows at
+    /// the next launch.
+    pub fn switch_profile(&mut self, id: i64) -> Result<ApplyReport> {
+        if id == self.store.active_profile()? {
+            return Ok(ApplyReport::default());
+        }
+        self.store.set_active_profile(id)?;
+        if self.game()?.is_some() {
+            self.apply()
+        } else {
+            Ok(ApplyReport::default())
+        }
+    }
+
+    fn valid_profile_name(&self, name: &str, renaming: Option<i64>) -> Result<String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(AppError::Invalid("a profile needs a name".into()));
+        }
+        let taken = self
+            .store
+            .list_profiles()?
+            .into_iter()
+            .any(|p| Some(p.id) != renaming && p.name.eq_ignore_ascii_case(name));
+        if taken {
+            return Err(AppError::Invalid(format!(
+                "there is already a profile called “{name}”"
+            )));
+        }
+        Ok(name.to_string())
+    }
+
     // -- applying ----------------------------------------------------------
+
+    /// Reconcile the game folder with the desired enabled set, and keep the
+    /// result as a restore point when anything changed.
+    pub fn apply(&mut self) -> Result<ApplyReport> {
+        let report = self.reconcile()?;
+        if !report.deployed.is_empty() || !report.removed.is_empty() {
+            self.record_automatic_point(&safety::describe(&report))?;
+        }
+        Ok(report)
+    }
 
     /// Reconcile the game folder with the desired enabled set.
     ///
     /// Each mod is handled independently so one bad mod cannot stop the rest,
     /// and any mod that fails is reported rather than silently skipped.
-    pub fn apply(&mut self) -> Result<ApplyReport> {
+    fn reconcile(&mut self) -> Result<ApplyReport> {
         let ctx = self.deploy_context()?;
         let mut report = ApplyReport::default();
 
@@ -1350,11 +1669,11 @@ impl App {
         }
 
         if states.values().any(|enabled| *enabled) {
-            ue4ss::sync_mods_txt(&ctx.game_root, &ctx.backup_root, &states)?;
+            mods_txt::sync_mods_txt(&ctx.game_root, &ctx.backup_root, &states)?;
         } else {
             // Nothing left for UE4SS to load: take our mods.txt back out and
             // let the folders it lived in go with it.
-            ue4ss::clear_registrations(&ctx.game_root, &ctx.backup_root)?;
+            mods_txt::clear_registrations(&ctx.game_root, &ctx.backup_root)?;
             self.prune_empty_dirs(ctx)?;
         }
         Ok(())
@@ -1405,7 +1724,7 @@ impl App {
         let game = self.game()?.is_some();
         if game && !enabled.is_empty() {
             self.store.set_enabled(&enabled, false)?;
-            let cleared = self.apply();
+            let cleared = self.reconcile();
             // Whatever happened, the user's choices are not lost.
             self.store.set_enabled(&enabled, true)?;
             cleared?;
@@ -1448,6 +1767,7 @@ impl App {
             hook,
             mapping,
             log: Some(self.vfs_dir().join("hook.log")),
+            diagnostics: Some(self.vfs_dir().join("launch.log")),
         })
     }
 
@@ -1512,8 +1832,20 @@ impl App {
         }
 
         if registrations.values().any(|enabled| *enabled) {
-            let real = std::fs::read_to_string(game.root.join(sbmm_core::paths::UE4SS_MODS_TXT))
-                .unwrap_or_default();
+            // Start from the `mods.txt` the game would otherwise see: the one
+            // the highest enabled mod ships — UE4SS's own, which switches on
+            // BPModLoaderMod and its other bundled mods — or else the real
+            // one. Starting from the real file alone would drop those, and
+            // logic mods need BPModLoaderMod to load at all.
+            let mods_txt = comparable_path(sbmm_core::paths::UE4SS_MODS_TXT);
+            let shipped = layers
+                .iter()
+                .rev()
+                .flat_map(|layer| layer.files.iter())
+                .find(|file| comparable_path(&file.target.to_string_lossy()) == mods_txt)
+                .map(|file| file.source.clone());
+            let real = shipped.unwrap_or_else(|| game.root.join(sbmm_core::paths::UE4SS_MODS_TXT));
+            let real = std::fs::read_to_string(real).unwrap_or_default();
             let generated = self
                 .vfs_dir()
                 .join("generated")
@@ -1521,7 +1853,7 @@ impl App {
             if let Some(parent) = generated.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
             }
-            std::fs::write(&generated, ue4ss::render_mods_txt(&real, &registrations))
+            std::fs::write(&generated, mods_txt::render_mods_txt(&real, &registrations))
                 .map_err(|e| AppError::io(&generated, e))?;
             layers.push(sbmm_vfs::Layer {
                 origin: sbmm_vfs::Origin::Generated,
@@ -1548,6 +1880,278 @@ impl App {
         let path = self.vfs_mapping_path();
         mapping.save(&path)?;
         Ok(path)
+    }
+
+    /// One directory of the virtual file tree, in the manner of Mod Organizer
+    /// 2's "Data" tab: the merged view the game would see, with who provides
+    /// each entry and who it hides.
+    ///
+    /// `dir` is a game-relative path; empty is the root. The real game folder
+    /// is read from disk and merged with the overlay, so an entry the game
+    /// ships but no mod touches is shown too, attributed to the game.
+    pub fn vfs_tree(&self, dir: &str) -> Result<VfsListing> {
+        use sbmm_vfs::{Origin, VPath};
+
+        let Some(game) = self.game()? else {
+            return Ok(VfsListing {
+                dir: String::new(),
+                entries: Vec::new(),
+            });
+        };
+        let (vfs, labels) = self.labelled_vfs()?;
+        let label = |origin: Origin| labels.label(origin);
+        let overlay = vfs.overlay();
+
+        let dir_path = if dir.is_empty() {
+            VPath::root()
+        } else {
+            VPath::from_relative(dir).ok_or_else(|| {
+                AppError::BadLibraryRoot(format!("{dir} is not a path inside the game folder"))
+            })?
+        };
+
+        // The real folder on disk, in its own spelling, so game files keep
+        // their case and can be opened.
+        let mut real_dir = game.root.clone();
+        for component in dir_path.components() {
+            real_dir.push(component);
+        }
+        let real: Vec<(String, bool)> = std::fs::read_dir(&real_dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|entry| {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                let is_dir = entry.file_type().map(|k| k.is_dir()).unwrap_or(false);
+                (name, is_dir)
+            })
+            .collect();
+
+        let mut entries = Vec::new();
+        for listed in overlay.list(&dir_path, real) {
+            let child = dir_path.join(&listed.name);
+            let entry = match overlay.file(&child) {
+                Some(file) => {
+                    let (origin, provided_by, mod_id) = label(file.origin);
+                    VfsEntry {
+                        name: listed.name,
+                        is_dir: false,
+                        path: child.display().to_string(),
+                        provided_by,
+                        origin,
+                        mod_id,
+                        shadowed_by: file.shadowed.iter().map(|o| label(*o).1).collect(),
+                        source: Some(path_string(&file.source)),
+                    }
+                }
+                None => VfsEntry {
+                    name: listed.name.clone(),
+                    is_dir: listed.is_dir,
+                    path: child.display().to_string(),
+                    provided_by: "Game".into(),
+                    origin: "game".into(),
+                    mod_id: None,
+                    shadowed_by: Vec::new(),
+                    source: (!listed.is_dir).then(|| path_string(real_dir.join(&listed.name))),
+                },
+            };
+            entries.push(entry);
+        }
+
+        // Folders first, then files, each case-insensitively by name — the
+        // order a file browser shows and the load-order screen does not care
+        // about here.
+        entries.sort_by(|a, b| {
+            b.is_dir
+                .cmp(&a.is_dir)
+                .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+        });
+
+        Ok(VfsListing {
+            dir: dir_path.display().to_string(),
+            entries,
+        })
+    }
+
+    /// What is waiting in the overwrite folder.
+    pub fn overwrite_summary(&self) -> OverwriteView {
+        let dir = self.overwrite_dir();
+        OverwriteView {
+            path: path_string(&dir),
+            files: sbmm_archive::walk_relative(&dir).len() as u32,
+            bytes: sbmm_archive::directory_size(&dir) as i64,
+        }
+    }
+
+    /// Turn everything in overwrite into a mod of its own, as Mod Organizer 2
+    /// does: the files move out of overwrite into a new mod, which is enabled
+    /// at the end of the load order — the same place overwrite sat, above
+    /// every mod — so what the game sees does not change.
+    pub fn create_mod_from_overwrite(&mut self, name: &str) -> Result<i64> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(AppError::Invalid("the new mod needs a name".into()));
+        }
+        let overwrite = self.overwrite_dir();
+        let files = sbmm_archive::walk_relative(&overwrite);
+        if files.is_empty() {
+            return Err(AppError::Invalid("the overwrite folder is empty".into()));
+        }
+
+        let staging_id = self.unique_staging_folder(name);
+        let staging = self.staging_path(&staging_id);
+        let mut component_files = Vec::with_capacity(files.len());
+        for relative in &files {
+            let from = overwrite.join(relative);
+            let to = staging.join(relative);
+            if let Some(parent) = to.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
+            }
+            move_or_copy(&from, &to)?;
+            // A copy across volumes leaves the original behind; it has to go,
+            // or the file would be in the view twice.
+            if from.exists() {
+                std::fs::remove_file(&from).map_err(|e| AppError::io(&from, e))?;
+            }
+            // Overwrite already mirrors the game folder, so each file goes
+            // exactly where it came from.
+            component_files.push(sbmm_core::model::ComponentFile {
+                source: relative.clone(),
+                target: relative.clone(),
+            });
+        }
+        clear_dir(&overwrite)?;
+
+        let detected = DetectedComponent {
+            mod_type: ModType::GameRootOverlay,
+            confidence: Confidence::High,
+            files: component_files,
+            target_subdir: PathBuf::new(),
+            ue4ss_mod_name: None,
+            pak_sets: Vec::new(),
+            warnings: Vec::new(),
+            notes: vec![
+                "Files the game created under the virtual file system, kept as a mod.".into(),
+            ],
+        };
+        let id = self.store.insert_mod(&NewMod {
+            name: name.to_string(),
+            staging_folder: staging_id,
+            version: None,
+            source: "overwrite".into(),
+            nexus_mod_id: None,
+            nexus_file_id: None,
+            primary_type: ModType::GameRootOverlay.as_str().to_string(),
+            components: vec![detected],
+            size_bytes: sbmm_archive::directory_size(&staging) as i64,
+            image_path: None,
+        })?;
+        self.store.set_enabled(&[id], true)?;
+        Ok(id)
+    }
+
+    /// Delete everything in overwrite.
+    pub fn clear_overwrite(&mut self) -> Result<u32> {
+        let dir = self.overwrite_dir();
+        let count = sbmm_archive::walk_relative(&dir).len() as u32;
+        clear_dir(&dir)?;
+        Ok(count)
+    }
+
+    /// Every path more than one provider claims, in the manner of Mod
+    /// Organizer 2's conflicts tab: who wins it and who is hidden beneath.
+    /// With `mod_id`, only the paths that mod takes part in, either side.
+    pub fn vfs_conflicts(&self, mod_id: Option<i64>) -> Result<Vec<VfsEntry>> {
+        if self.game()?.is_none() {
+            return Ok(Vec::new());
+        }
+        let (vfs, labels) = self.labelled_vfs()?;
+        let wanted = mod_id.map(sbmm_vfs::Origin::Mod);
+        let mut entries: Vec<VfsEntry> = vfs
+            .overlay()
+            .conflicts()
+            .filter(|(_, file)| {
+                wanted.is_none_or(|o| file.origin == o || file.shadowed.contains(&o))
+            })
+            .map(|(path, file)| {
+                let (origin, provided_by, mod_id) = labels.label(file.origin);
+                VfsEntry {
+                    name: path.file_name().to_string(),
+                    is_dir: false,
+                    path: path.display().to_string(),
+                    provided_by,
+                    origin,
+                    mod_id,
+                    shadowed_by: file.shadowed.iter().map(|o| labels.label(*o).1).collect(),
+                    source: Some(path_string(&file.source)),
+                }
+            })
+            .collect();
+        entries.sort_by_key(|e| e.path.to_lowercase());
+        Ok(entries)
+    }
+
+    /// The live virtual view, with a display name for every provider in it.
+    fn labelled_vfs(&self) -> Result<(sbmm_vfs::Vfs, OriginLabels)> {
+        let mapping = self.vfs_mapping()?;
+        // Resolved before the mapping is turned into the live view, which
+        // keeps the files but not the layer names.
+        let mut names = std::collections::HashMap::new();
+        for layer in &mapping.layers {
+            names.insert(layer.origin, layer.name.clone());
+        }
+        names.insert(sbmm_vfs::Origin::Overwrite, "Overwrite".to_string());
+        Ok((mapping.into_vfs(), OriginLabels(names)))
+    }
+
+    /// How each enabled mod's loose files fare against the other enabled
+    /// mods: paths it wins because it is further down the order, and paths a
+    /// mod further down takes from it. Paks never clash here — their names
+    /// carry the load order — so this is the file-level picture that asset
+    /// conflicts inside paks do not cover. Read from the plans alone, so it
+    /// is cheap enough for every snapshot.
+    fn file_conflict_counts(
+        &self,
+        records: &[ModRecord],
+    ) -> Result<std::collections::HashMap<i64, FileConflicts>> {
+        use std::collections::{HashMap, HashSet};
+
+        let mut enabled: Vec<&ModRecord> = records.iter().filter(|m| m.enabled).collect();
+        enabled.sort_by_key(|m| (m.priority, m.id));
+
+        let mut claims: BTreeMap<sbmm_vfs::VPath, Vec<i64>> = BTreeMap::new();
+        let mut totals: HashMap<i64, u32> = HashMap::new();
+        for record in enabled {
+            let components = self.store.components_for(record.id)?;
+            let plan = self.plan_for(record, &components);
+            let mut seen = HashSet::new();
+            for file in &plan.files {
+                let Some(path) = sbmm_vfs::VPath::from_relative(&file.target) else {
+                    continue;
+                };
+                if seen.insert(path.clone()) {
+                    claims.entry(path).or_default().push(record.id);
+                }
+            }
+            totals.insert(record.id, seen.len() as u32);
+        }
+
+        let mut out: HashMap<i64, FileConflicts> = HashMap::new();
+        for ids in claims.values().filter(|ids| ids.len() > 1) {
+            let winner = ids.last().copied();
+            for &id in ids {
+                let entry = out.entry(id).or_default();
+                if Some(id) == winner {
+                    entry.wins += 1;
+                } else {
+                    entry.loses += 1;
+                }
+            }
+        }
+        for (id, counts) in out.iter_mut() {
+            counts.redundant = counts.loses > 0 && Some(&counts.loses) == totals.get(id);
+        }
+        Ok(out)
     }
 
     // -- update checks -----------------------------------------------------
@@ -1711,6 +2315,30 @@ fn must_be_physical(source: &str, target: &Path) -> bool {
     inside(sbmm_core::paths::BINARIES_WIN64) && !inside(sbmm_core::paths::UE4SS_MODS)
 }
 
+/// Display names for the providers in a virtual view.
+struct OriginLabels(std::collections::HashMap<sbmm_vfs::Origin, String>);
+
+impl OriginLabels {
+    /// `(kind, name, mod id)` for one provider.
+    fn label(&self, origin: sbmm_vfs::Origin) -> (String, String, Option<i64>) {
+        use sbmm_vfs::Origin;
+        let (kind, mod_id) = match origin {
+            Origin::Mod(id) => ("mod", Some(id)),
+            Origin::Generated => ("generated", None),
+            Origin::Overwrite => ("overwrite", None),
+        };
+        let name = self
+            .0
+            .get(&origin)
+            .cloned()
+            .unwrap_or_else(|| match origin {
+                Origin::Mod(id) => format!("mod {id}"),
+                _ => kind.to_string(),
+            });
+        (kind.to_string(), name, mod_id)
+    }
+}
+
 /// The staging folder of the RTX 20/30 frame generation package.
 const FRAMEGEN_STAGING: &str = "framegen-dlssg-sm86";
 
@@ -1718,6 +2346,23 @@ const FRAMEGEN_STAGING: &str = "framegen-dlssg-sm86";
 /// ignore case, and the deployment record may hold either separator.
 fn comparable_path(path: &str) -> String {
     path.replace('\\', "/").to_ascii_lowercase()
+}
+
+/// Empty a folder, keeping the folder itself.
+fn clear_dir(dir: &Path) -> Result<()> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Ok(());
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let removed = if entry.file_type().map(|k| k.is_dir()).unwrap_or(false) {
+            std::fs::remove_dir_all(&path)
+        } else {
+            std::fs::remove_file(&path)
+        };
+        removed.map_err(|e| AppError::io(&path, e))?;
+    }
+    Ok(())
 }
 
 /// Rename where possible, copy across volumes.

@@ -167,6 +167,13 @@ async fn install_finished(app: &tauri::AppHandle, finished: &Finished) -> bool {
                     // it would double the space every Nexus mod costs.
                     let _ = std::fs::remove_file(&path);
                 }
+                // Several versions in one archive, and no earlier answer to
+                // reuse: it is extracted and staged, so the archive can go,
+                // and the window asks which version to keep.
+                Err(sbmm_app::AppError::NeedsChoice(staged)) => {
+                    let _ = std::fs::remove_file(&path);
+                    let _ = app.emit("download-needs-choice", *staged);
+                }
                 Err(error) => {
                     let _ = app.emit(
                         "download-install-failed",

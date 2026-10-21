@@ -45,6 +45,44 @@ export interface ModView {
   /** Set only when Nexus reports a version different from the installed one. */
   latestVersion: string | null;
   nexusModId: number | null;
+  /** Loose files shared with other enabled mods; null when none. */
+  fileConflicts: FileConflicts | null;
+  /** What this enabled mod needs and the game will not have, e.g. "UE4SS". */
+  missingRequirements: string[];
+  /** Its folder in the library, which pictures are read from. */
+  folder: string;
+  /** The mod's picture, relative to `folder`. */
+  image: string | null;
+  notes: string | null;
+  tags: string[];
+}
+
+/** UE4SS at a glance. */
+export interface Ue4ssStatus {
+  /** Installed as a mod and enabled, installed but off, by hand, or not at all. */
+  state: "managed" | "disabled" | "manual" | "missing";
+  modId: number | null;
+  version: string | null;
+  /** Enabled mods that do nothing without UE4SS. */
+  neededBy: string[];
+  projectUrl: string;
+}
+
+/** The flags Mod Organizer 2 shows beside a mod. */
+export interface FileConflicts {
+  /** Paths it provides over a mod earlier in the load order. */
+  wins: number;
+  /** Paths a mod later in the load order takes from it. */
+  loses: number;
+  /** Every file it has is taken by later mods. */
+  redundant: boolean;
+}
+
+/** What the game created under the virtual file system. */
+export interface OverwriteView {
+  path: string;
+  files: number;
+  bytes: number;
 }
 
 export interface UpdateCheckReport {
@@ -79,6 +117,20 @@ export interface AppSnapshot {
   /** Whether the manager publishes a Discord presence. */
   discordRpc: boolean;
   deploymentMode: DeploymentMode;
+  /** Every profile, the active one marked. */
+  profiles: ProfileView[];
+  overwrite: OverwriteView;
+  ue4ss: Ue4ssStatus;
+  /** The game changed build since the user last acknowledged it. */
+  gameUpdate: GameUpdate | null;
+}
+
+/** A named set of enabled mods and a load order. */
+export interface ProfileView {
+  id: number;
+  name: string;
+  active: boolean;
+  enabledCount: number;
 }
 
 /** How enabled mods reach the game: hard links in the folder, or the virtual
@@ -86,6 +138,28 @@ export interface AppSnapshot {
 export type DeploymentMode = "hardlink" | "virtual";
 
 export type UpdateChannel = "stable" | "nightly";
+
+/** One entry of the virtual file tree, like Mod Organizer 2's Data tab. */
+export interface VfsEntry {
+  name: string;
+  isDir: boolean;
+  /** Game-relative path, for navigating into a folder. */
+  path: string;
+  /** Winning provider: a mod's name, "Game", "Overwrite" or the UE4SS list. */
+  providedBy: string;
+  /** "mod" | "game" | "overwrite" | "generated". */
+  origin: string;
+  modId: number | null;
+  /** Hidden providers of the same path, the next in line first. */
+  shadowedBy: string[];
+  /** The real file the winning version comes from. */
+  source: string | null;
+}
+
+export interface VfsListing {
+  dir: string;
+  entries: VfsEntry[];
+}
 
 export interface AvailableUpdate {
   version: string;
@@ -120,7 +194,86 @@ export interface StagedInstall {
   suggestedName: string;
   components: DetectedComponent[];
   sizeBytes: number;
+  /** The user has to be asked: a type, or which version to install. */
   needsConfirmation: boolean;
+  /** The versions the archive offers, when it holds several. */
+  variants: VariantChoice | null;
+  /** What was chosen when this mod was installed before. */
+  rememberedVariants: string[];
+  /** The archive's FOMOD installer, when it has one. */
+  fomod: FomodView | null;
+  /** Pictures in the archive, relative to the staging folder, previews first. */
+  previews: string[];
+}
+
+export type FomodGroupKind =
+  | "selectExactlyOne"
+  | "selectAtMostOne"
+  | "selectAtLeastOne"
+  | "selectAll"
+  | "selectAny";
+
+export type FomodPluginType = "required" | "recommended" | "optional" | "couldBeUsable" | "notUsable";
+
+export interface FomodPlugin {
+  name: string;
+  description: string;
+  /** Relative to the installer's root. */
+  image: string | null;
+}
+
+export interface FomodGroup {
+  name: string;
+  kind: FomodGroupKind;
+  plugins: FomodPlugin[];
+}
+
+export interface FomodStep {
+  name: string;
+  groups: FomodGroup[];
+}
+
+export interface FomodInstaller {
+  name: string;
+  /** The header image, relative to the installer's root. */
+  image: string | null;
+  steps: FomodStep[];
+}
+
+/** A FOMOD installer ready to run. */
+export interface FomodView {
+  /** The folder holding fomod/, relative to the staging folder. */
+  root: string;
+  installer: FomodInstaller;
+  /** What to tick when the wizard opens, as [step, group, option]. */
+  selection: [number, number, number][];
+  /** True when selection is the user's choice from last time. */
+  remembered: boolean;
+}
+
+/** The wizard's state for a selection. */
+export interface FomodWizardState {
+  visible: boolean[];
+  /** [step][group][option]. */
+  kinds: FomodPluginType[][][];
+  /** What stops the install, e.g. "Colour: choose one option". */
+  problems: string[];
+}
+
+/** One version of a mod an archive offers. */
+export interface VariantOption {
+  label: string;
+  folder: string;
+  modTypes: ModTypeId[];
+  fileCount: number;
+  /** A picture in the option's folder, relative to the staging folder. */
+  preview: string | null;
+}
+
+export interface VariantChoice {
+  options: VariantOption[];
+  /** Every option clashes with every other, so exactly one makes sense. */
+  exclusive: boolean;
 }
 
 export interface ApplyReport {
@@ -339,9 +492,29 @@ export const ipc = {
 
   stageArchive: (path: string) => invoke<StagedInstall>("stage_archive", { path }),
   stageFolder: (path: string) => invoke<StagedInstall>("stage_folder", { path }),
-  confirmInstall: (stagingId: string, name: string, typeOverride?: ModTypeId) =>
-    invoke<number>("confirm_install", { stagingId, name, typeOverride: typeOverride ?? null }),
+  confirmInstall: (
+    stagingId: string,
+    name: string,
+    typeOverride?: ModTypeId,
+    variants?: string[],
+  ) =>
+    invoke<number>("confirm_install", {
+      stagingId,
+      name,
+      typeOverride: typeOverride ?? null,
+      variants: variants ?? null,
+    }),
   cancelInstall: (stagingId: string) => invoke<void>("cancel_install", { stagingId }),
+  fomodState: (stagingId: string, selection: [number, number, number][]) =>
+    invoke<FomodWizardState>("fomod_state", { stagingId, selection }),
+  confirmInstallFomod: (
+    stagingId: string,
+    name: string,
+    selection: [number, number, number][],
+  ) => invoke<number>("confirm_install_fomod", { stagingId, name, selection }),
+  /** A picture from a staged install or an installed mod, as a data: URL. */
+  previewImage: (folder: string, path: string) =>
+    invoke<string>("preview_image", { folder, path }),
 
   setEnabled: (modIds: number[], enabled: boolean) =>
     invoke<void>("set_enabled", { modIds, enabled }),
@@ -397,7 +570,134 @@ export const ipc = {
   setDeploymentMode: (mode: DeploymentMode) =>
     invoke<ApplyReport>("set_deployment_mode", { mode }),
   launchGame: () => invoke<string>("launch_game"),
+  vfsTree: (dir: string) => invoke<VfsListing>("vfs_tree", { dir }),
+  vfsConflicts: (modId: number | null) => invoke<VfsEntry[]>("vfs_conflicts", { modId }),
+  createModFromOverwrite: (name: string) => invoke<number>("create_mod_from_overwrite", { name }),
+  clearOverwrite: () => invoke<number>("clear_overwrite"),
+  /** Null when GitHub could not be asked. */
+  ue4ssLatest: () => invoke<string | null>("ue4ss_latest"),
+  installUe4ss: () => invoke<string>("install_ue4ss"),
+  /** Write the diagnostics zip to `path`; resolves to where it went. */
+  collectDiagnostics: (path: string) => invoke<string>("collect_diagnostics", { path }),
+  createProfile: (name: string, copyEnabled: boolean) =>
+    invoke<number>("create_profile", { name, copyEnabled }),
+  renameProfile: (id: number, name: string) => invoke<void>("rename_profile", { id, name }),
+  deleteProfile: (id: number) => invoke<void>("delete_profile", { id }),
+  switchProfile: (id: number) => invoke<ApplyReport>("switch_profile", { id }),
+  /** What a profile's shortcut runs, as one line. */
+  profileCommand: (profileId: number, launch: boolean) =>
+    invoke<string>("profile_command", { profileId, launch }),
+  /** Resolves to the shortcut's path. */
+  createProfileShortcut: (profileId: number, place: ShortcutPlace, launch: boolean) =>
+    invoke<string>("create_profile_shortcut", { profileId, place, launch }),
+  /** Messages about command-line requests, each handed over once. */
+  takeNotices: () => invoke<Notice[]>("take_notices"),
+  acknowledgeGameUpdate: () => invoke<void>("acknowledge_game_update"),
+  repairDrift: () => invoke<RepairReport>("repair_drift"),
+  restorePoints: () => invoke<RestorePoint[]>("restore_points"),
+  createRestorePoint: (label: string) => invoke<number>("create_restore_point", { label }),
+  deleteRestorePoint: (id: number) => invoke<void>("delete_restore_point", { id }),
+  restoreToPoint: (id: number) => invoke<RestoreReport>("restore_to_point", { id }),
+  saves: () => invoke<Saves>("saves"),
+  backUpSaves: () => invoke<SaveBackup | null>("back_up_saves"),
+  restoreSaves: (file: string) => invoke<void>("restore_saves", { file }),
+  deleteSaveBackup: (file: string) => invoke<void>("delete_save_backup", { file }),
+  /** Null goes back to where the game keeps its saves. */
+  setSavesDir: (dir: string | null) => invoke<void>("set_saves_dir", { dir }),
+  setBackupSavesOnLaunch: (on: boolean) => invoke<void>("set_backup_saves_on_launch", { on }),
+  configFiles: (scope: ConfigScope) => invoke<ConfigFile[]>("config_files", { scope }),
+  readConfig: (scope: ConfigScope, path: string) =>
+    invoke<ConfigText>("read_config", { scope, path }),
+  writeConfig: (scope: ConfigScope, path: string, text: string) =>
+    invoke<void>("write_config", { scope, path, text }),
+  setModNotes: (modId: number, notes: string) => invoke<void>("set_mod_notes", { modId, notes }),
+  setModTags: (modId: number, tags: string[]) => invoke<void>("set_mod_tags", { modId, tags }),
+  modImages: (modId: number) => invoke<string[]>("mod_images", { modId }),
+  setModImage: (modId: number, image: string | null) =>
+    invoke<void>("set_mod_image", { modId, image }),
 };
+
+export type ShortcutPlace = "desktop" | "startMenu";
+
+/** Whose settings files: one mod's, or the game's own. */
+export type ConfigScope = { kind: "mod"; modId: number } | { kind: "game" };
+
+export interface ConfigFile {
+  path: string;
+  bytes: number;
+  /** Differs from the copy it was installed (or first found) as. */
+  edited: boolean;
+}
+
+export interface ConfigText {
+  text: string;
+  /** As installed or first found; null when no copy was kept. */
+  original: string | null;
+}
+
+/** What identifies an installed build of the game. */
+export interface GameBuild {
+  /** Steam's build id, when Steam installed the game. */
+  buildId: string | null;
+  exeSize: number | null;
+  /** Seconds since the Unix epoch. */
+  exeModified: number | null;
+}
+
+export interface GameUpdate {
+  previous: GameBuild;
+  current: GameBuild;
+  /** Deployed files the update replaced or removed. */
+  drifted: number;
+}
+
+export interface RepairReport {
+  relinked: number;
+  displaced: number;
+  adopted: number;
+  recorded: number;
+  failed: ApplyReport["failed"];
+}
+
+export interface RestorePoint {
+  id: number;
+  /** UTC, ISO 8601. */
+  createdAt: string;
+  label: string;
+  automatic: boolean;
+  gameBuild: string | null;
+  enabled: number;
+  /** Mods it had enabled that are no longer installed. */
+  uninstalled: number;
+}
+
+export interface RestoreReport {
+  applied: ApplyReport;
+  uninstalled: number;
+}
+
+export interface SaveBackup {
+  file: string;
+  /** Seconds since the Unix epoch. */
+  createdAt: number;
+  kind: "auto" | "manual" | "before-restore";
+  bytes: number;
+}
+
+export interface Saves {
+  dir: string | null;
+  customDir: boolean;
+  exists: boolean;
+  files: number;
+  backupOnLaunch: boolean;
+  backups: SaveBackup[];
+}
+
+/** The outcome of a request from the command line or a shortcut. */
+export interface Notice {
+  kind: "success" | "error";
+  message: string;
+}
 
 /** The game's Nexus domain, mirroring `NEXUS_DOMAIN` in `sbmm-game`. */
 const NEXUS_DOMAIN = "stellarblade";

@@ -2,6 +2,7 @@
 
 pub mod discover;
 pub mod vdf;
+pub mod version;
 
 use std::path::{Path, PathBuf};
 
@@ -12,6 +13,7 @@ pub const STEAM_APP_ID: &str = "3489700";
 pub const NEXUS_DOMAIN: &str = "stellarblade";
 
 pub use discover::{discover, validate, DiscoveryError};
+pub use version::GameBuild;
 
 /// How an install was found, shown in the setup wizard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

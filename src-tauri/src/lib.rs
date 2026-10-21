@@ -5,9 +5,13 @@
 //! behaviour worth testing lives in `sbmm-app`.
 
 mod collections;
+mod config;
 mod discord;
 mod downloads;
 mod framegen;
+mod safety;
+mod shell;
+mod ue4ss;
 mod upscaler;
 mod vfs;
 
@@ -128,6 +132,7 @@ fn confirm_install(
     staging_id: String,
     name: String,
     type_override: Option<String>,
+    variants: Option<Vec<String>>,
 ) -> Result<i64, String> {
     let forced = match type_override {
         Some(id) => {
@@ -135,7 +140,12 @@ fn confirm_install(
         }
         None => None,
     };
-    with_app!(state, |app| app.confirm_install(&staging_id, &name, forced))
+    with_app!(state, |app| app.confirm_install_with(
+        &staging_id,
+        &name,
+        forced,
+        variants.as_deref()
+    ))
 }
 
 #[tauri::command]
@@ -213,6 +223,89 @@ fn set_auto_apply(state: tauri::State<'_, AppState>, enabled: bool) -> Result<()
 #[tauri::command]
 fn folders(state: tauri::State<'_, AppState>) -> Result<FoldersView, String> {
     with_app!(state, |app| app.folders())
+}
+
+/// The FOMOD wizard's state for a selection of `[step, group, option]`.
+#[tauri::command]
+fn fomod_state(
+    state: tauri::State<'_, AppState>,
+    staging_id: String,
+    selection: Vec<[usize; 3]>,
+) -> Result<sbmm_core::fomod::WizardState, String> {
+    with_app!(state, |app| app.fomod_state(&staging_id, &selection))
+}
+
+/// Install a staged FOMOD the way the wizard was answered.
+#[tauri::command]
+fn confirm_install_fomod(
+    state: tauri::State<'_, AppState>,
+    staging_id: String,
+    name: String,
+    selection: Vec<[usize; 3]>,
+) -> Result<i64, String> {
+    with_app!(state, |app| app.confirm_install_fomod(&staging_id, &name, &selection))
+}
+
+/// A picture from a staged install or an installed mod, as a `data:` URL.
+#[tauri::command]
+fn preview_image(
+    state: tauri::State<'_, AppState>,
+    folder: String,
+    path: String,
+) -> Result<String, String> {
+    with_app!(state, |app| app.preview_data_url(&folder, &path))
+}
+
+#[tauri::command]
+fn create_profile(
+    state: tauri::State<'_, AppState>,
+    name: String,
+    copy_enabled: bool,
+) -> Result<i64, String> {
+    with_app!(state, |app| app.create_profile(&name, copy_enabled))
+}
+
+#[tauri::command]
+fn rename_profile(state: tauri::State<'_, AppState>, id: i64, name: String) -> Result<(), String> {
+    with_app!(state, |app| app.rename_profile(id, &name))
+}
+
+#[tauri::command]
+fn delete_profile(state: tauri::State<'_, AppState>, id: i64) -> Result<(), String> {
+    with_app!(state, |app| app.delete_profile(id))
+}
+
+/// Make another profile active and reconcile the game folder with it.
+#[tauri::command]
+fn switch_profile(state: tauri::State<'_, AppState>, id: i64) -> Result<ApplyReport, String> {
+    with_app!(state, |app| app.switch_profile(id))
+}
+
+/// Write the diagnostics bundle to `path`, with what only the shell knows —
+/// the manager's version, the system and the graphics card — added to it.
+#[tauri::command]
+fn collect_diagnostics(
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    path: String,
+) -> Result<String, String> {
+    let adapter = sbmm_upscaler::gpu::primary_adapter()
+        .map(|a| format!("{} ({:?}, {} MB)", a.name, a.vendor, a.memory_bytes >> 20))
+        .unwrap_or_else(|| "not identified".into());
+    let context = vec![
+        (
+            "Manager".to_string(),
+            app_handle.package_info().version.to_string(),
+        ),
+        (
+            "System".to_string(),
+            format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),
+        ),
+        ("Graphics card".to_string(), adapter),
+    ];
+    let written = with_app!(state, |app| app
+        .write_diagnostics(std::path::Path::new(&path), &context))?;
+    Ok(written.to_string_lossy().into_owned())
 }
 
 #[tauri::command]
@@ -604,8 +697,13 @@ pub fn run() {
         // nxm:// link, and this is what forwards the link to the running
         // window instead of opening a second manager.
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
-            focus_main_window(app);
-            for arg in argv.iter().skip(1) {
+            let args = argv.get(1..).unwrap_or_default();
+            // A shortcut that only starts the game leaves the window alone.
+            let request = shell::handle(app, args, false);
+            if !request.is_some_and(|r| r.launch) {
+                focus_main_window(app);
+            }
+            for arg in args {
                 deliver_nxm(app, arg);
             }
         }))
@@ -620,6 +718,7 @@ pub fn run() {
             app.manage(AppState(Mutex::new(service)));
             app.manage(Downloads::new());
             app.manage(Discord::start());
+            app.manage(shell::Notices::default());
 
             // Only needed during development and on Linux; the installer
             // registers the scheme on Windows.
@@ -644,6 +743,16 @@ pub fn run() {
 
             downloads::restore(app.handle());
             downloads::spawn_driver(app.handle().clone());
+
+            // The window starts hidden so a start that only launches the game
+            // never shows it; every other start shows it now.
+            let args: Vec<String> = std::env::args().skip(1).collect();
+            let request = shell::handle(app.handle(), &args, true);
+            if !request.is_some_and(|r| r.launch) {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                }
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -665,6 +774,14 @@ pub fn run() {
             assign_group,
             set_auto_apply,
             folders,
+            collect_diagnostics,
+            fomod_state,
+            confirm_install_fomod,
+            preview_image,
+            create_profile,
+            rename_profile,
+            delete_profile,
+            switch_profile,
             conflicts,
             index_mod_assets,
             set_library_root,
@@ -689,6 +806,34 @@ pub fn run() {
             framegen::remove_framegen,
             vfs::set_deployment_mode,
             vfs::launch_game,
+            vfs::vfs_tree,
+            vfs::vfs_conflicts,
+            vfs::create_mod_from_overwrite,
+            vfs::clear_overwrite,
+            ue4ss::ue4ss_latest,
+            ue4ss::install_ue4ss,
+            shell::take_notices,
+            shell::profile_command,
+            shell::create_profile_shortcut,
+            safety::acknowledge_game_update,
+            safety::repair_drift,
+            safety::restore_points,
+            safety::create_restore_point,
+            safety::delete_restore_point,
+            safety::restore_to_point,
+            safety::saves,
+            safety::back_up_saves,
+            safety::restore_saves,
+            safety::delete_save_backup,
+            safety::set_saves_dir,
+            safety::set_backup_saves_on_launch,
+            config::config_files,
+            config::read_config,
+            config::write_config,
+            config::set_mod_notes,
+            config::set_mod_tags,
+            config::mod_images,
+            config::set_mod_image,
         ])
         .run(tauri::generate_context!())
         .expect("failed to start SB Mod Manager");

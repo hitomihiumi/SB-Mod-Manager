@@ -21,7 +21,7 @@ export function Button({
   return (
     <button
       className={clsx(
-        "no-drag inline-flex items-center justify-center gap-1.5 rounded-md font-medium",
+        "no-drag inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-md font-medium",
         "transition-colors disabled:pointer-events-none disabled:opacity-40",
         size === "sm" ? "h-7 px-2.5 text-[12px]" : "h-8 px-3 text-[13px]",
         variant === "primary" &&

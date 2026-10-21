@@ -83,6 +83,161 @@ impl DeployBackend for HardlinkBackend {
     }
 }
 
+/// How [`repair`] put a drifted file right.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Repair {
+    /// It was gone and is linked in again.
+    Relinked,
+    /// It was changed through the link, so the mod's own copy changed with
+    /// it; only the record was out of date.
+    Recorded,
+    /// A settings file edited in place of the link: the edit is kept, by
+    /// becoming the mod's copy.
+    Adopted,
+    /// Something else was put there — usually a game update restoring its
+    /// own file. It is kept as the file to put back when the mod is
+    /// disabled, and the mod's file goes back in.
+    Displaced,
+}
+
+/// What [`repair`] did to one file.
+#[derive(Debug, Clone)]
+pub struct Repaired {
+    /// The file's new record.
+    pub file: DeployedFile,
+    pub how: Repair,
+    /// Folders made to put a removed file back, relative to the game root.
+    pub created_dirs: Vec<PathBuf>,
+}
+
+/// Put one drifted file of a mod back the way the mod has it.
+///
+/// Nothing found in the game folder is thrown away: a file that is not the
+/// mod's either joins the mod (settings edits) or becomes the backup that
+/// disabling the mod restores, replacing an older backup — after a game
+/// update the new game file is the one to restore, not the old.
+pub fn repair(
+    ctx: &DeployContext,
+    plan: &DeployPlan,
+    file: &DeployedFile,
+) -> Result<Repaired, DeployError> {
+    let planned = plan
+        .files
+        .iter()
+        .find(|p| p.target == file.target)
+        .ok_or_else(|| DeployError::MissingSource(file.target.clone()))?;
+    let source = plan.staging_root.join(&planned.source);
+    if !source.is_file() {
+        return Err(DeployError::MissingSource(planned.source.clone()));
+    }
+    let target = resolve_target(&ctx.game_root, &file.target)?;
+
+    let mut repaired = file.clone();
+    let mut manifest = Manifest::default();
+    let how = if fs::symlink_metadata(&target).is_err() {
+        record_created_dirs(&ctx.game_root, &target, &mut manifest)?;
+        link_or_copy(&source, &target)?;
+        Repair::Relinked
+    } else if same_contents(&source, &target)? {
+        Repair::Recorded
+    } else if is_settings_file(&file.target) {
+        // The edit wins: it becomes the mod's file, then the link is restored.
+        fs::copy(&target, &source).map_err(|e| DeployError::io(&source, e))?;
+        fs::remove_file(&target).map_err(|e| DeployError::io(&target, e))?;
+        link_or_copy(&source, &target)?;
+        Repair::Adopted
+    } else {
+        let backup = resolve_target(&ctx.backup_root, &file.target)?;
+        create_parents(&backup)?;
+        match fs::remove_file(&backup) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(DeployError::io(&backup, e)),
+        }
+        move_file(&target, &backup)?;
+        link_or_copy(&source, &target)?;
+        repaired.backup = Some(file.target.clone());
+        Repair::Displaced
+    };
+    repaired.size = fs::metadata(&source)
+        .map_err(|e| DeployError::io(&source, e))?
+        .len();
+    Ok(Repaired {
+        file: repaired,
+        how,
+        created_dirs: manifest.created_dirs,
+    })
+}
+
+/// After the mod's own copy of a deployed file was edited, make the game's
+/// copy match and return its new record. Through a hard link it already
+/// does; a copied file (the library is on another drive) is replaced.
+pub fn refresh(
+    ctx: &DeployContext,
+    plan: &DeployPlan,
+    file: &DeployedFile,
+) -> Result<DeployedFile, DeployError> {
+    let planned = plan
+        .files
+        .iter()
+        .find(|p| p.target == file.target)
+        .ok_or_else(|| DeployError::MissingSource(file.target.clone()))?;
+    let source = plan.staging_root.join(&planned.source);
+    let target = resolve_target(&ctx.game_root, &file.target)?;
+    if !target.exists() || !same_contents(&source, &target)? {
+        match fs::remove_file(&target) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(DeployError::io(&target, e)),
+        }
+        create_parents(&target)?;
+        link_or_copy(&source, &target)?;
+    }
+    let mut refreshed = file.clone();
+    refreshed.size = fs::metadata(&source)
+        .map_err(|e| DeployError::io(&source, e))?
+        .len();
+    Ok(refreshed)
+}
+
+/// Text settings a user may well have opened and saved in the game folder.
+fn is_settings_file(path: &Path) -> bool {
+    path.extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .is_some_and(|e| {
+            matches!(
+                e.as_str(),
+                "ini" | "cfg" | "txt" | "json" | "toml" | "yaml" | "yml" | "xml"
+            )
+        })
+}
+
+fn same_contents(a: &Path, b: &Path) -> Result<bool, DeployError> {
+    use std::io::Read;
+    let open = |p: &Path| fs::File::open(p).map_err(|e| DeployError::io(p, e));
+    let (mut fa, mut fb) = (open(a)?, open(b)?);
+    let len = |f: &fs::File, p: &Path| {
+        f.metadata()
+            .map(|m| m.len())
+            .map_err(|e| DeployError::io(p, e))
+    };
+    if len(&fa, a)? != len(&fb, b)? {
+        return Ok(false);
+    }
+    let (mut ba, mut bb) = (vec![0u8; 1 << 16], vec![0u8; 1 << 16]);
+    loop {
+        let n = fa.read(&mut ba).map_err(|e| DeployError::io(a, e))?;
+        if n == 0 {
+            return Ok(true);
+        }
+        fb.read_exact(&mut bb[..n])
+            .map_err(|e| DeployError::io(b, e))?;
+        if ba[..n] != bb[..n] {
+            return Ok(false);
+        }
+    }
+}
+
 fn deploy_all(
     ctx: &DeployContext,
     plan: &DeployPlan,
