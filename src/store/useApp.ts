@@ -61,6 +61,11 @@ interface AppStore {
   refreshConflicts: () => Promise<void>;
   reindexAssets: () => Promise<void>;
   setView: (view: View) => void;
+  /** The mod the Files view's conflict list is narrowed to, if any. */
+  conflictFocus: { modId: number; name: string } | null;
+  /** Open the Files view on the clashes one mod takes part in. */
+  showFileConflicts: (modId: number, name: string) => void;
+  setConflictFocus: (focus: { modId: number; name: string } | null) => void;
   setSearch: (search: string) => void;
   setSelection: (ids: number[]) => void;
 
@@ -84,6 +89,7 @@ let toastSeq = 0;
 export const useApp = create<AppStore>((set, get) => ({
   ready: false,
   view: "mods",
+  conflictFocus: null,
   snapshot: null,
   selection: [],
   search: "",
@@ -191,6 +197,8 @@ export const useApp = create<AppStore>((set, get) => ({
   },
 
   setView: (view) => set({ view }),
+  showFileConflicts: (modId, name) => set({ view: "files", conflictFocus: { modId, name } }),
+  setConflictFocus: (conflictFocus) => set({ conflictFocus }),
   setSearch: (search) => set({ search }),
   setSelection: (selection) => set({ selection }),
 

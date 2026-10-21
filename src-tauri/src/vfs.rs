@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-use sbmm_app::dto::{ApplyReport, DeploymentMode, VfsListing};
+use sbmm_app::dto::{ApplyReport, DeploymentMode, VfsEntry, VfsListing};
 use sbmm_game::InstallSource;
 use tauri_plugin_opener::OpenerExt;
 
@@ -22,6 +22,30 @@ pub fn vfs_tree(
     dir: Option<String>,
 ) -> Result<VfsListing, String> {
     crate::with_app!(state, |app| app.vfs_tree(dir.as_deref().unwrap_or("")))
+}
+
+/// Every clashing path, or only those `mod_id` takes part in.
+#[tauri::command]
+pub fn vfs_conflicts(
+    state: tauri::State<'_, AppState>,
+    mod_id: Option<i64>,
+) -> Result<Vec<VfsEntry>, String> {
+    crate::with_app!(state, |app| app.vfs_conflicts(mod_id))
+}
+
+/// Move everything in overwrite into a new, enabled mod.
+#[tauri::command]
+pub fn create_mod_from_overwrite(
+    state: tauri::State<'_, AppState>,
+    name: String,
+) -> Result<i64, String> {
+    crate::with_app!(state, |app| app.create_mod_from_overwrite(&name))
+}
+
+/// Delete everything in overwrite; returns how many files went.
+#[tauri::command]
+pub fn clear_overwrite(state: tauri::State<'_, AppState>) -> Result<u32, String> {
+    crate::with_app!(state, |app| app.clear_overwrite())
 }
 
 #[tauri::command]

@@ -26,6 +26,17 @@ pub struct AppSnapshot {
     pub deployment_mode: DeploymentMode,
     /// Every profile, the active one marked.
     pub profiles: Vec<sbmm_store::ProfileRecord>,
+    /// What the game created under the virtual file system.
+    pub overwrite: OverwriteView,
+}
+
+/// The overwrite folder at a glance.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OverwriteView {
+    pub path: String,
+    pub files: u32,
+    pub bytes: i64,
 }
 
 /// How enabled mods reach the game.
@@ -72,6 +83,22 @@ pub struct ModView {
     /// Set only when Nexus reports a version different from the installed one.
     pub latest_version: Option<String>,
     pub nexus_mod_id: Option<i64>,
+    /// Loose files this mod shares with other enabled mods. `None` when it
+    /// shares none, or is disabled.
+    pub file_conflicts: Option<FileConflicts>,
+}
+
+/// How a mod's loose files fare against the other enabled mods — the flags
+/// Mod Organizer 2 shows beside each mod.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileConflicts {
+    /// Paths it provides over a mod earlier in the load order.
+    pub wins: u32,
+    /// Paths a mod later in the load order takes from it.
+    pub loses: u32,
+    /// Every file it has is taken by later mods, so it does nothing at all.
+    pub redundant: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

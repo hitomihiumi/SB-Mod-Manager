@@ -17,6 +17,7 @@ import { useMemo, useRef, useState } from "react";
 import { formatBytes } from "../lib/format";
 import { ipc, modPageUrl, MOD_TYPE_META, type GroupView, type ModView } from "../lib/ipc";
 import { useApp, visibleMods } from "../store/useApp";
+import { OverwriteBar } from "./OverwriteBar";
 import { ProfileSwitcher } from "./ProfileSwitcher";
 import { Badge, Button, Checkbox, Empty } from "./ui";
 
@@ -167,6 +168,8 @@ export function ModsView({ onAdd }: { onAdd: () => void }) {
           </div>
         </div>
       )}
+
+      {snapshot.overwrite.files > 0 && <OverwriteBar />}
     </div>
   );
 }
@@ -393,6 +396,8 @@ function ModRow({
         </AlertTriangle>
       )}
 
+      {mod.fileConflicts && <FileConflictFlag mod={mod} />}
+
       {/* Enabled, but a mod further down the order replaces some of it. */}
       {overridden && overridden.losing > 0 && (
         <button
@@ -452,5 +457,45 @@ function ModRow({
         <Trash2 size={13} />
       </button>
     </div>
+  );
+}
+
+/**
+ * Loose files this mod shares with other enabled mods, flagged the way Mod
+ * Organizer 2 does. Clicking opens the Files view on exactly those paths.
+ */
+function FileConflictFlag({ mod }: { mod: ModView }) {
+  const showFileConflicts = useApp((s) => s.showFileConflicts);
+  const conflicts = mod.fileConflicts;
+  if (!conflicts) return null;
+
+  const { wins, loses, redundant } = conflicts;
+  const [tone, label, detail]: ["accent" | "warn" | "danger", string, string] = redundant
+    ? [
+        "danger",
+        "Redundant",
+        `Every file of this mod (${loses}) is replaced by mods later in the load order, so it does nothing.`,
+      ]
+    : wins > 0 && loses > 0
+      ? [
+          "warn",
+          `±${wins}/${loses}`,
+          `Replaces ${wins} file(s) of earlier mods, and loses ${loses} to later ones.`,
+        ]
+      : wins > 0
+        ? ["accent", `+${wins}`, `Replaces ${wins} file(s) from mods earlier in the load order.`]
+        : ["warn", `−${loses}`, `${loses} file(s) are replaced by mods later in the load order.`];
+
+  return (
+    <button
+      onClick={(event) => {
+        event.stopPropagation();
+        showFileConflicts(mod.id, mod.name);
+      }}
+      title={`${detail} Click to see which.`}
+      className="shrink-0"
+    >
+      <Badge tone={tone}>{label}</Badge>
+    </button>
   );
 }

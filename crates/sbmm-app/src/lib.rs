@@ -1014,6 +1014,7 @@ impl App {
         let mut pending = Vec::new();
 
         let virtual_mode = self.deployment_mode()? == DeploymentMode::Virtual;
+        let file_conflicts = self.file_conflict_counts(&records)?;
         for record in &records {
             let components = self.store.components_for(record.id)?;
             let planned = self.deploy_plan_for(record, &components)?;
@@ -1052,6 +1053,7 @@ impl App {
                 warnings: components.iter().flat_map(|c| c.warnings.clone()).collect(),
                 latest_version: newer_version(&record.version, &record.latest_version),
                 nexus_mod_id: record.nexus_mod_id,
+                file_conflicts: file_conflicts.get(&record.id).cloned(),
             });
         }
 
@@ -1080,6 +1082,7 @@ impl App {
             discord_rpc: self.discord_rpc()?,
             deployment_mode: self.deployment_mode()?,
             profiles: self.store.list_profiles()?,
+            overwrite: self.overwrite_summary(),
         })
     }
 
@@ -1631,29 +1634,8 @@ impl App {
                 entries: Vec::new(),
             });
         };
-        let mapping = self.vfs_mapping()?;
-
-        // The display name of each provider, resolved before the mapping is
-        // turned into the live view.
-        let mut names: std::collections::HashMap<Origin, String> = std::collections::HashMap::new();
-        for layer in &mapping.layers {
-            names.insert(layer.origin, layer.name.clone());
-        }
-        names.insert(Origin::Overwrite, "Overwrite".into());
-        let label = |origin: Origin| -> (String, String, Option<i64>) {
-            let (kind, mod_id) = match origin {
-                Origin::Mod(id) => ("mod", Some(id)),
-                Origin::Generated => ("generated", None),
-                Origin::Overwrite => ("overwrite", None),
-            };
-            let name = names.get(&origin).cloned().unwrap_or_else(|| match origin {
-                Origin::Mod(id) => format!("mod {id}"),
-                _ => kind.to_string(),
-            });
-            (kind.to_string(), name, mod_id)
-        };
-
-        let vfs = mapping.into_vfs();
+        let (vfs, labels) = self.labelled_vfs()?;
+        let label = |origin: Origin| labels.label(origin);
         let overlay = vfs.overlay();
 
         let dir_path = if dir.is_empty() {
@@ -1725,6 +1707,187 @@ impl App {
             dir: dir_path.display().to_string(),
             entries,
         })
+    }
+
+    /// What is waiting in the overwrite folder.
+    pub fn overwrite_summary(&self) -> OverwriteView {
+        let dir = self.overwrite_dir();
+        OverwriteView {
+            path: path_string(&dir),
+            files: sbmm_archive::walk_relative(&dir).len() as u32,
+            bytes: sbmm_archive::directory_size(&dir) as i64,
+        }
+    }
+
+    /// Turn everything in overwrite into a mod of its own, as Mod Organizer 2
+    /// does: the files move out of overwrite into a new mod, which is enabled
+    /// at the end of the load order — the same place overwrite sat, above
+    /// every mod — so what the game sees does not change.
+    pub fn create_mod_from_overwrite(&mut self, name: &str) -> Result<i64> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(AppError::Invalid("the new mod needs a name".into()));
+        }
+        let overwrite = self.overwrite_dir();
+        let files = sbmm_archive::walk_relative(&overwrite);
+        if files.is_empty() {
+            return Err(AppError::Invalid("the overwrite folder is empty".into()));
+        }
+
+        let staging_id = self.unique_staging_folder(name);
+        let staging = self.staging_path(&staging_id);
+        let mut component_files = Vec::with_capacity(files.len());
+        for relative in &files {
+            let from = overwrite.join(relative);
+            let to = staging.join(relative);
+            if let Some(parent) = to.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
+            }
+            move_or_copy(&from, &to)?;
+            // A copy across volumes leaves the original behind; it has to go,
+            // or the file would be in the view twice.
+            if from.exists() {
+                std::fs::remove_file(&from).map_err(|e| AppError::io(&from, e))?;
+            }
+            // Overwrite already mirrors the game folder, so each file goes
+            // exactly where it came from.
+            component_files.push(sbmm_core::model::ComponentFile {
+                source: relative.clone(),
+                target: relative.clone(),
+            });
+        }
+        clear_dir(&overwrite)?;
+
+        let detected = DetectedComponent {
+            mod_type: ModType::GameRootOverlay,
+            confidence: Confidence::High,
+            files: component_files,
+            target_subdir: PathBuf::new(),
+            ue4ss_mod_name: None,
+            pak_sets: Vec::new(),
+            warnings: Vec::new(),
+            notes: vec![
+                "Files the game created under the virtual file system, kept as a mod.".into(),
+            ],
+        };
+        let id = self.store.insert_mod(&NewMod {
+            name: name.to_string(),
+            staging_folder: staging_id,
+            version: None,
+            source: "overwrite".into(),
+            nexus_mod_id: None,
+            nexus_file_id: None,
+            primary_type: ModType::GameRootOverlay.as_str().to_string(),
+            components: vec![detected],
+            size_bytes: sbmm_archive::directory_size(&staging) as i64,
+            image_path: None,
+        })?;
+        self.store.set_enabled(&[id], true)?;
+        Ok(id)
+    }
+
+    /// Delete everything in overwrite.
+    pub fn clear_overwrite(&mut self) -> Result<u32> {
+        let dir = self.overwrite_dir();
+        let count = sbmm_archive::walk_relative(&dir).len() as u32;
+        clear_dir(&dir)?;
+        Ok(count)
+    }
+
+    /// Every path more than one provider claims, in the manner of Mod
+    /// Organizer 2's conflicts tab: who wins it and who is hidden beneath.
+    /// With `mod_id`, only the paths that mod takes part in, either side.
+    pub fn vfs_conflicts(&self, mod_id: Option<i64>) -> Result<Vec<VfsEntry>> {
+        if self.game()?.is_none() {
+            return Ok(Vec::new());
+        }
+        let (vfs, labels) = self.labelled_vfs()?;
+        let wanted = mod_id.map(sbmm_vfs::Origin::Mod);
+        let mut entries: Vec<VfsEntry> = vfs
+            .overlay()
+            .conflicts()
+            .filter(|(_, file)| {
+                wanted.is_none_or(|o| file.origin == o || file.shadowed.contains(&o))
+            })
+            .map(|(path, file)| {
+                let (origin, provided_by, mod_id) = labels.label(file.origin);
+                VfsEntry {
+                    name: path.file_name().to_string(),
+                    is_dir: false,
+                    path: path.display().to_string(),
+                    provided_by,
+                    origin,
+                    mod_id,
+                    shadowed_by: file.shadowed.iter().map(|o| labels.label(*o).1).collect(),
+                    source: Some(path_string(&file.source)),
+                }
+            })
+            .collect();
+        entries.sort_by_key(|e| e.path.to_lowercase());
+        Ok(entries)
+    }
+
+    /// The live virtual view, with a display name for every provider in it.
+    fn labelled_vfs(&self) -> Result<(sbmm_vfs::Vfs, OriginLabels)> {
+        let mapping = self.vfs_mapping()?;
+        // Resolved before the mapping is turned into the live view, which
+        // keeps the files but not the layer names.
+        let mut names = std::collections::HashMap::new();
+        for layer in &mapping.layers {
+            names.insert(layer.origin, layer.name.clone());
+        }
+        names.insert(sbmm_vfs::Origin::Overwrite, "Overwrite".to_string());
+        Ok((mapping.into_vfs(), OriginLabels(names)))
+    }
+
+    /// How each enabled mod's loose files fare against the other enabled
+    /// mods: paths it wins because it is further down the order, and paths a
+    /// mod further down takes from it. Paks never clash here — their names
+    /// carry the load order — so this is the file-level picture that asset
+    /// conflicts inside paks do not cover. Read from the plans alone, so it
+    /// is cheap enough for every snapshot.
+    fn file_conflict_counts(
+        &self,
+        records: &[ModRecord],
+    ) -> Result<std::collections::HashMap<i64, FileConflicts>> {
+        use std::collections::{HashMap, HashSet};
+
+        let mut enabled: Vec<&ModRecord> = records.iter().filter(|m| m.enabled).collect();
+        enabled.sort_by_key(|m| (m.priority, m.id));
+
+        let mut claims: BTreeMap<sbmm_vfs::VPath, Vec<i64>> = BTreeMap::new();
+        let mut totals: HashMap<i64, u32> = HashMap::new();
+        for record in enabled {
+            let components = self.store.components_for(record.id)?;
+            let plan = self.plan_for(record, &components);
+            let mut seen = HashSet::new();
+            for file in &plan.files {
+                let Some(path) = sbmm_vfs::VPath::from_relative(&file.target) else {
+                    continue;
+                };
+                if seen.insert(path.clone()) {
+                    claims.entry(path).or_default().push(record.id);
+                }
+            }
+            totals.insert(record.id, seen.len() as u32);
+        }
+
+        let mut out: HashMap<i64, FileConflicts> = HashMap::new();
+        for ids in claims.values().filter(|ids| ids.len() > 1) {
+            let winner = ids.last().copied();
+            for &id in ids {
+                let entry = out.entry(id).or_default();
+                if Some(id) == winner {
+                    entry.wins += 1;
+                } else {
+                    entry.loses += 1;
+                }
+            }
+        }
+        for (id, counts) in out.iter_mut() {
+            counts.redundant = counts.loses > 0 && Some(&counts.loses) == totals.get(id);
+        }
+        Ok(out)
     }
 
     // -- update checks -----------------------------------------------------
@@ -1888,6 +2051,30 @@ fn must_be_physical(source: &str, target: &Path) -> bool {
     inside(sbmm_core::paths::BINARIES_WIN64) && !inside(sbmm_core::paths::UE4SS_MODS)
 }
 
+/// Display names for the providers in a virtual view.
+struct OriginLabels(std::collections::HashMap<sbmm_vfs::Origin, String>);
+
+impl OriginLabels {
+    /// `(kind, name, mod id)` for one provider.
+    fn label(&self, origin: sbmm_vfs::Origin) -> (String, String, Option<i64>) {
+        use sbmm_vfs::Origin;
+        let (kind, mod_id) = match origin {
+            Origin::Mod(id) => ("mod", Some(id)),
+            Origin::Generated => ("generated", None),
+            Origin::Overwrite => ("overwrite", None),
+        };
+        let name = self
+            .0
+            .get(&origin)
+            .cloned()
+            .unwrap_or_else(|| match origin {
+                Origin::Mod(id) => format!("mod {id}"),
+                _ => kind.to_string(),
+            });
+        (kind.to_string(), name, mod_id)
+    }
+}
+
 /// The staging folder of the RTX 20/30 frame generation package.
 const FRAMEGEN_STAGING: &str = "framegen-dlssg-sm86";
 
@@ -1895,6 +2082,23 @@ const FRAMEGEN_STAGING: &str = "framegen-dlssg-sm86";
 /// ignore case, and the deployment record may hold either separator.
 fn comparable_path(path: &str) -> String {
     path.replace('\\', "/").to_ascii_lowercase()
+}
+
+/// Empty a folder, keeping the folder itself.
+fn clear_dir(dir: &Path) -> Result<()> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Ok(());
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let removed = if entry.file_type().map(|k| k.is_dir()).unwrap_or(false) {
+            std::fs::remove_dir_all(&path)
+        } else {
+            std::fs::remove_file(&path)
+        };
+        removed.map_err(|e| AppError::io(&path, e))?;
+    }
+    Ok(())
 }
 
 /// Rename where possible, copy across volumes.

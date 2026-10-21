@@ -1594,3 +1594,107 @@ fn profiles_are_named_sensibly_and_the_active_one_cannot_be_deleted() {
         "the last profile left stays"
     );
 }
+
+/// The mod list flags loose-file clashes the way Mod Organizer 2 does: the
+/// mod further down wins, the one above loses, and a mod whose every file is
+/// taken is called out as doing nothing.
+#[test]
+fn file_conflicts_are_flagged_per_mod_and_listed_for_the_files_view() {
+    let mut fx = Fixture::new();
+    let a = fx.install_folder("Intro A", &[("Movies/Intro.mp4", "a")]);
+    let b = fx.install_folder(
+        "Intro B",
+        &[("Movies/Intro.mp4", "b"), ("Movies/Credits.mp4", "credits")],
+    );
+    let pak = fx.install_folder("Outfit", &[("Outfit_P.pak", "outfit")]);
+    fx.app.set_enabled(&[a, b, pak], true).unwrap();
+    fx.app.set_order(&[a, b, pak]).unwrap();
+
+    let mods = fx.app.snapshot().unwrap().mods;
+    let flags = |id: i64| {
+        mods.iter()
+            .find(|m| m.id == id)
+            .unwrap()
+            .file_conflicts
+            .clone()
+    };
+    let a_flags = flags(a).unwrap();
+    assert_eq!((a_flags.wins, a_flags.loses), (0, 1));
+    assert!(a_flags.redundant, "Intro A's only file is taken by Intro B");
+    let b_flags = flags(b).unwrap();
+    assert_eq!((b_flags.wins, b_flags.loses), (1, 0));
+    assert!(!b_flags.redundant);
+    assert_eq!(
+        flags(pak),
+        None,
+        "a pak's name carries its order, so it clashes with nothing"
+    );
+
+    // Disabling the winner leaves nothing to clash with.
+    fx.app.set_enabled(&[b], false).unwrap();
+    let mods = fx.app.snapshot().unwrap().mods;
+    assert!(mods.iter().all(|m| m.file_conflicts.is_none()));
+    fx.app.set_enabled(&[b], true).unwrap();
+
+    let for_a = fx.app.vfs_conflicts(Some(a)).unwrap();
+    assert_eq!(for_a.len(), 1);
+    assert_eq!(for_a[0].path, "SB/Content/Movies/Intro.mp4");
+    assert_eq!(for_a[0].provided_by, "Intro B");
+    assert_eq!(for_a[0].shadowed_by, vec!["Intro A".to_string()]);
+    assert!(fx.app.vfs_conflicts(Some(pak)).unwrap().is_empty());
+    assert_eq!(fx.app.vfs_conflicts(None).unwrap().len(), 1);
+}
+
+/// What the game created under the virtual file system becomes a mod of its
+/// own, enabled where overwrite sat, so the game sees exactly the same files.
+#[test]
+fn overwrite_becomes_a_mod_without_changing_what_the_game_sees() {
+    use sbmm_app::dto::DeploymentMode;
+
+    let mut fx = Fixture::new();
+    fx.app.set_deployment_mode(DeploymentMode::Virtual).unwrap();
+    assert!(fx.app.create_mod_from_overwrite("Nothing").is_err());
+
+    let overwrite = fx.app.overwrite_dir();
+    let created = overwrite.join("SB/Binaries/Win64/ue4ss/Mods/Skip/config.ini");
+    fs::create_dir_all(created.parent().unwrap()).unwrap();
+    fs::write(&created, "skip=1").unwrap();
+    assert_eq!(fx.app.snapshot().unwrap().overwrite.files, 1);
+
+    let before = virtual_view(&fx.game, fx.app.vfs_mapping().unwrap());
+    let untouched = fx.game_snapshot();
+    assert!(fx.app.create_mod_from_overwrite("  ").is_err());
+    let id = fx.app.create_mod_from_overwrite("Skip settings").unwrap();
+
+    assert_eq!(fx.app.snapshot().unwrap().overwrite.files, 0);
+    assert!(fs::read_dir(&overwrite).unwrap().next().is_none());
+    let new_mod = fx
+        .app
+        .snapshot()
+        .unwrap()
+        .mods
+        .into_iter()
+        .find(|m| m.id == id)
+        .unwrap();
+    assert!(new_mod.enabled);
+    assert_eq!(
+        virtual_view(&fx.game, fx.app.vfs_mapping().unwrap()),
+        before,
+        "the game sees the same file, now from the mod"
+    );
+    fx.app.apply().unwrap();
+    assert_eq!(fx.game_snapshot(), untouched, "nothing physical was needed");
+}
+
+#[test]
+fn clearing_overwrite_empties_it_and_keeps_the_folder() {
+    let mut fx = Fixture::new();
+    let overwrite = fx.app.overwrite_dir();
+    fs::create_dir_all(overwrite.join("SB/Saved")).unwrap();
+    fs::write(overwrite.join("SB/Saved/a.log"), "a").unwrap();
+    fs::write(overwrite.join("b.log"), "b").unwrap();
+
+    assert_eq!(fx.app.clear_overwrite().unwrap(), 2);
+    assert!(overwrite.is_dir());
+    assert!(fs::read_dir(&overwrite).unwrap().next().is_none());
+}

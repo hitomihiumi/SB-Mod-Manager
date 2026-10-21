@@ -747,6 +747,9 @@ pub fn run() {
             vfs::set_deployment_mode,
             vfs::launch_game,
             vfs::vfs_tree,
+            vfs::vfs_conflicts,
+            vfs::create_mod_from_overwrite,
+            vfs::clear_overwrite,
         ])
         .run(tauri::generate_context!())
         .expect("failed to start SB Mod Manager");

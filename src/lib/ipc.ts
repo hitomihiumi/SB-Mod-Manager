@@ -45,6 +45,25 @@ export interface ModView {
   /** Set only when Nexus reports a version different from the installed one. */
   latestVersion: string | null;
   nexusModId: number | null;
+  /** Loose files shared with other enabled mods; null when none. */
+  fileConflicts: FileConflicts | null;
+}
+
+/** The flags Mod Organizer 2 shows beside a mod. */
+export interface FileConflicts {
+  /** Paths it provides over a mod earlier in the load order. */
+  wins: number;
+  /** Paths a mod later in the load order takes from it. */
+  loses: number;
+  /** Every file it has is taken by later mods. */
+  redundant: boolean;
+}
+
+/** What the game created under the virtual file system. */
+export interface OverwriteView {
+  path: string;
+  files: number;
+  bytes: number;
 }
 
 export interface UpdateCheckReport {
@@ -81,6 +100,7 @@ export interface AppSnapshot {
   deploymentMode: DeploymentMode;
   /** Every profile, the active one marked. */
   profiles: ProfileView[];
+  overwrite: OverwriteView;
 }
 
 /** A named set of enabled mods and a load order. */
@@ -430,6 +450,9 @@ export const ipc = {
     invoke<ApplyReport>("set_deployment_mode", { mode }),
   launchGame: () => invoke<string>("launch_game"),
   vfsTree: (dir: string) => invoke<VfsListing>("vfs_tree", { dir }),
+  vfsConflicts: (modId: number | null) => invoke<VfsEntry[]>("vfs_conflicts", { modId }),
+  createModFromOverwrite: (name: string) => invoke<number>("create_mod_from_overwrite", { name }),
+  clearOverwrite: () => invoke<number>("clear_overwrite"),
   /** Write the diagnostics zip to `path`; resolves to where it went. */
   collectDiagnostics: (path: string) => invoke<string>("collect_diagnostics", { path }),
   createProfile: (name: string, copyEnabled: boolean) =>

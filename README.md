@@ -100,7 +100,15 @@ wrong is the usual reason a mod "doesn't work".
   duplicate keeps the enabled set too.
 - **A Files view, like Mod Organizer 2's Data tab.** Browse the game folder as
   the enabled mods make it: every file is labelled with the mod, the game or
-  the overwrite folder that provides it, and with the mods it hides.
+  the overwrite folder that provides it, and with the mods it hides. A
+  Conflicts mode lists every clashing path at once.
+- **Conflict flags in the mod list.** Beside each mod, as in Mod Organizer 2:
+  `+N` when it replaces files of earlier mods, `−N` when later mods replace
+  its own, both together, and *Redundant* when every file it has is replaced
+  so it does nothing. Clicking a flag shows exactly which files.
+- **Overwrite as a mod.** What the game creates under the virtual file system
+  is listed under the mod list; one click turns it into a mod of its own,
+  enabled where overwrite sat, so nothing the game sees changes.
 - **One-click diagnostics.** Settings → Diagnostics writes a zip with a
   summary of the setup and every relevant log, for attaching to a report.
 - **Leaves nothing behind.** Every file written and every original displaced is
