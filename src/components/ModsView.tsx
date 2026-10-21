@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronRight,
+  FolderMinus,
   FolderPlus,
   Package,
   Plus,
@@ -214,10 +215,11 @@ function Toolbar({
 }) {
   const scope = selectionCount > 0 ? `${selectionCount} selected` : `all ${totalShown}`;
   return (
-    <div className="flex h-12 shrink-0 items-center gap-2 border-b border-line px-3">
+    <div className="flex h-12 min-w-0 shrink-0 items-center gap-1.5 border-b border-line px-3 xl:gap-2">
       <ProfileSwitcher />
       <div className="mx-1 h-5 w-px bg-line" />
-      <div className="relative">
+      {/* The search box gives up width first, so the buttons never run off the edge. */}
+      <div className="relative w-56 min-w-20 shrink">
         <Search
           size={13}
           className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-ink-muted"
@@ -226,29 +228,45 @@ function Toolbar({
           value={search}
           onChange={(event) => setSearch(event.target.value)}
           placeholder="Search mods"
-          className="h-8 w-36 rounded-md border border-line bg-base pr-2 pl-7 text-[12px] placeholder:text-ink-muted focus:border-accent-soft focus:outline-none xl:w-56"
+          className="h-8 w-full rounded-md border border-line bg-base pr-2 pl-7 text-[12px] placeholder:text-ink-muted focus:border-accent-soft focus:outline-none"
         />
       </div>
 
       <div className="mx-1 h-5 w-px bg-line" />
 
+      {/* With a selection the badge names the scope, so the buttons can stay short. */}
+      {selectionCount > 0 && (
+        <span className="shrink-0 whitespace-nowrap">
+          <Badge tone="accent">{selectionCount} selected</Badge>
+        </span>
+      )}
       <Button size="sm" onClick={onEnableAll} title={`Enable ${scope}`}>
-        Enable {selectionCount > 0 ? "selected" : "all"}
+        Enable{selectionCount > 0 ? "" : " all"}
       </Button>
       <Button size="sm" onClick={onDisableAll} title={`Disable ${scope}`}>
-        Disable {selectionCount > 0 ? "selected" : "all"}
+        Disable{selectionCount > 0 ? "" : " all"}
       </Button>
 
       {selectionCount > 0 && (
         <>
-          <div className="mx-1 h-5 w-px bg-line" />
-          <Button size="sm" onClick={onGroup}>
-            <FolderPlus size={13} /> Group
+          <Button
+            size="sm"
+            className="px-1.5"
+            onClick={onGroup}
+            title="Group selected"
+            aria-label="Group selected"
+          >
+            <FolderPlus size={14} />
           </Button>
-          <Button size="sm" onClick={onUngroup}>
-            Ungroup
+          <Button
+            size="sm"
+            className="px-1.5"
+            onClick={onUngroup}
+            title="Remove selected from their group"
+            aria-label="Ungroup selected"
+          >
+            <FolderMinus size={14} />
           </Button>
-          <span className="ml-1 text-[11px] text-ink-muted">{selectionCount} selected</span>
         </>
       )}
 
