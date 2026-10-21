@@ -60,6 +60,8 @@ pub struct ModRecord {
     pub assets_indexed_at: Option<String>,
     /// The variant options chosen at install, as a JSON list of labels.
     pub variant_choice: Option<String>,
+    /// The user's own labels.
+    pub tags: Vec<String>,
 }
 
 /// An asset more than one mod provides.
@@ -350,7 +352,7 @@ impl Store {
                     m.size_bytes, m.image_path, m.notes, m.installed_at,
                     COALESCE(pm.enabled, 0), COALESCE(pm.priority, 0),
                     m.latest_version, m.update_checked_at, m.assets_indexed_at,
-                    m.variant_choice
+                    m.variant_choice, m.tags
              FROM mods m
              LEFT JOIN profile_mods pm
                     ON pm.mod_id = m.id AND pm.profile_id = ?1
@@ -377,9 +379,37 @@ impl Store {
                 update_checked_at: row.get(16)?,
                 assets_indexed_at: row.get(17)?,
                 variant_choice: row.get(18)?,
+                tags: serde_json::from_str(&row.get::<_, String>(19)?).unwrap_or_default(),
             })
         })?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// The user's note on a mod; empty clears it.
+    pub fn set_notes(&self, mod_id: i64, notes: Option<&str>) -> Result<()> {
+        self.update_mod(mod_id, "notes", notes)
+    }
+
+    /// The mod's picture, relative to its staging folder.
+    pub fn set_image(&self, mod_id: i64, image: Option<&str>) -> Result<()> {
+        self.update_mod(mod_id, "image_path", image)
+    }
+
+    pub fn set_tags(&self, mod_id: i64, tags: &[String]) -> Result<()> {
+        let json = serde_json::to_string(tags)?;
+        self.update_mod(mod_id, "tags", Some(&json))
+    }
+
+    fn update_mod(&self, mod_id: i64, column: &str, value: Option<&str>) -> Result<()> {
+        // `column` is one of the fixed names above, never user input.
+        let changed = self.conn.execute(
+            &format!("UPDATE mods SET {column} = ?2 WHERE id = ?1"),
+            params![mod_id, value],
+        )?;
+        if changed == 0 {
+            return Err(StoreError::UnknownMod(mod_id));
+        }
+        Ok(())
     }
 
     /// Remember which variants of its archive a mod was installed with.
@@ -885,6 +915,29 @@ mod tests {
             size_bytes: 42,
             image_path: None,
         }
+    }
+
+    #[test]
+    fn notes_tags_and_pictures_are_kept_on_the_mod() {
+        let store = Store::open_in_memory().unwrap();
+        let id = store.insert_mod(&sample("Alpha")).unwrap();
+        assert!(store.list_mods().unwrap()[0].tags.is_empty());
+
+        store
+            .set_notes(id, Some("Needs the physics patch"))
+            .unwrap();
+        store.set_image(id, Some("images/cover.png")).unwrap();
+        store
+            .set_tags(id, &["outfit".to_string(), "nsfw".to_string()])
+            .unwrap();
+        let mod_ = &store.list_mods().unwrap()[0];
+        assert_eq!(mod_.notes.as_deref(), Some("Needs the physics patch"));
+        assert_eq!(mod_.image_path.as_deref(), Some("images/cover.png"));
+        assert_eq!(mod_.tags, ["outfit", "nsfw"]);
+
+        store.set_notes(id, None).unwrap();
+        assert_eq!(store.list_mods().unwrap()[0].notes, None);
+        assert!(store.set_notes(999, Some("x")).is_err());
     }
 
     #[test]

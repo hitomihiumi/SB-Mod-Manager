@@ -153,6 +153,11 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX idx_restore_points_profile ON restore_points(profile_id, id);
     "#,
+    // v7 — the user's own labels for a mod, as a JSON list, beside the notes
+    // and picture columns v1 already has.
+    r#"
+    ALTER TABLE mods ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';
+    "#,
 ];
 
 pub fn migrate(conn: &Connection) -> Result<()> {

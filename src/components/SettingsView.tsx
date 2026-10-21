@@ -10,6 +10,7 @@ import { useApp } from "../store/useApp";
 import { Button, Checkbox, Section } from "./ui";
 import { DeploymentSection } from "./DeploymentSection";
 import { DiagnosticsSection } from "./DiagnosticsSection";
+import { GameConfigSection } from "./ConfigEditor";
 import { RestorePointsSection, SavesSection } from "./SafetySections";
 import { Ue4ssSection } from "./Ue4ssSection";
 import { FramegenSection } from "./FramegenSection";
@@ -115,6 +116,8 @@ export function SettingsView() {
         <RestorePointsSection />
 
         <SavesSection />
+
+        <GameConfigSection />
 
         <Ue4ssSection />
 

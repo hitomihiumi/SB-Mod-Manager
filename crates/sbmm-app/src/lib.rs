@@ -4,6 +4,7 @@
 //! which keeps it compilable and testable on any platform; `src-tauri` is only
 //! a set of thin command wrappers around this type.
 
+pub mod config;
 pub mod credentials;
 pub mod diagnostics;
 pub mod dto;
@@ -308,10 +309,9 @@ impl App {
         library::move_tree(&old_root.join("backups"), &new_root.join("backups"))?;
         library::move_tree(&old_root.join("downloads"), &new_root.join("downloads"))?;
         library::move_tree(&old_root.join("overwrite"), &new_root.join("overwrite"))?;
-        library::move_tree(
-            &old_root.join("save-backups"),
-            &new_root.join("save-backups"),
-        )?;
+        for folder in ["save-backups", "pristine", "config-backups"] {
+            library::move_tree(&old_root.join(folder), &new_root.join(folder))?;
+        }
 
         self.store
             .set_setting(SETTING_LIBRARY_ROOT, &new_root.to_string_lossy())?;
@@ -991,9 +991,16 @@ impl App {
         proxy: sbmm_upscaler::framegen::Proxy,
         version: &str,
     ) -> Result<i64> {
-        if let Some(previous) = self.framegen_installed()? {
-            self.uninstall(previous.mod_id)?;
-        }
+        // The user's dlssg_sm86.ini edits outlive a reinstall or update.
+        let kept = match self.framegen_installed()? {
+            Some(previous) => {
+                let folder = self.record(previous.mod_id)?.staging_folder;
+                let kept = self.keep_settings(&folder);
+                self.uninstall(previous.mod_id)?;
+                Some(kept)
+            }
+            None => None,
+        };
 
         let staging_root = self.staging_path(FRAMEGEN_STAGING);
         let binaries = Path::new(sbmm_core::paths::BINARIES_WIN64);
@@ -1038,6 +1045,12 @@ impl App {
             size_bytes: sbmm_archive::directory_size(&staging_root) as i64,
             image_path: None,
         })?;
+        match &kept {
+            Some(kept) => {
+                self.restore_settings(FRAMEGEN_STAGING, kept)?;
+            }
+            None => self.keep_pristine(FRAMEGEN_STAGING)?,
+        }
 
         // Same reasoning as the upscalers: a staged frame generator does
         // nothing, so it goes in now and only this mod is deployed.
@@ -1113,6 +1126,9 @@ impl App {
         // installed either way, it just has no conflict picture yet, and
         // `index_missing_assets` will come back to it.
         let _ = self.index_mod_assets(id);
+        // Its settings as they came, for resets and for carrying edits over
+        // to a later version.
+        self.keep_pristine(staging_id)?;
 
         Ok(id)
     }
@@ -1136,6 +1152,7 @@ impl App {
         if staging.is_dir() {
             std::fs::remove_dir_all(&staging).map_err(|e| AppError::io(&staging, e))?;
         }
+        self.forget_pristine(&record.staging_folder);
         self.store.delete_mod(mod_id)?;
         Ok(())
     }
@@ -1208,6 +1225,10 @@ impl App {
                 } else {
                     Vec::new()
                 },
+                folder: record.staging_folder.clone(),
+                image: record.image_path.clone(),
+                notes: record.notes.clone(),
+                tags: record.tags.clone(),
             });
         }
 
@@ -1317,6 +1338,49 @@ impl App {
 
     pub fn set_group_collapsed(&mut self, group_id: i64, collapsed: bool) -> Result<()> {
         self.store.set_group_collapsed(group_id, collapsed)?;
+        Ok(())
+    }
+
+    /// The user's note on a mod; blank clears it.
+    pub fn set_mod_notes(&mut self, mod_id: i64, notes: &str) -> Result<()> {
+        let notes = notes.trim();
+        self.store
+            .set_notes(mod_id, (!notes.is_empty()).then_some(notes))?;
+        Ok(())
+    }
+
+    /// The user's labels for a mod, tidied: trimmed, without blanks or
+    /// repeats in any case, and short enough to show as a chip.
+    pub fn set_mod_tags(&mut self, mod_id: i64, tags: &[String]) -> Result<()> {
+        let mut tidy: Vec<String> = Vec::new();
+        for tag in tags {
+            let tag: String = tag.trim().chars().take(32).collect();
+            if !tag.is_empty() && !tidy.iter().any(|t| t.to_lowercase() == tag.to_lowercase()) {
+                tidy.push(tag);
+            }
+        }
+        self.store.set_tags(mod_id, &tidy)?;
+        Ok(())
+    }
+
+    /// Pictures in a mod's folder, to choose its picture from.
+    pub fn mod_images(&self, mod_id: i64) -> Result<Vec<String>> {
+        let record = self.record(mod_id)?;
+        Ok(installer::previews(
+            &self.staging_path(&record.staging_folder),
+        ))
+    }
+
+    /// Choose one of the mod's own pictures, or none.
+    pub fn set_mod_image(&mut self, mod_id: i64, image: Option<&str>) -> Result<()> {
+        if let Some(image) = image {
+            if !self.mod_images(mod_id)?.iter().any(|i| i == image) {
+                return Err(AppError::Invalid(format!(
+                    "{image} is not one of the mod's pictures"
+                )));
+            }
+        }
+        self.store.set_image(mod_id, image)?;
         Ok(())
     }
 

@@ -169,6 +169,37 @@ pub fn repair(
     })
 }
 
+/// After the mod's own copy of a deployed file was edited, make the game's
+/// copy match and return its new record. Through a hard link it already
+/// does; a copied file (the library is on another drive) is replaced.
+pub fn refresh(
+    ctx: &DeployContext,
+    plan: &DeployPlan,
+    file: &DeployedFile,
+) -> Result<DeployedFile, DeployError> {
+    let planned = plan
+        .files
+        .iter()
+        .find(|p| p.target == file.target)
+        .ok_or_else(|| DeployError::MissingSource(file.target.clone()))?;
+    let source = plan.staging_root.join(&planned.source);
+    let target = resolve_target(&ctx.game_root, &file.target)?;
+    if !target.exists() || !same_contents(&source, &target)? {
+        match fs::remove_file(&target) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(DeployError::io(&target, e)),
+        }
+        create_parents(&target)?;
+        link_or_copy(&source, &target)?;
+    }
+    let mut refreshed = file.clone();
+    refreshed.size = fs::metadata(&source)
+        .map_err(|e| DeployError::io(&source, e))?
+        .len();
+    Ok(refreshed)
+}
+
 /// Text settings a user may well have opened and saved in the game folder.
 fn is_settings_file(path: &Path) -> bool {
     path.extension()

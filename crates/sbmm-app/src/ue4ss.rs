@@ -196,9 +196,9 @@ impl App {
     /// Install a downloaded UE4SS release archive as a mod and put it in the
     /// game straight away, replacing a UE4SS the manager installed before.
     ///
-    /// The user's `UE4SS-settings.ini` is carried over from the previous
-    /// install: those are their choices, and UE4SS fills in defaults for any
-    /// key a newer version adds.
+    /// The user's changes to `UE4SS-settings.ini` are carried over from the
+    /// previous install onto the new version's file, so keys a newer version
+    /// adds keep their defaults.
     pub fn install_ue4ss(&mut self, archive: &Path, version: &str) -> Result<i64> {
         let staged = self.stage_archive(archive)?;
         if !provides_ue4ss(&staged.components) {
@@ -216,7 +216,8 @@ impl App {
             }
         }
         if let Some(old) = &previous {
-            self.carry_settings_over(old, &staged.staging_id)?;
+            let kept = self.keep_settings(&old.staging_folder);
+            self.restore_settings(&staged.staging_id, &kept)?;
             self.uninstall(old.id)?;
         }
 
@@ -250,30 +251,6 @@ impl App {
             }
         }
         Ok(id)
-    }
-
-    /// Copy `UE4SS-settings.ini` from an installed UE4SS mod into a staged one.
-    fn carry_settings_over(&self, old: &ModRecord, staging_id: &str) -> Result<()> {
-        let is_settings = |path: &Path| {
-            path.file_name()
-                .is_some_and(|n| n.eq_ignore_ascii_case("UE4SS-settings.ini"))
-        };
-        let old_root = self.staging_path(&old.staging_folder);
-        let Some(old_settings) = sbmm_archive::walk_relative(&old_root)
-            .into_iter()
-            .find(|p| is_settings(p))
-        else {
-            return Ok(());
-        };
-        let new_root = self.staging_path(staging_id);
-        if let Some(new_settings) = sbmm_archive::walk_relative(&new_root)
-            .into_iter()
-            .find(|p| is_settings(p))
-        {
-            let to = new_root.join(new_settings);
-            std::fs::copy(old_root.join(old_settings), &to).map_err(|e| AppError::io(&to, e))?;
-        }
-        Ok(())
     }
 }
 

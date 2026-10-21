@@ -49,6 +49,12 @@ export interface ModView {
   fileConflicts: FileConflicts | null;
   /** What this enabled mod needs and the game will not have, e.g. "UE4SS". */
   missingRequirements: string[];
+  /** Its folder in the library, which pictures are read from. */
+  folder: string;
+  /** The mod's picture, relative to `folder`. */
+  image: string | null;
+  notes: string | null;
+  tags: string[];
 }
 
 /** UE4SS at a glance. */
@@ -599,9 +605,35 @@ export const ipc = {
   /** Null goes back to where the game keeps its saves. */
   setSavesDir: (dir: string | null) => invoke<void>("set_saves_dir", { dir }),
   setBackupSavesOnLaunch: (on: boolean) => invoke<void>("set_backup_saves_on_launch", { on }),
+  configFiles: (scope: ConfigScope) => invoke<ConfigFile[]>("config_files", { scope }),
+  readConfig: (scope: ConfigScope, path: string) =>
+    invoke<ConfigText>("read_config", { scope, path }),
+  writeConfig: (scope: ConfigScope, path: string, text: string) =>
+    invoke<void>("write_config", { scope, path, text }),
+  setModNotes: (modId: number, notes: string) => invoke<void>("set_mod_notes", { modId, notes }),
+  setModTags: (modId: number, tags: string[]) => invoke<void>("set_mod_tags", { modId, tags }),
+  modImages: (modId: number) => invoke<string[]>("mod_images", { modId }),
+  setModImage: (modId: number, image: string | null) =>
+    invoke<void>("set_mod_image", { modId, image }),
 };
 
 export type ShortcutPlace = "desktop" | "startMenu";
+
+/** Whose settings files: one mod's, or the game's own. */
+export type ConfigScope = { kind: "mod"; modId: number } | { kind: "game" };
+
+export interface ConfigFile {
+  path: string;
+  bytes: number;
+  /** Differs from the copy it was installed (or first found) as. */
+  edited: boolean;
+}
+
+export interface ConfigText {
+  text: string;
+  /** As installed or first found; null when no copy was kept. */
+  original: string | null;
+}
 
 /** What identifies an installed build of the game. */
 export interface GameBuild {

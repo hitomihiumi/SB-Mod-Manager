@@ -449,5 +449,11 @@ export function visibleMods(snapshot: AppSnapshot | null, search: string): ModVi
   if (!snapshot) return [];
   const needle = search.trim().toLowerCase();
   if (!needle) return snapshot.mods;
-  return snapshot.mods.filter((m) => m.name.toLowerCase().includes(needle));
+  // Tags and notes are searched too, so a tag works as a filter.
+  return snapshot.mods.filter(
+    (m) =>
+      m.name.toLowerCase().includes(needle) ||
+      m.tags.some((tag) => tag.toLowerCase().includes(needle)) ||
+      (m.notes ?? "").toLowerCase().includes(needle),
+  );
 }

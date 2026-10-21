@@ -186,6 +186,32 @@ pub struct ModView {
     pub file_conflicts: Option<FileConflicts>,
     /// What this enabled mod needs and the game will not have, e.g. `UE4SS`.
     pub missing_requirements: Vec<String>,
+    /// Its folder in the library, which pictures are read from.
+    pub folder: String,
+    /// The mod's picture, relative to `folder`.
+    pub image: Option<String>,
+    pub notes: Option<String>,
+    pub tags: Vec<String>,
+}
+
+/// One settings file in the editor's list.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigFileView {
+    /// Relative to the mod's folder or the game's settings folder.
+    pub path: String,
+    pub bytes: u64,
+    /// Differs from the copy it was installed (or first found) as.
+    pub edited: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigText {
+    pub text: String,
+    /// The file as installed or first found, to reset to; `None` when no
+    /// copy was kept (mods installed before copies were).
+    pub original: Option<String>,
 }
 
 /// How a mod's loose files fare against the other enabled mods — the flags

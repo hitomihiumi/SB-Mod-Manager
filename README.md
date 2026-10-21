@@ -124,6 +124,20 @@ wrong is the usual reason a mod "doesn't work".
   between them from the mod list; the game folder is brought in line on the
   spot. A new profile keeps the current order with nothing enabled; a
   duplicate keeps the enabled set too.
+- **Edits settings files.** A mod's INI, JSON, Lua and other settings
+  files open in an editor from the mod's details panel — INI files as a
+  form, a field per setting with the comments above it as help, or as text.
+  The game's own INI files (`%LOCALAPPDATA%\SB\Saved\Config`) are edited
+  from Settings, in whatever encoding Unreal wrote them. Each file can be
+  reset to the copy it was installed (or first found) as.
+- **Keeps your settings across reinstalls.** Every mod's settings files are
+  kept as installed, so when frame generation or UE4SS is reinstalled or
+  updated, the values you changed in `dlssg_sm86.ini` or
+  `UE4SS-settings.ini` are carried into the new version's file — and only
+  those: settings you never touched take the new version's defaults.
+- **Notes, tags and a picture for every mod**, in the details panel that
+  opens when one mod is selected. Tags show in the list and the search box
+  finds mods by tag and note as well as name.
 - **Notices game updates.** The installed build is remembered — Steam's
   build id, or the executable for other installs — and when it changes the
   mod list says so, with how many modded files the update replaced or

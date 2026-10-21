@@ -364,3 +364,23 @@ fn an_edit_through_the_link_is_only_recorded() {
     assert_eq!(done.how, sbmm_deploy::Repair::Recorded);
     assert_eq!(done.file.size, 5);
 }
+
+/// A copied (not linked) file is brought up to date after the mod's copy is
+/// edited; a linked one already is.
+#[test]
+fn refresh_replaces_a_stale_copy() {
+    let fx = Fixture::new();
+    fx.write_staged("a.ini", "x=1\n");
+    let backend = HardlinkBackend;
+    let plan = fx.plan(1, &[("a.ini", "SB/Binaries/Win64/a.ini")]);
+    let manifest = backend.deploy(&fx.ctx(), &plan).unwrap();
+    // As if the library were on another drive: the game has a copy.
+    let target = fx.game.join("SB/Binaries/Win64/a.ini");
+    fs::remove_file(&target).unwrap();
+    fs::write(&target, "x=1\n").unwrap();
+
+    fs::write(fx.staging.join("a.ini"), "x=100\n").unwrap();
+    let file = sbmm_deploy::refresh(&fx.ctx(), &plan, &manifest.files[0]).unwrap();
+    assert_eq!(fs::read_to_string(&target).unwrap(), "x=100\n");
+    assert_eq!(file.size, 6);
+}

@@ -5,6 +5,7 @@
 //! behaviour worth testing lives in `sbmm-app`.
 
 mod collections;
+mod config;
 mod discord;
 mod downloads;
 mod framegen;
@@ -826,6 +827,13 @@ pub fn run() {
             safety::delete_save_backup,
             safety::set_saves_dir,
             safety::set_backup_saves_on_launch,
+            config::config_files,
+            config::read_config,
+            config::write_config,
+            config::set_mod_notes,
+            config::set_mod_tags,
+            config::mod_images,
+            config::set_mod_image,
         ])
         .run(tauri::generate_context!())
         .expect("failed to start SB Mod Manager");

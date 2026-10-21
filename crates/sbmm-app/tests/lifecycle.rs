@@ -2494,3 +2494,195 @@ fn saves_are_backed_up_and_restored() {
     assert!(fx.app.restore_saves("../sbmm.db").is_err());
     fx.app.delete_save_backup(&first.file).unwrap();
 }
+
+// -- stage 8: settings files, notes, tags and pictures ---------------------
+
+/// Editing a mod's INI edits what the game reads, keeps the deployment
+/// record honest, and the installed copy is there to reset to.
+#[test]
+fn a_mods_settings_file_is_edited_where_the_game_reads_it() {
+    use sbmm_app::config::ConfigScope;
+    let mut fx = Fixture::new();
+    let id = fx.install_folder(
+        "Photo Mode",
+        &[
+            ("PhotoMode/Scripts/main.lua", "print('hi')"),
+            ("PhotoMode/config.ini", "[Camera]\nFov=90\n"),
+            ("PhotoMode/enabled.txt", ""),
+        ],
+    );
+    fx.app.set_enabled(&[id], true).unwrap();
+    fx.app.apply().unwrap();
+
+    let scope = ConfigScope::Mod { mod_id: id };
+    let files: Vec<String> = fx
+        .app
+        .config_files(scope)
+        .unwrap()
+        .into_iter()
+        .map(|f| f.path)
+        .collect();
+    assert!(
+        files.contains(&"PhotoMode/config.ini".to_string()),
+        "{files:?}"
+    );
+
+    fx.app
+        .write_config(scope, "PhotoMode/config.ini", "[Camera]\nFov=110\n")
+        .unwrap();
+    let deployed = fx
+        .game
+        .join("SB/Binaries/Win64/ue4ss/Mods/PhotoMode/config.ini");
+    assert_eq!(
+        fs::read_to_string(&deployed).unwrap(),
+        "[Camera]\nFov=110\n"
+    );
+    assert!(
+        fx.app.snapshot().unwrap().drift.is_empty(),
+        "the record follows the edit"
+    );
+
+    let text = fx.app.read_config(scope, "PhotoMode/config.ini").unwrap();
+    assert_eq!(text.original.as_deref(), Some("[Camera]\nFov=90\n"));
+    let edited = fx.app.config_files(scope).unwrap();
+    assert!(edited
+        .iter()
+        .any(|f| f.path == "PhotoMode/config.ini" && f.edited));
+
+    // Only settings files inside the mod can be reached.
+    assert!(fx.app.read_config(scope, "../../sbmm.db").is_err());
+    assert!(fx
+        .app
+        .write_config(scope, "PhotoMode/Scripts/../../x.pak", "")
+        .is_err());
+}
+
+/// Reinstalling or updating frame generation keeps what the user changed in
+/// dlssg_sm86.ini, and takes the new version's defaults for the rest.
+#[test]
+fn frame_generation_keeps_the_users_ini_across_a_reinstall() {
+    use sbmm_upscaler::framegen::Proxy;
+    let mut fx = Fixture::new();
+    let ini = fx.game.join("SB/Binaries/Win64/dlssg_sm86.ini");
+
+    let first = fake_framegen_release(&fx.source.join("first"));
+    fx.app
+        .install_framegen(&first, Proxy::Version, "0.4.0")
+        .unwrap();
+    // The user switches it off, in the game folder like the README says.
+    fs::write(&ini, "[General]\nEnabled=0\n").unwrap();
+
+    let second = fake_framegen_release(&fx.source.join("second"));
+    fs::write(
+        second.root.join("dlssg_sm86.ini"),
+        "[General]\nEnabled=1\nLogLevel=2\n",
+    )
+    .unwrap();
+    fx.app
+        .install_framegen(&second, Proxy::Version, "0.5.0")
+        .unwrap();
+
+    assert_eq!(
+        fs::read_to_string(&ini).unwrap(),
+        "[General]\nEnabled=0\nLogLevel=2\n"
+    );
+    // And the new version's own file is what a reset goes back to.
+    let id = fx.app.framegen_installed().unwrap().unwrap().mod_id;
+    let text = fx
+        .app
+        .read_config(
+            sbmm_app::config::ConfigScope::Mod { mod_id: id },
+            "SB/Binaries/Win64/dlssg_sm86.ini",
+        )
+        .unwrap();
+    assert_eq!(
+        text.original.as_deref(),
+        Some("[General]\nEnabled=1\nLogLevel=2\n")
+    );
+}
+
+/// The game's own INI files, with the first version found kept to reset to.
+#[test]
+fn the_games_settings_files_can_be_edited_and_reset() {
+    use sbmm_app::config::ConfigScope;
+    let mut fx = Fixture::new();
+    let config = fx.source.join("Config");
+    fs::create_dir_all(config.join("WindowsNoEditor")).unwrap();
+    // Unreal writes these as UTF-16 often enough.
+    let utf16: Vec<u8> = [0xFF, 0xFE]
+        .into_iter()
+        .chain(
+            "[/Script/Engine.RendererSettings]\r\nr.Tonemapper.Sharpen=0\r\n"
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes),
+        )
+        .collect();
+    fs::write(config.join("WindowsNoEditor/Engine.ini"), &utf16).unwrap();
+    fs::write(config.join("WindowsNoEditor/notes.txt"), "not a setting").unwrap();
+    // SAFETY: the only test that sets this variable.
+    unsafe { std::env::set_var("SBMM_GAME_CONFIG_DIR", &config) };
+
+    let files = fx.app.config_files(ConfigScope::Game).unwrap();
+    assert_eq!(files.len(), 1, "only INI files: {files:?}");
+    let path = &files[0].path;
+    assert_eq!(path, "WindowsNoEditor/Engine.ini");
+
+    let text = fx.app.read_config(ConfigScope::Game, path).unwrap();
+    assert!(text.text.contains("Sharpen=0"));
+    assert_eq!(text.original, None);
+    let edited = text.text.replace("Sharpen=0", "Sharpen=1");
+    fx.app
+        .write_config(ConfigScope::Game, path, &edited)
+        .unwrap();
+
+    let bytes = fs::read(config.join("WindowsNoEditor/Engine.ini")).unwrap();
+    assert_eq!(&bytes[..2], &[0xFF, 0xFE], "still UTF-16");
+    let again = fx.app.read_config(ConfigScope::Game, path).unwrap();
+    assert!(again.text.contains("Sharpen=1"));
+    assert!(again.original.unwrap().contains("Sharpen=0"));
+    unsafe { std::env::remove_var("SBMM_GAME_CONFIG_DIR") };
+}
+
+#[test]
+fn a_mod_carries_notes_tags_and_a_chosen_picture() {
+    let mut fx = Fixture::new();
+    let id = fx.install_folder(
+        "Outfit",
+        &[
+            ("Outfit_P.pak", "pak"),
+            ("images/cover.png", "png"),
+            ("images/back.jpg", "jpg"),
+        ],
+    );
+    let images = fx.app.mod_images(id).unwrap();
+    assert_eq!(images.len(), 2);
+    let installed = fx.app.snapshot().unwrap().mods[0].image.clone();
+    assert_eq!(installed.as_deref(), Some("images/cover.png"));
+
+    fx.app.set_mod_image(id, Some("images/back.jpg")).unwrap();
+    assert!(fx.app.set_mod_image(id, Some("Outfit_P.pak")).is_err());
+    fx.app
+        .set_mod_notes(id, "  Goes with the white hair  ")
+        .unwrap();
+    fx.app
+        .set_mod_tags(
+            id,
+            &[
+                "outfit".into(),
+                " Outfit ".into(),
+                "".into(),
+                "white".into(),
+            ],
+        )
+        .unwrap();
+
+    let view = fx.app.snapshot().unwrap().mods.remove(0);
+    assert_eq!(view.image.as_deref(), Some("images/back.jpg"));
+    assert_eq!(view.notes.as_deref(), Some("Goes with the white hair"));
+    assert_eq!(view.tags, ["outfit", "white"]);
+
+    fx.app.set_mod_notes(id, " ").unwrap();
+    fx.app.set_mod_image(id, None).unwrap();
+    let view = fx.app.snapshot().unwrap().mods.remove(0);
+    assert_eq!((view.notes, view.image), (None, None));
+}

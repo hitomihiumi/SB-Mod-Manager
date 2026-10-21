@@ -10,6 +10,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  StickyNote,
   Trash2,
 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
@@ -19,6 +20,7 @@ import { ipc, modPageUrl, MOD_TYPE_META, type GroupView, type ModView } from "..
 import { useApp, visibleMods } from "../store/useApp";
 import { OverwriteBar } from "./OverwriteBar";
 import { ProfileSwitcher } from "./ProfileSwitcher";
+import { ModDetails } from "./ModDetails";
 import { GameUpdateBanner } from "./SafetySections";
 import { Ue4ssBanner } from "./Ue4ssSection";
 import { Badge, Button, Checkbox, Empty } from "./ui";
@@ -98,6 +100,10 @@ export function ModsView({ onAdd }: { onAdd: () => void }) {
     setLastClicked(mod.id);
   }
 
+  // One mod selected shows its details beside the list.
+  const detailed =
+    selection.length === 1 ? (snapshot?.mods.find((m) => m.id === selection[0]) ?? null) : null;
+
   /** Bulk actions act on the selection when there is one, otherwise on everything shown. */
   const bulkTargets = selection.length > 0 ? selection : mods.map((m) => m.id);
 
@@ -129,6 +135,8 @@ export function ModsView({ onAdd }: { onAdd: () => void }) {
       <GameUpdateBanner />
       <Ue4ssBanner />
 
+      <div className="flex min-h-0 flex-1">
+        <div className="flex min-w-0 flex-1 flex-col">
       {rows.length === 0 ? (
         <Empty
           icon={<Package size={20} />}
@@ -173,6 +181,10 @@ export function ModsView({ onAdd }: { onAdd: () => void }) {
           </div>
         </div>
       )}
+
+        </div>
+        {detailed && <ModDetails mod={detailed} onClose={() => setSelection([])} />}
+      </div>
 
       {snapshot.overwrite.files > 0 && <OverwriteBar />}
     </div>
@@ -394,6 +406,25 @@ function ModRow({
       >
         {mod.name}
       </button>
+
+      {mod.tags.slice(0, 2).map((tag) => (
+        <span
+          key={tag}
+          className="shrink-0 rounded-full border border-line px-1.5 text-[10px] leading-4 text-ink-soft"
+        >
+          {tag}
+        </span>
+      ))}
+      {mod.tags.length > 2 && (
+        <span className="shrink-0 text-[10px] text-ink-muted" title={mod.tags.slice(2).join(", ")}>
+          +{mod.tags.length - 2}
+        </span>
+      )}
+      {mod.notes && (
+        <StickyNote size={12} className="shrink-0 text-ink-muted" aria-label="Has notes">
+          <title>{mod.notes}</title>
+        </StickyNote>
+      )}
 
       {mod.warnings.length > 0 && (
         <AlertTriangle size={13} className="shrink-0 text-warn" aria-label="Has warnings">

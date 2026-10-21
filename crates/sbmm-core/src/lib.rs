@@ -6,6 +6,7 @@
 
 pub mod detect;
 pub mod fomod;
+pub mod ini;
 pub mod loadorder;
 pub mod model;
 pub mod paths;
