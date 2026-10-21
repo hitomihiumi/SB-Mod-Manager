@@ -2066,3 +2066,225 @@ fn a_bundle_of_separate_mods_still_installs_whole_without_asking() {
     assert!(staged.variants.is_none());
     assert!(!staged.needs_confirmation);
 }
+
+const FOMOD_CONFIG: &str = r#"<?xml version="1.0" encoding="UTF-16"?>
+<config>
+  <moduleName>Planet Diving Suit</moduleName>
+  <moduleImage path="fomod\images\header.jpg"/>
+  <requiredInstallFiles><file source="Core\Shared_P.pak" destination=""/></requiredInstallFiles>
+  <installSteps order="Explicit">
+    <installStep name="Colour"><optionalFileGroups order="Explicit">
+      <group name="Colour" type="SelectExactlyOne"><plugins order="Explicit">
+        <plugin name="Black">
+          <description>The original.</description>
+          <image path="fomod\images\black.jpg"/>
+          <files><folder source="Black" destination=""/></files>
+          <conditionFlags><flag name="colour">black</flag></conditionFlags>
+          <typeDescriptor><type name="Optional"/></typeDescriptor>
+        </plugin>
+        <plugin name="White">
+          <description>Snow white.</description>
+          <files><folder source="White" destination=""/></files>
+          <conditionFlags><flag name="colour">white</flag></conditionFlags>
+          <typeDescriptor><type name="Recommended"/></typeDescriptor>
+        </plugin>
+      </plugins></group>
+    </optionalFileGroups></installStep>
+    <installStep name="Extras">
+      <visible><flagDependency flag="colour" value="white"/></visible>
+      <optionalFileGroups order="Explicit"><group name="Extras" type="SelectAny"><plugins order="Explicit">
+        <plugin name="Gloves"><description>Gloves.</description>
+          <files><file source="Extras\Gloves_P.pak" destination=""/></files>
+          <typeDescriptor><type name="Optional"/></typeDescriptor></plugin>
+      </plugins></group></optionalFileGroups>
+    </installStep>
+  </installSteps>
+</config>"#;
+
+/// A FOMOD archive, its script in UTF-16 as the old tools wrote it.
+fn fomod_archive(path: &Path) {
+    use std::io::Write;
+    let mut config = vec![0xFF, 0xFE];
+    for unit in FOMOD_CONFIG.encode_utf16() {
+        config.extend(unit.to_le_bytes());
+    }
+    let mut zip = zip::ZipWriter::new(fs::File::create(path).unwrap());
+    let options: zip::write::FileOptions<'_, ()> = zip::write::FileOptions::default();
+    zip.start_file("Suit/fomod/ModuleConfig.xml", options)
+        .unwrap();
+    zip.write_all(&config).unwrap();
+    for (name, contents) in [
+        ("Suit/fomod/images/header.jpg", "header picture"),
+        ("Suit/fomod/images/black.jpg", "black picture"),
+        ("Suit/Core/Shared_P.pak", "shared"),
+        ("Suit/Black/Outfit_P.pak", "black"),
+        ("Suit/White/Outfit_P.pak", "white"),
+        ("Suit/Extras/Gloves_P.pak", "gloves"),
+    ] {
+        zip.start_file(name, options).unwrap();
+        zip.write_all(contents.as_bytes()).unwrap();
+    }
+    zip.finish().unwrap();
+}
+
+fn deployed_paks(game: &Path) -> Vec<String> {
+    let mut found: Vec<String> = fs::read_dir(game.join("SB/Content/Paks/~mods"))
+        .map(|dir| {
+            dir.flatten()
+                .map(|e| fs::read_to_string(e.path()).unwrap())
+                .collect()
+        })
+        .unwrap_or_default();
+    found.sort();
+    found
+}
+
+/// A FOMOD runs as a wizard: the answers decide what is installed, a step
+/// shows only when an earlier answer calls for it, and the chosen option's
+/// picture becomes the mod's.
+#[test]
+fn a_fomod_installs_what_its_wizard_was_answered() {
+    let mut fx = Fixture::new();
+    let archive = fx.source.join("Planet Diving Suit.zip");
+    fomod_archive(&archive);
+
+    let staged = fx.app.stage_archive(&archive).unwrap();
+    assert!(staged.needs_confirmation);
+    assert!(
+        staged.variants.is_none(),
+        "the FOMOD asks; nothing else does"
+    );
+    let view = staged.fomod.clone().expect("the installer is found");
+    assert_eq!(view.root, "Suit");
+    assert_eq!(view.installer.name, "Planet Diving Suit");
+    assert_eq!(view.selection, vec![[0, 0, 1]], "White is recommended");
+    assert!(!view.remembered);
+    assert!(staged
+        .previews
+        .contains(&"Suit/fomod/images/black.jpg".to_string()));
+
+    let black = fx
+        .app
+        .fomod_state(&staged.staging_id, &[[0, 0, 0]])
+        .unwrap();
+    assert_eq!(black.visible, vec![true, false]);
+    assert!(black.problems.is_empty());
+    let both = fx
+        .app
+        .fomod_state(&staged.staging_id, &[[0, 0, 0], [0, 0, 1]])
+        .unwrap();
+    assert_eq!(both.problems.len(), 1);
+    assert!(fx
+        .app
+        .confirm_install_fomod(&staged.staging_id, "Suit", &[[0, 0, 0], [0, 0, 1]])
+        .is_err());
+
+    // Black, with a stale tick on the hidden gloves step.
+    let id = fx
+        .app
+        .confirm_install_fomod(&staged.staging_id, "Suit", &[[0, 0, 0], [1, 0, 0]])
+        .unwrap();
+    fx.app.set_enabled(&[id], true).unwrap();
+    fx.app.apply().unwrap();
+    assert_eq!(deployed_paks(&fx.game), vec!["black", "shared"]);
+
+    let preview = fx
+        .app
+        .preview_data_url(&staged.staging_id, "_preview.jpg")
+        .unwrap();
+    assert!(preview.starts_with("data:image/jpeg;base64,"));
+
+    // The same archive again opens on last time's answers.
+    let again = fx.app.stage_archive(&archive).unwrap();
+    let view = again.fomod.unwrap();
+    assert!(view.remembered);
+    assert_eq!(view.selection, vec![[0, 0, 0], [1, 0, 0]]);
+    fx.app.cancel_install(&again.staging_id).unwrap();
+}
+
+/// From Nexus, a FOMOD waits for the wizard the first time, and installs the
+/// next version with the same answers without asking.
+#[test]
+fn a_downloaded_fomod_asks_once_and_then_remembers() {
+    let mut fx = Fixture::new();
+    let first = fx.source.join("Suit-202-1-0.zip");
+    fomod_archive(&first);
+    let staged = match fx.app.install_download(
+        &first,
+        "Planet Diving Suit",
+        sbmm_app::Origin::nexus(202, 1).with_version(Some("1.0".into())),
+    ) {
+        Err(sbmm_app::AppError::NeedsChoice(staged)) => staged,
+        other => panic!("expected the wizard, got {other:?}"),
+    };
+    let id = fx
+        .app
+        .confirm_install_fomod(
+            &staged.staging_id,
+            &staged.suggested_name,
+            &[[0, 0, 1], [1, 0, 0]],
+        )
+        .unwrap();
+    let installed = fx
+        .app
+        .snapshot()
+        .unwrap()
+        .mods
+        .into_iter()
+        .find(|m| m.id == id)
+        .unwrap();
+    assert_eq!(installed.nexus_mod_id, Some(202));
+
+    let update = fx.source.join("Suit-202-1-1.zip");
+    fomod_archive(&update);
+    let new_id = fx
+        .app
+        .install_download(
+            &update,
+            "Planet Diving Suit",
+            sbmm_app::Origin::nexus(202, 2).with_version(Some("1.1".into())),
+        )
+        .expect("remembered answers install it");
+    fx.app.set_enabled(&[id], false).unwrap();
+    fx.app.set_enabled(&[new_id], true).unwrap();
+    fx.app.apply().unwrap();
+    assert_eq!(deployed_paks(&fx.game), vec!["gloves", "shared", "white"]);
+}
+
+#[test]
+fn previews_are_only_pictures_from_inside_the_library() {
+    let mut fx = Fixture::new();
+    let id = fx.install_folder(
+        "Pictured",
+        &[
+            ("Outfit_P.pak", "pak"),
+            ("preview.png", "png"),
+            ("notes.txt", "hi"),
+        ],
+    );
+    let folder = fx
+        .store()
+        .list_mods()
+        .unwrap()
+        .into_iter()
+        .find(|m| m.id == id)
+        .unwrap();
+    assert_eq!(folder.image_path.as_deref(), Some("preview.png"));
+    let staging = folder.staging_folder;
+
+    assert!(fx
+        .app
+        .preview_data_url(&staging, "preview.png")
+        .unwrap()
+        .starts_with("data:image/png;base64,"));
+    assert!(
+        fx.app.preview_data_url(&staging, "notes.txt").is_err(),
+        "not a picture"
+    );
+    assert!(fx.app.preview_data_url(&staging, "../../sbmm.db").is_err());
+    assert!(fx.app.preview_data_url("..", "x.png").is_err());
+    assert!(fx
+        .app
+        .preview_data_url(&staging, "C:/Windows/x.png")
+        .is_err());
+}

@@ -33,6 +33,9 @@ pub struct VariantOption {
     pub folder: String,
     pub mod_types: Vec<ModType>,
     pub file_count: usize,
+    /// A picture in the option's folder, relative to the extraction root, to
+    /// show beside it — the colour swatch most variant archives include.
+    pub preview: Option<String>,
 }
 
 /// The versions an archive offers.
@@ -136,11 +139,20 @@ pub fn variant_choice(tree: &FileTree) -> Option<VariantChoice> {
             .join("/");
         let mut mod_types: Vec<ModType> = components.iter().map(|c| c.mod_type).collect();
         mod_types.dedup();
+        let prefix = format!("{key}/");
+        let preview = stripped
+            .entries()
+            .iter()
+            .filter(|e| e.norm.starts_with(&prefix))
+            .filter(|e| matches!(e.extension(), Some("jpg" | "jpeg" | "png" | "webp" | "gif")))
+            .min_by_key(|e| e.norm.matches('/').count())
+            .map(|e| e.path.to_string_lossy().replace('\\', "/"));
         options.push(VariantOption {
             label,
             folder,
             mod_types,
             file_count: entries.len(),
+            preview,
         });
     }
 
@@ -199,6 +211,30 @@ mod tests {
         assert_eq!(c.options[0].folder, "Planet Diving Suit/Black");
         assert_eq!(c.options[0].mod_types, vec![ModType::GenericPak]);
         assert_eq!(c.options[0].file_count, 3);
+        assert_eq!(c.options[0].preview, None);
+    }
+
+    #[test]
+    fn each_option_carries_its_own_picture() {
+        let c = choice(&[
+            "Suit/Black/Outfit_P.pak",
+            "Suit/Black/black.jpg",
+            "Suit/White/Outfit_P.pak",
+            "Suit/White/Preview/white.png",
+        ])
+        .unwrap();
+        assert_eq!(
+            c.options[0].preview.as_deref(),
+            Some("Suit/Black/black.jpg")
+        );
+        assert_eq!(
+            c.options[1].preview.as_deref(),
+            Some("Suit/White/Preview/white.png")
+        );
+        assert_eq!(
+            c.options[0].file_count, 1,
+            "a picture is not part of the payload"
+        );
     }
 
     #[test]

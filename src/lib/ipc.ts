@@ -192,6 +192,64 @@ export interface StagedInstall {
   variants: VariantChoice | null;
   /** What was chosen when this mod was installed before. */
   rememberedVariants: string[];
+  /** The archive's FOMOD installer, when it has one. */
+  fomod: FomodView | null;
+  /** Pictures in the archive, relative to the staging folder, previews first. */
+  previews: string[];
+}
+
+export type FomodGroupKind =
+  | "selectExactlyOne"
+  | "selectAtMostOne"
+  | "selectAtLeastOne"
+  | "selectAll"
+  | "selectAny";
+
+export type FomodPluginType = "required" | "recommended" | "optional" | "couldBeUsable" | "notUsable";
+
+export interface FomodPlugin {
+  name: string;
+  description: string;
+  /** Relative to the installer's root. */
+  image: string | null;
+}
+
+export interface FomodGroup {
+  name: string;
+  kind: FomodGroupKind;
+  plugins: FomodPlugin[];
+}
+
+export interface FomodStep {
+  name: string;
+  groups: FomodGroup[];
+}
+
+export interface FomodInstaller {
+  name: string;
+  /** The header image, relative to the installer's root. */
+  image: string | null;
+  steps: FomodStep[];
+}
+
+/** A FOMOD installer ready to run. */
+export interface FomodView {
+  /** The folder holding fomod/, relative to the staging folder. */
+  root: string;
+  installer: FomodInstaller;
+  /** What to tick when the wizard opens, as [step, group, option]. */
+  selection: [number, number, number][];
+  /** True when selection is the user's choice from last time. */
+  remembered: boolean;
+}
+
+/** The wizard's state for a selection. */
+export interface FomodWizardState {
+  visible: boolean[];
+  /** [step][group][option]. */
+  kinds: FomodPluginType[][][];
+  /** What stops the install, e.g. "Colour: choose one option". */
+  problems: string[];
 }
 
 /** One version of a mod an archive offers. */
@@ -200,6 +258,8 @@ export interface VariantOption {
   folder: string;
   modTypes: ModTypeId[];
   fileCount: number;
+  /** A picture in the option's folder, relative to the staging folder. */
+  preview: string | null;
 }
 
 export interface VariantChoice {
@@ -437,6 +497,16 @@ export const ipc = {
       variants: variants ?? null,
     }),
   cancelInstall: (stagingId: string) => invoke<void>("cancel_install", { stagingId }),
+  fomodState: (stagingId: string, selection: [number, number, number][]) =>
+    invoke<FomodWizardState>("fomod_state", { stagingId, selection }),
+  confirmInstallFomod: (
+    stagingId: string,
+    name: string,
+    selection: [number, number, number][],
+  ) => invoke<number>("confirm_install_fomod", { stagingId, name, selection }),
+  /** A picture from a staged install or an installed mod, as a data: URL. */
+  previewImage: (folder: string, path: string) =>
+    invoke<string>("preview_image", { folder, path }),
 
   setEnabled: (modIds: number[], enabled: boolean) =>
     invoke<void>("set_enabled", { modIds, enabled }),

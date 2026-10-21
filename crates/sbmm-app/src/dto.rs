@@ -215,6 +215,25 @@ pub struct StagedInstall {
     pub variants: Option<sbmm_core::VariantChoice>,
     /// The options chosen when this mod was installed before, to preselect.
     pub remembered_variants: Vec<String>,
+    /// The archive's FOMOD installer, when it has one.
+    pub fomod: Option<FomodView>,
+    /// Pictures in the archive, relative to the staging folder, previews
+    /// first — shown while the user decides.
+    pub previews: Vec<String>,
+}
+
+/// A FOMOD installer ready to run in the install dialog.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FomodView {
+    /// The folder holding `fomod/`, relative to the staging folder, which
+    /// every path in the installer — pictures included — is relative to.
+    pub root: String,
+    pub installer: sbmm_core::fomod::Fomod,
+    /// What to tick when the wizard opens, as `[step, group, option]`.
+    pub selection: Vec<[usize; 3]>,
+    /// True when `selection` is the user's choice from last time.
+    pub remembered: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

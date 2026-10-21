@@ -76,6 +76,8 @@ interface AppStore {
 
   stagePaths: (paths: string[]) => Promise<void>;
   confirmInstall: (name: string, typeOverride?: ModTypeId, variants?: string[]) => Promise<void>;
+  /** Install the staged FOMOD at the head of the queue, as the wizard was answered. */
+  confirmFomod: (name: string, selection: [number, number, number][]) => Promise<void>;
   /** Ask about an install that arrived from elsewhere — a download that holds several versions. */
   enqueueStaged: (staged: StagedInstall) => void;
   cancelInstall: () => Promise<void>;
@@ -302,6 +304,22 @@ export const useApp = create<AppStore>((set, get) => ({
         "success",
         `Installed ${installed} mod${installed === 1 ? "" : "s"}${waiting}${broke}.`,
       );
+    }
+  },
+
+  async confirmFomod(name, selection) {
+    const staged = get().queue[0];
+    if (!staged) return;
+    set({ busy: { label: name, done: 0, total: 1 } });
+    try {
+      await ipc.confirmInstallFomod(staged.stagingId, name, selection);
+      set((state) => ({ queue: state.queue.slice(1) }));
+      await get().refresh();
+      get().toast("success", `Installed ${name}.`);
+    } catch (error) {
+      get().toast("error", String(error));
+    } finally {
+      set({ busy: null });
     }
   },
 

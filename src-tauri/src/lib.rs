@@ -222,6 +222,37 @@ fn folders(state: tauri::State<'_, AppState>) -> Result<FoldersView, String> {
     with_app!(state, |app| app.folders())
 }
 
+/// The FOMOD wizard's state for a selection of `[step, group, option]`.
+#[tauri::command]
+fn fomod_state(
+    state: tauri::State<'_, AppState>,
+    staging_id: String,
+    selection: Vec<[usize; 3]>,
+) -> Result<sbmm_core::fomod::WizardState, String> {
+    with_app!(state, |app| app.fomod_state(&staging_id, &selection))
+}
+
+/// Install a staged FOMOD the way the wizard was answered.
+#[tauri::command]
+fn confirm_install_fomod(
+    state: tauri::State<'_, AppState>,
+    staging_id: String,
+    name: String,
+    selection: Vec<[usize; 3]>,
+) -> Result<i64, String> {
+    with_app!(state, |app| app.confirm_install_fomod(&staging_id, &name, &selection))
+}
+
+/// A picture from a staged install or an installed mod, as a `data:` URL.
+#[tauri::command]
+fn preview_image(
+    state: tauri::State<'_, AppState>,
+    folder: String,
+    path: String,
+) -> Result<String, String> {
+    with_app!(state, |app| app.preview_data_url(&folder, &path))
+}
+
 #[tauri::command]
 fn create_profile(
     state: tauri::State<'_, AppState>,
@@ -725,6 +756,9 @@ pub fn run() {
             set_auto_apply,
             folders,
             collect_diagnostics,
+            fomod_state,
+            confirm_install_fomod,
+            preview_image,
             create_profile,
             rename_profile,
             delete_profile,

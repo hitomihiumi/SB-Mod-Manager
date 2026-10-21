@@ -5,6 +5,7 @@
 //! files need to end up — can be unit tested anywhere.
 
 pub mod detect;
+pub mod fomod;
 pub mod loadorder;
 pub mod model;
 pub mod paths;

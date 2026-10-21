@@ -7,6 +7,7 @@
 pub mod credentials;
 pub mod diagnostics;
 pub mod dto;
+pub mod installer;
 pub mod library;
 pub mod ue4ss;
 
@@ -394,10 +395,18 @@ impl App {
     ) -> Result<StagedInstall> {
         let tree = FileTree::new(sbmm_archive::walk_relative(&dest));
         let components = detect_components(&tree);
-        let variants = sbmm_core::variant_choice(&tree);
+        // A FOMOD says itself what to ask; guessing at variants on top of it
+        // would ask twice.
+        let fomod = self.fomod_view(&staging_id, &suggested_name, None)?;
+        let variants = if fomod.is_some() {
+            None
+        } else {
+            sbmm_core::variant_choice(&tree)
+        };
         // An archive of alternatives always asks: installing every colour of
         // an outfit at once is never what anyone meant.
         let needs_confirmation = variants.is_some()
+            || fomod.is_some()
             || components
                 .iter()
                 .any(|c| c.confidence == Confidence::AskUser);
@@ -417,6 +426,8 @@ impl App {
             needs_confirmation,
             variants,
             remembered_variants,
+            fomod,
+            previews: installer::previews(&dest),
         })
     }
 
@@ -511,6 +522,19 @@ impl App {
         } else {
             name.to_string()
         };
+        if staged.fomod.is_some() {
+            // An update installs with last time's answers; a first install
+            // waits for the wizard, remembering where it came from.
+            self.pending_origins
+                .insert(staged.staging_id.clone(), origin.clone());
+            if let Some(id) =
+                self.fomod_with_remembered(&staged.staging_id, &name, origin.nexus_mod_id)?
+            {
+                return Ok(id);
+            }
+            staged.suggested_name = name;
+            return Err(AppError::NeedsChoice(Box::new(staged)));
+        }
         if let Some(choice) = &staged.variants {
             // An update of a mod installed before goes in the way it did then;
             // anything else waits for the user, keeping where it came from.
@@ -1074,7 +1098,8 @@ impl App {
             primary_type,
             components,
             size_bytes: sbmm_archive::directory_size(&dest) as i64,
-            image_path: None,
+            // The best picture the archive carried, shown as the mod's.
+            image_path: installer::previews(&dest).into_iter().next(),
         })?;
 
         // Read what it replaces now, while the containers are to hand. A

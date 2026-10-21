@@ -9,13 +9,15 @@ import {
   type VariantChoice,
 } from "../lib/ipc";
 import { useApp } from "../store/useApp";
+import { FomodWizard } from "./FomodWizard";
+import { Gallery, Preview } from "./Preview";
 import { Badge, Button, Dialog } from "./ui";
 
 /**
  * Shown only when an install cannot go ahead on its own: detection could not
- * decide where the files belong, or the archive holds several versions of the
- * mod and one has to be chosen. Everything else installs without interrupting
- * the user.
+ * decide where the files belong, the archive holds several versions of the
+ * mod and one has to be chosen, or it brings its own FOMOD installer.
+ * Everything else installs without interrupting the user.
  */
 export function InstallDialog() {
   const queue = useApp((s) => s.queue);
@@ -43,6 +45,9 @@ export function InstallDialog() {
   }, [staged]);
 
   if (!staged) return null;
+  if (staged.fomod) {
+    return <FomodWizard key={staged.stagingId} staged={staged} queueLength={queue.length} />;
+  }
 
   const variants = staged.variants;
   const many = queue.length > 1 ? ` (1 of ${queue.length})` : "";
@@ -114,6 +119,7 @@ function VariantBody({
   setChosen: (chosen: string[]) => void;
 }) {
   const remembered = staged.rememberedVariants.length > 0;
+  const pictured = variants.options.some((option) => option.preview);
   const toggle = (label: string) =>
     setChosen(
       variants.exclusive
@@ -131,6 +137,8 @@ function VariantBody({
         {variants.exclusive ? "Pick the one to install." : "Pick which to install."} The choice is
         remembered, and the next version of this mod installs the same way.
       </p>
+
+      {!pictured && <Gallery folder={staged.stagingId} paths={staged.previews} />}
 
       <label className="mb-1.5 block text-[12px] font-medium">Name</label>
       <input
@@ -166,6 +174,14 @@ function VariantBody({
               >
                 {selected && <span className="size-1.5 rounded-full bg-accent-ink" />}
               </span>
+              {pictured && (
+                <Preview
+                  folder={staged.stagingId}
+                  path={option.preview}
+                  alt={option.label}
+                  className="h-12 w-20 shrink-0"
+                />
+              )}
               <span className="min-w-0 flex-1 truncate text-[13px]">{option.label}</span>
               {option.modTypes.map((t) => (
                 <Badge key={t} tone="accent">
@@ -215,6 +231,8 @@ function TypeBody({
         <code className="font-mono text-ink-soft">LogicMods</code> folder, no UE4SS script. Pick
         the type and it will be remembered for archives shaped like this one.
       </p>
+
+      <Gallery folder={staged.stagingId} paths={staged.previews} />
 
       <label className="mb-1.5 block text-[12px] font-medium">Name</label>
       <input

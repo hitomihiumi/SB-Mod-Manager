@@ -31,7 +31,17 @@ wrong is the usual reason a mod "doesn't work".
   do — keeps only that, and remembers the answer: the next version of the same
   mod, from Nexus or dropped in by hand, installs the same way without asking.
   Folders that do not clash, like a pack of separate Lua mods, still install
-  together without a question.
+  together without a question. The pictures each version carries are shown
+  next to it, so the choice is made by looking rather than by folder name.
+- **Runs FOMOD installers.** An archive with `fomod/ModuleConfig.xml` opens as
+  a step-by-step wizard, the way Mod Organizer 2 runs one: option groups with
+  their rules (choose one, any, at least one), required and unavailable
+  options locked, steps and options that depend on earlier answers or on
+  files in the game folder shown and hidden as the script says, and the
+  picture and description of the option under the pointer beside the list.
+  Conditional file installs and priorities are honoured, the answers are
+  remembered for the next version of the mod, and the chosen picture becomes
+  the mod's preview.
 - **Load order that actually applies.** `~mods` is mounted alphanumerically, so
   priority is written into the deployed file names (`0010_Outfit_P.pak`) with
   every file of a set renamed together. Logic mods are left alone, because
