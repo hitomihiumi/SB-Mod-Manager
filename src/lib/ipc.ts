@@ -420,6 +420,8 @@ export const ipc = {
     invoke<ApplyReport>("set_deployment_mode", { mode }),
   launchGame: () => invoke<string>("launch_game"),
   vfsTree: (dir: string) => invoke<VfsListing>("vfs_tree", { dir }),
+  /** Write the diagnostics zip to `path`; resolves to where it went. */
+  collectDiagnostics: (path: string) => invoke<string>("collect_diagnostics", { path }),
 };
 
 /** The game's Nexus domain, mirroring `NEXUS_DOMAIN` in `sbmm-game`. */

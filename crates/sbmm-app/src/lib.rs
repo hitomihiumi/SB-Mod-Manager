@@ -5,6 +5,7 @@
 //! a set of thin command wrappers around this type.
 
 pub mod credentials;
+pub mod diagnostics;
 pub mod dto;
 pub mod library;
 

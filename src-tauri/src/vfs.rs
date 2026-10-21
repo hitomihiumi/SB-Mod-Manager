@@ -17,7 +17,10 @@ const HOOK: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/sbmm_vfs_hook.dll"
 
 /// One directory of the virtual file tree, for the Files view.
 #[tauri::command]
-pub fn vfs_tree(state: tauri::State<'_, AppState>, dir: Option<String>) -> Result<VfsListing, String> {
+pub fn vfs_tree(
+    state: tauri::State<'_, AppState>,
+    dir: Option<String>,
+) -> Result<VfsListing, String> {
     crate::with_app!(state, |app| app.vfs_tree(dir.as_deref().unwrap_or("")))
 }
 
@@ -45,9 +48,14 @@ pub async fn launch_game(
         // Steam's own launch keeps the overlay, cloud saves and playtime.
         if game.source == InstallSource::Steam {
             let url = format!("steam://rungameid/{}", sbmm_game::STEAM_APP_ID);
-            app_handle.opener().open_url(url, None::<&str>).map_err(fail)?;
+            app_handle
+                .opener()
+                .open_url(url, None::<&str>)
+                .map_err(fail)?;
         } else {
-            let exe = game.executable_path().ok_or("the game executable was not found")?;
+            let exe = game
+                .executable_path()
+                .ok_or("the game executable was not found")?;
             std::process::Command::new(&exe)
                 .current_dir(game.binaries_dir())
                 .spawn()
@@ -67,7 +75,12 @@ pub async fn launch_game(
     let pid = tauri::async_runtime::spawn_blocking(move || sbmm_vfs::launch::launch(&options))
         .await
         .map_err(fail)?
-        .map_err(|error| format!("{error}\nLaunch log: {}", log.display()))?;
+        .map_err(|error| {
+            format!(
+                "{error}\nLaunch log: {}\nSettings → Diagnostics packs it with everything else.",
+                log.display()
+            )
+        })?;
     Ok(format!(
         "Started Stellar Blade under the virtual file system (process {pid})."
     ))
@@ -82,7 +95,9 @@ fn install_hook(vfs_dir: &Path) -> Result<PathBuf, String> {
     let path = vfs_dir.join("sbmm_vfs_hook.dll");
     if std::fs::read(&path).ok().as_deref() != Some(HOOK) {
         std::fs::write(&path, HOOK).map_err(|e| {
-            format!("could not update the virtual file system hook (is the game still running?): {e}")
+            format!(
+                "could not update the virtual file system hook (is the game still running?): {e}"
+            )
         })?;
     }
     Ok(path)

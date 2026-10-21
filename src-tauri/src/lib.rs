@@ -215,6 +215,33 @@ fn folders(state: tauri::State<'_, AppState>) -> Result<FoldersView, String> {
     with_app!(state, |app| app.folders())
 }
 
+/// Write the diagnostics bundle to `path`, with what only the shell knows —
+/// the manager's version, the system and the graphics card — added to it.
+#[tauri::command]
+fn collect_diagnostics(
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    path: String,
+) -> Result<String, String> {
+    let adapter = sbmm_upscaler::gpu::primary_adapter()
+        .map(|a| format!("{} ({:?}, {} MB)", a.name, a.vendor, a.memory_bytes >> 20))
+        .unwrap_or_else(|| "not identified".into());
+    let context = vec![
+        (
+            "Manager".to_string(),
+            app_handle.package_info().version.to_string(),
+        ),
+        (
+            "System".to_string(),
+            format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),
+        ),
+        ("Graphics card".to_string(), adapter),
+    ];
+    let written = with_app!(state, |app| app
+        .write_diagnostics(std::path::Path::new(&path), &context))?;
+    Ok(written.to_string_lossy().into_owned())
+}
+
 #[tauri::command]
 fn set_library_root(
     state: tauri::State<'_, AppState>,
@@ -665,6 +692,7 @@ pub fn run() {
             assign_group,
             set_auto_apply,
             folders,
+            collect_diagnostics,
             conflicts,
             index_mod_assets,
             set_library_root,

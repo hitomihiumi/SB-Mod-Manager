@@ -25,6 +25,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+zip = "4.2.0"
 
 [dev-dependencies]
 sbmm-vfs.workspace = true
@@ -33,4 +34,3 @@ sbmm-upscaler.workspace = true
 sbmm-nexus.workspace = true
 sbmm-store.workspace = true
 tempfile = { workspace = true }
-zip = "4.2.0"

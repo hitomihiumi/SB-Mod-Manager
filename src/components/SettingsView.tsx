@@ -9,6 +9,7 @@ import { ipc, type Folders, type UpdateChannel, type UpdateInfo } from "../lib/i
 import { useApp } from "../store/useApp";
 import { Button, Checkbox, Section } from "./ui";
 import { DeploymentSection } from "./DeploymentSection";
+import { DiagnosticsSection } from "./DiagnosticsSection";
 import { FramegenSection } from "./FramegenSection";
 import { UpscalerSection } from "./UpscalerSection";
 
@@ -152,6 +153,8 @@ export function SettingsView() {
             <PathRow label="Backups of replaced game files" path={folders?.backups} />
           </div>
         </Section>
+
+        <DiagnosticsSection />
 
         <Section title="About" hint="">
           <p className="text-[12px] leading-relaxed text-ink-muted">

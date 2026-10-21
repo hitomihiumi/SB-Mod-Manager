@@ -1453,3 +1453,47 @@ fn mods_installed_before_the_index_existed_are_caught_up() {
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {
     haystack.windows(needle.len()).any(|w| w == needle)
 }
+
+/// The diagnostics bundle holds a summary of the setup and the logs that
+/// exist, so a bug report needs one attachment rather than a hunt by path.
+#[test]
+fn a_diagnostics_bundle_carries_the_setup_and_the_logs() {
+    use std::io::Read;
+
+    let mut fx = Fixture::new();
+    let outfit = fx.install_folder("Outfit", &[("Outfit_P.pak", "outfit")]);
+    fx.app.set_enabled(&[outfit], true).unwrap();
+    fx.app.apply().unwrap();
+
+    let vfs = fx.app.vfs_dir();
+    fs::create_dir_all(&vfs).unwrap();
+    fs::write(vfs.join("launch.log"), "FAILED: hook not loaded\n").unwrap();
+    let framegen_logs = fx.game.join("SB/Binaries/Win64/dlssg_sm86/logs");
+    fs::create_dir_all(&framegen_logs).unwrap();
+    fs::write(framegen_logs.join("loader_1.jsonl"), "{}\n").unwrap();
+
+    let dest = fx.source.join("diagnostics.zip");
+    fx.app
+        .write_diagnostics(&dest, &[("Manager".into(), "0.2.0".into())])
+        .unwrap();
+
+    let mut zip = zip::ZipArchive::new(fs::File::open(&dest).unwrap()).unwrap();
+    let mut read = |name: &str| {
+        let mut text = String::new();
+        zip.by_name(name)
+            .unwrap()
+            .read_to_string(&mut text)
+            .unwrap();
+        text
+    };
+    let summary = read("summary.txt");
+    assert!(summary.contains("Manager: 0.2.0"));
+    assert!(summary.contains("Deployment: hard links"));
+    assert!(summary.contains("[x]") && summary.contains("Outfit"));
+    assert_eq!(read("vfs/launch.log"), "FAILED: hook not loaded\n");
+    assert_eq!(read("framegen/loader_1.jsonl"), "{}\n");
+    assert!(
+        zip.by_name("vfs/hook.log").is_err(),
+        "a log that was never written is left out, not faked"
+    );
+}
