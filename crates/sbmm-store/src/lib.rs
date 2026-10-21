@@ -20,6 +20,10 @@ pub enum StoreError {
     Encode(#[from] serde_json::Error),
     #[error("no mod with id {0}")]
     UnknownMod(i64),
+    #[error("no profile with id {0}")]
+    UnknownProfile(i64),
+    #[error("the active profile, or the only one left, cannot be deleted")]
+    ProfileInUse,
 }
 
 type Result<T> = std::result::Result<T, StoreError>;
@@ -54,6 +58,10 @@ pub struct ModRecord {
     pub update_checked_at: Option<String>,
     /// Set once the mod's containers have been read for their asset list.
     pub assets_indexed_at: Option<String>,
+    /// The variant options chosen at install, as a JSON list of labels.
+    pub variant_choice: Option<String>,
+    /// The user's own labels.
+    pub tags: Vec<String>,
 }
 
 /// An asset more than one mod provides.
@@ -103,6 +111,16 @@ pub struct NewMod {
     pub image_path: Option<String>,
 }
 
+/// A named set of enabled mods and a load order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileRecord {
+    pub id: i64,
+    pub name: String,
+    pub active: bool,
+    pub enabled_count: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GroupRecord {
@@ -111,6 +129,31 @@ pub struct GroupRecord {
     pub color: Option<String>,
     pub sort_index: i64,
     pub collapsed: bool,
+}
+
+/// One mod's place in a restore point.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PointEntry {
+    pub mod_id: i64,
+    pub enabled: bool,
+    pub priority: i64,
+}
+
+/// A profile's enabled set and load order at one moment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestorePointRecord {
+    pub id: i64,
+    pub profile_id: i64,
+    /// UTC, ISO 8601.
+    pub created_at: String,
+    pub label: String,
+    /// Taken by the manager rather than asked for.
+    pub automatic: bool,
+    /// The game build at the time, when it was known.
+    pub game_build: Option<String>,
+    pub entries: Vec<PointEntry>,
 }
 
 pub struct Store {
@@ -154,6 +197,12 @@ impl Store {
         Ok(())
     }
 
+    pub fn delete_setting(&self, key: &str) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM settings WHERE key = ?1", [key])?;
+        Ok(())
+    }
+
     // -- profiles ----------------------------------------------------------
 
     pub fn active_profile(&self) -> Result<i64> {
@@ -162,6 +211,99 @@ impl Store {
             [],
             |r| r.get(0),
         )?)
+    }
+
+    pub fn list_profiles(&self) -> Result<Vec<ProfileRecord>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT p.id, p.name, p.active,
+                    (SELECT COUNT(*) FROM profile_mods pm
+                      WHERE pm.profile_id = p.id AND pm.enabled = 1)
+             FROM profiles p ORDER BY p.id",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(ProfileRecord {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                active: r.get::<_, i64>(2)? != 0,
+                enabled_count: r.get(3)?,
+            })
+        })?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// Add a profile, taking its load order from `copy_from` (or the active
+    /// profile). With `copy_enabled` the enabled set comes along too, which
+    /// is a duplicate; without it every mod starts disabled, which is a fresh
+    /// profile that still knows the order the user arranged.
+    pub fn create_profile(
+        &mut self,
+        name: &str,
+        copy_from: Option<i64>,
+        copy_enabled: bool,
+    ) -> Result<i64> {
+        let source = match copy_from {
+            Some(id) => id,
+            None => self.active_profile()?,
+        };
+        let tx = self.conn.transaction()?;
+        tx.execute(
+            "INSERT INTO profiles (name, active) VALUES (?1, 0)",
+            [name.trim()],
+        )?;
+        let id = tx.last_insert_rowid();
+        // Every mod gets a row, so the new profile has a full, gap-free order
+        // even for mods the source profile never had a row for.
+        tx.execute(
+            "INSERT INTO profile_mods (profile_id, mod_id, enabled, priority)
+             SELECT ?1, m.id,
+                    CASE WHEN ?3 THEN COALESCE(pm.enabled, 0) ELSE 0 END,
+                    COALESCE(pm.priority, 1000000 + m.id)
+             FROM mods m
+             LEFT JOIN profile_mods pm ON pm.mod_id = m.id AND pm.profile_id = ?2",
+            params![id, source, copy_enabled],
+        )?;
+        tx.commit()?;
+        Ok(id)
+    }
+
+    pub fn rename_profile(&self, id: i64, name: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE profiles SET name = ?2 WHERE id = ?1",
+            params![id, name.trim()],
+        )?;
+        Ok(())
+    }
+
+    /// Delete a profile. The active profile and the last one left are
+    /// refused: something has to describe what the game folder holds.
+    pub fn delete_profile(&self, id: i64) -> Result<()> {
+        let (active, count): (i64, i64) = self.conn.query_row(
+            "SELECT (SELECT active FROM profiles WHERE id = ?1),
+                    (SELECT COUNT(*) FROM profiles)",
+            [id],
+            |r| Ok((r.get::<_, Option<i64>>(0)?.unwrap_or(0), r.get(1)?)),
+        )?;
+        if active != 0 || count <= 1 {
+            return Err(StoreError::ProfileInUse);
+        }
+        self.conn
+            .execute("DELETE FROM profiles WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    /// Make `id` the profile every per-mod query reads from.
+    pub fn set_active_profile(&mut self, id: i64) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        let exists: i64 =
+            tx.query_row("SELECT COUNT(*) FROM profiles WHERE id = ?1", [id], |r| {
+                r.get(0)
+            })?;
+        if exists == 0 {
+            return Err(StoreError::UnknownProfile(id));
+        }
+        tx.execute("UPDATE profiles SET active = (id = ?1)", [id])?;
+        tx.commit()?;
+        Ok(())
     }
 
     // -- mods --------------------------------------------------------------
@@ -188,18 +330,16 @@ impl Store {
         )?;
         let id = self.conn.last_insert_rowid();
 
-        // New mods start disabled at the end of the load order, so installing
-        // never changes what the game currently loads.
-        let profile = self.active_profile()?;
-        let next_priority: i64 = self.conn.query_row(
-            "SELECT COALESCE(MAX(priority), 0) + 10 FROM profile_mods WHERE profile_id = ?1",
-            [profile],
-            |r| r.get(0),
-        )?;
+        // New mods start disabled at the end of the load order — in every
+        // profile, so installing never changes what any profile loads and a
+        // mod never turns up at the top of another profile's order.
         self.conn.execute(
             "INSERT INTO profile_mods (profile_id, mod_id, enabled, priority)
-             VALUES (?1, ?2, 0, ?3)",
-            params![profile, id, next_priority],
+             SELECT p.id, ?1, 0,
+                    (SELECT COALESCE(MAX(priority), 0) + 10
+                       FROM profile_mods WHERE profile_id = p.id)
+             FROM profiles p",
+            [id],
         )?;
         Ok(id)
     }
@@ -211,7 +351,8 @@ impl Store {
                     m.nexus_mod_id, m.nexus_file_id, m.group_id, m.primary_type,
                     m.size_bytes, m.image_path, m.notes, m.installed_at,
                     COALESCE(pm.enabled, 0), COALESCE(pm.priority, 0),
-                    m.latest_version, m.update_checked_at, m.assets_indexed_at
+                    m.latest_version, m.update_checked_at, m.assets_indexed_at,
+                    m.variant_choice, m.tags
              FROM mods m
              LEFT JOIN profile_mods pm
                     ON pm.mod_id = m.id AND pm.profile_id = ?1
@@ -237,9 +378,47 @@ impl Store {
                 latest_version: row.get(15)?,
                 update_checked_at: row.get(16)?,
                 assets_indexed_at: row.get(17)?,
+                variant_choice: row.get(18)?,
+                tags: serde_json::from_str(&row.get::<_, String>(19)?).unwrap_or_default(),
             })
         })?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// The user's note on a mod; empty clears it.
+    pub fn set_notes(&self, mod_id: i64, notes: Option<&str>) -> Result<()> {
+        self.update_mod(mod_id, "notes", notes)
+    }
+
+    /// The mod's picture, relative to its staging folder.
+    pub fn set_image(&self, mod_id: i64, image: Option<&str>) -> Result<()> {
+        self.update_mod(mod_id, "image_path", image)
+    }
+
+    pub fn set_tags(&self, mod_id: i64, tags: &[String]) -> Result<()> {
+        let json = serde_json::to_string(tags)?;
+        self.update_mod(mod_id, "tags", Some(&json))
+    }
+
+    fn update_mod(&self, mod_id: i64, column: &str, value: Option<&str>) -> Result<()> {
+        // `column` is one of the fixed names above, never user input.
+        let changed = self.conn.execute(
+            &format!("UPDATE mods SET {column} = ?2 WHERE id = ?1"),
+            params![mod_id, value],
+        )?;
+        if changed == 0 {
+            return Err(StoreError::UnknownMod(mod_id));
+        }
+        Ok(())
+    }
+
+    /// Remember which variants of its archive a mod was installed with.
+    pub fn set_variant_choice(&self, mod_id: i64, choice: Option<&str>) -> Result<()> {
+        self.conn.execute(
+            "UPDATE mods SET variant_choice = ?2 WHERE id = ?1",
+            params![mod_id, choice],
+        )?;
+        Ok(())
     }
 
     /// Record what a Nexus update check found for one mod.
@@ -622,6 +801,80 @@ impl Store {
         Ok(())
     }
 
+    // -- restore points ----------------------------------------------------
+
+    pub fn add_restore_point(
+        &self,
+        profile_id: i64,
+        label: &str,
+        automatic: bool,
+        game_build: Option<&str>,
+        entries: &[PointEntry],
+    ) -> Result<i64> {
+        self.conn.execute(
+            "INSERT INTO restore_points (profile_id, label, automatic, game_build, state)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                profile_id,
+                label,
+                automatic as i64,
+                game_build,
+                serde_json::to_string(entries)?
+            ],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// A profile's points, newest first.
+    pub fn restore_points(&self, profile_id: i64) -> Result<Vec<RestorePointRecord>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, profile_id, created_at, label, automatic, game_build, state
+             FROM restore_points WHERE profile_id = ?1 ORDER BY id DESC",
+        )?;
+        let rows = stmt.query_map([profile_id], |r| {
+            Ok((
+                RestorePointRecord {
+                    id: r.get(0)?,
+                    profile_id: r.get(1)?,
+                    created_at: r.get(2)?,
+                    label: r.get(3)?,
+                    automatic: r.get::<_, i64>(4)? != 0,
+                    game_build: r.get(5)?,
+                    entries: Vec::new(),
+                },
+                r.get::<_, String>(6)?,
+            ))
+        })?;
+        let mut points = Vec::new();
+        for row in rows {
+            let (mut point, state) = row?;
+            point.entries = serde_json::from_str(&state)?;
+            points.push(point);
+        }
+        Ok(points)
+    }
+
+    pub fn delete_restore_point(&self, id: i64) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM restore_points WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    /// Keep only the newest `keep` automatic points of a profile; the ones the
+    /// user made stay until deleted.
+    pub fn prune_automatic_points(&self, profile_id: i64, keep: usize) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM restore_points
+             WHERE profile_id = ?1 AND automatic = 1 AND id NOT IN (
+                 SELECT id FROM restore_points
+                 WHERE profile_id = ?1 AND automatic = 1
+                 ORDER BY id DESC LIMIT ?2
+             )",
+            params![profile_id, keep as i64],
+        )?;
+        Ok(())
+    }
+
     // -- learned detection overrides ---------------------------------------
 
     pub fn remember_detection(&self, pattern: &str, mod_type: &str) -> Result<()> {
@@ -662,6 +915,66 @@ mod tests {
             size_bytes: 42,
             image_path: None,
         }
+    }
+
+    #[test]
+    fn notes_tags_and_pictures_are_kept_on_the_mod() {
+        let store = Store::open_in_memory().unwrap();
+        let id = store.insert_mod(&sample("Alpha")).unwrap();
+        assert!(store.list_mods().unwrap()[0].tags.is_empty());
+
+        store
+            .set_notes(id, Some("Needs the physics patch"))
+            .unwrap();
+        store.set_image(id, Some("images/cover.png")).unwrap();
+        store
+            .set_tags(id, &["outfit".to_string(), "nsfw".to_string()])
+            .unwrap();
+        let mod_ = &store.list_mods().unwrap()[0];
+        assert_eq!(mod_.notes.as_deref(), Some("Needs the physics patch"));
+        assert_eq!(mod_.image_path.as_deref(), Some("images/cover.png"));
+        assert_eq!(mod_.tags, ["outfit", "nsfw"]);
+
+        store.set_notes(id, None).unwrap();
+        assert_eq!(store.list_mods().unwrap()[0].notes, None);
+        assert!(store.set_notes(999, Some("x")).is_err());
+    }
+
+    #[test]
+    fn restore_points_round_trip_and_only_automatic_ones_are_pruned() {
+        let store = Store::open_in_memory().unwrap();
+        let profile = store.active_profile().unwrap();
+        let entries = vec![PointEntry {
+            mod_id: 7,
+            enabled: true,
+            priority: 10,
+        }];
+        let mine = store
+            .add_restore_point(
+                profile,
+                "Before the big update",
+                false,
+                Some("1870"),
+                &entries,
+            )
+            .unwrap();
+        for n in 0..5 {
+            store
+                .add_restore_point(profile, &format!("Applied {n}"), true, None, &entries)
+                .unwrap();
+        }
+        store.prune_automatic_points(profile, 2).unwrap();
+
+        let points = store.restore_points(profile).unwrap();
+        let labels: Vec<_> = points.iter().map(|p| p.label.as_str()).collect();
+        assert_eq!(labels, ["Applied 4", "Applied 3", "Before the big update"]);
+        let kept = points.iter().find(|p| p.id == mine).unwrap();
+        assert_eq!(kept.entries, entries);
+        assert_eq!(kept.game_build.as_deref(), Some("1870"));
+        assert!(kept.created_at.ends_with('Z'));
+
+        store.delete_restore_point(mine).unwrap();
+        assert_eq!(store.restore_points(profile).unwrap().len(), 2);
     }
 
     #[test]

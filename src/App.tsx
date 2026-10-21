@@ -7,12 +7,14 @@ import {
   Boxes,
   CheckCircle2,
   Download,
+  FolderTree,
   Layers,
   ListOrdered,
   Loader2,
   Play,
   Settings,
   Swords,
+  Wrench,
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -20,6 +22,7 @@ import { useEffect, useState } from "react";
 import { CollectionsView } from "./components/CollectionsView";
 import { ConflictsView } from "./components/ConflictsView";
 import { DownloadsView } from "./components/DownloadsView";
+import { FilesView } from "./components/FilesView";
 import { InstallDialog } from "./components/InstallDialog";
 import { LoadOrderView } from "./components/LoadOrderView";
 import { ModsView } from "./components/ModsView";
@@ -27,13 +30,14 @@ import { SettingsView } from "./components/SettingsView";
 import { SetupWizard } from "./components/SetupWizard";
 import { TitleBar } from "./components/TitleBar";
 import { Button } from "./components/ui";
-import { ipc, type QueueItem } from "./lib/ipc";
+import { ipc, type QueueItem, type StagedInstall } from "./lib/ipc";
 import { useApp, type View } from "./store/useApp";
 
 const NAV: { id: View; label: string; icon: typeof Layers }[] = [
   { id: "mods", label: "Mods", icon: Layers },
   { id: "order", label: "Load order", icon: ListOrdered },
   { id: "conflicts", label: "Conflicts", icon: Swords },
+  { id: "files", label: "Files", icon: FolderTree },
   { id: "downloads", label: "Downloads", icon: Download },
   { id: "collections", label: "Collections", icon: Boxes },
   { id: "settings", label: "Settings", icon: Settings },
@@ -94,11 +98,18 @@ export default function App() {
           `${event.payload.name}: press “Mod Manager Download” on the page that just opened.`,
         );
       }),
+      // A download holding several versions waits in the same queue as a
+      // dropped archive that needs a choice.
+      listen<StagedInstall>("download-needs-choice", (event) => {
+        useApp.getState().enqueueStaged(event.payload);
+      }),
       listen<[string, string]>("download-install-failed", (event) => {
         const [name, reason] = event.payload;
         toast("error", name ? `${name}: ${reason}` : reason);
       }),
       listen<[string, string]>("nxm-rejected", (event) => toast("error", event.payload[1])),
+      // A shortcut or a second start asked for a profile or the game.
+      listen("notices", () => void useApp.getState().takeNotices()),
       // A collection link from the browser goes to the collections screen,
       // which looks it up on arrival.
       listen<{ slug: string }>("nxm-collection", (event) => {
@@ -172,6 +183,7 @@ export default function App() {
             {view === "mods" && <ModsView onAdd={pickFiles} />}
             {view === "order" && <LoadOrderView />}
             {view === "conflicts" && <ConflictsView />}
+            {view === "files" && <FilesView />}
             {view === "downloads" && <DownloadsView />}
             {view === "collections" && <CollectionsView />}
             {view === "settings" && <SettingsView />}
@@ -211,6 +223,7 @@ export default function App() {
 function ApplyBar() {
   const snapshot = useApp((s) => s.snapshot);
   const applyChanges = useApp((s) => s.applyChanges);
+  const repairDrift = useApp((s) => s.repairDrift);
 
   const pending = snapshot?.pending ?? [];
   const drift = snapshot?.drift ?? [];
@@ -239,9 +252,21 @@ function ApplyBar() {
         </>
       )}
       <div className="ml-auto" />
-      <Button variant="primary" size="sm" onClick={() => void applyChanges()}>
-        <CheckCircle2 size={13} /> Apply
-      </Button>
+      {drift.length > 0 && (
+        <Button
+          variant="outline"
+          size="sm"
+          title="Put the mods' files back. Whatever replaced them is kept: settings edits join the mod, anything else is restored when the mod is disabled."
+          onClick={() => void repairDrift()}
+        >
+          <Wrench size={13} /> Repair
+        </Button>
+      )}
+      {pending.length > 0 && (
+        <Button variant="primary" size="sm" onClick={() => void applyChanges()}>
+          <CheckCircle2 size={13} /> Apply
+        </Button>
+      )}
     </div>
   );
 }

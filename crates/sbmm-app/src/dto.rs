@@ -24,6 +24,117 @@ pub struct AppSnapshot {
     pub discord_rpc: bool,
     /// How enabled mods reach the game.
     pub deployment_mode: DeploymentMode,
+    /// Every profile, the active one marked.
+    pub profiles: Vec<sbmm_store::ProfileRecord>,
+    /// What the game created under the virtual file system.
+    pub overwrite: OverwriteView,
+    /// Whether UE4SS will be loaded, and which mods need it.
+    pub ue4ss: Ue4ssStatus,
+    /// The game changed build since the user last acknowledged it.
+    pub game_update: Option<GameUpdate>,
+}
+
+/// The game was updated under the mods.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GameUpdate {
+    pub previous: sbmm_game::GameBuild,
+    pub current: sbmm_game::GameBuild,
+    /// Deployed files the update replaced or removed.
+    pub drifted: usize,
+}
+
+/// What putting drifted files back did.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepairReport {
+    /// Removed files linked in again.
+    pub relinked: usize,
+    /// Files replaced by something else, now kept as the backup.
+    pub displaced: usize,
+    /// Settings files edited in the game folder, the edit taken into the mod.
+    pub adopted: usize,
+    /// Files changed through the link; only the record was updated.
+    pub recorded: usize,
+    pub failed: Vec<ApplyFailure>,
+}
+
+/// A restore point as the settings list shows it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestorePointView {
+    pub id: i64,
+    /// UTC, ISO 8601.
+    pub created_at: String,
+    pub label: String,
+    pub automatic: bool,
+    pub game_build: Option<String>,
+    /// Mods enabled at the time.
+    pub enabled: usize,
+    /// Of those, how many have been uninstalled since and cannot come back.
+    pub uninstalled: usize,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreReport {
+    pub applied: ApplyReport,
+    /// Mods the point had enabled that are no longer installed.
+    pub uninstalled: usize,
+}
+
+/// The game's saves and their backups.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavesView {
+    /// Where the saves are looked for; `None` off Windows with no choice made.
+    pub dir: Option<String>,
+    /// The folder was chosen by the user rather than the default.
+    pub custom_dir: bool,
+    pub exists: bool,
+    /// Files in the saves folder now.
+    pub files: usize,
+    pub backup_on_launch: bool,
+    /// Newest first.
+    pub backups: Vec<SaveBackupView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveBackupView {
+    /// The file name, which is also its id.
+    pub file: String,
+    /// Seconds since the Unix epoch.
+    pub created_at: u64,
+    /// `auto`, `manual` or `before-restore`.
+    pub kind: String,
+    pub bytes: u64,
+}
+
+/// UE4SS at a glance.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Ue4ssStatus {
+    /// `missing`, `disabled` (installed as a mod but switched off), `managed`
+    /// (installed as a mod and enabled) or `manual` (in the game folder,
+    /// put there by hand).
+    pub state: String,
+    /// The UE4SS mod, when the manager installed it.
+    pub mod_id: Option<i64>,
+    pub version: Option<String>,
+    /// Enabled mods that do nothing without UE4SS.
+    pub needed_by: Vec<String>,
+    /// Where the Stellar Blade build comes from.
+    pub project_url: String,
+}
+
+/// The overwrite folder at a glance.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OverwriteView {
+    pub path: String,
+    pub files: u32,
+    pub bytes: i64,
 }
 
 /// How enabled mods reach the game.
@@ -70,6 +181,50 @@ pub struct ModView {
     /// Set only when Nexus reports a version different from the installed one.
     pub latest_version: Option<String>,
     pub nexus_mod_id: Option<i64>,
+    /// Loose files this mod shares with other enabled mods. `None` when it
+    /// shares none, or is disabled.
+    pub file_conflicts: Option<FileConflicts>,
+    /// What this enabled mod needs and the game will not have, e.g. `UE4SS`.
+    pub missing_requirements: Vec<String>,
+    /// Its folder in the library, which pictures are read from.
+    pub folder: String,
+    /// The mod's picture, relative to `folder`.
+    pub image: Option<String>,
+    pub notes: Option<String>,
+    pub tags: Vec<String>,
+}
+
+/// One settings file in the editor's list.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigFileView {
+    /// Relative to the mod's folder or the game's settings folder.
+    pub path: String,
+    pub bytes: u64,
+    /// Differs from the copy it was installed (or first found) as.
+    pub edited: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigText {
+    pub text: String,
+    /// The file as installed or first found, to reset to; `None` when no
+    /// copy was kept (mods installed before copies were).
+    pub original: Option<String>,
+}
+
+/// How a mod's loose files fare against the other enabled mods — the flags
+/// Mod Organizer 2 shows beside each mod.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileConflicts {
+    /// Paths it provides over a mod earlier in the load order.
+    pub wins: u32,
+    /// Paths a mod later in the load order takes from it.
+    pub loses: u32,
+    /// Every file it has is taken by later mods, so it does nothing at all.
+    pub redundant: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -158,8 +313,32 @@ pub struct StagedInstall {
     pub suggested_name: String,
     pub components: Vec<DetectedComponent>,
     pub size_bytes: i64,
-    /// True when at least one component needs the user to pick a type.
+    /// True when the user has to be asked: a component whose type could not
+    /// be worked out, or an archive offering several versions.
     pub needs_confirmation: bool,
+    /// The versions the archive offers, when it is several mods in one.
+    pub variants: Option<sbmm_core::VariantChoice>,
+    /// The options chosen when this mod was installed before, to preselect.
+    pub remembered_variants: Vec<String>,
+    /// The archive's FOMOD installer, when it has one.
+    pub fomod: Option<FomodView>,
+    /// Pictures in the archive, relative to the staging folder, previews
+    /// first — shown while the user decides.
+    pub previews: Vec<String>,
+}
+
+/// A FOMOD installer ready to run in the install dialog.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FomodView {
+    /// The folder holding `fomod/`, relative to the staging folder, which
+    /// every path in the installer — pictures included — is relative to.
+    pub root: String,
+    pub installer: sbmm_core::fomod::Fomod,
+    /// What to tick when the wizard opens, as `[step, group, option]`.
+    pub selection: Vec<[usize; 3]>,
+    /// True when `selection` is the user's choice from last time.
+    pub remembered: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -226,4 +405,37 @@ pub struct FramegenInstall {
     pub proxy: sbmm_upscaler::framegen::Proxy,
     /// False when the user switched it off in the mod list.
     pub enabled: bool,
+}
+
+/// One entry in the virtual file tree, in the manner of Mod Organizer 2's
+/// "Data" tab: the game folder as the enabled mods make it, with who provides
+/// each file and who it hides.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VfsEntry {
+    pub name: String,
+    pub is_dir: bool,
+    /// Game-relative path of this entry, for navigating into a folder.
+    pub path: String,
+    /// What provides the winning version: a mod's name, "Game", "Overwrite"
+    /// or the generated UE4SS list.
+    pub provided_by: String,
+    /// `mod`, `game`, `overwrite` or `generated`.
+    pub origin: String,
+    /// The mod's id, when a mod provides it, so the UI can jump to it.
+    pub mod_id: Option<i64>,
+    /// Other providers of the same path, hidden beneath the winner, the next
+    /// in line first. A non-empty list is a conflict.
+    pub shadowed_by: Vec<String>,
+    /// The real file on disk the winning version comes from, for opening it.
+    pub source: Option<String>,
+}
+
+/// A directory of the virtual file tree.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VfsListing {
+    /// The game-relative directory shown. Empty is the game root.
+    pub dir: String,
+    pub entries: Vec<VfsEntry>,
 }

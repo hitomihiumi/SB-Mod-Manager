@@ -29,6 +29,7 @@ sbmm-archive = { path = "../crates/sbmm-archive" }
 sbmm-core = { path = "../crates/sbmm-core" }
 sbmm-game = { path = "../crates/sbmm-game" }
 sbmm-nexus = { path = "../crates/sbmm-nexus" }
+sbmm-shell = { path = "../crates/sbmm-shell" }
 sbmm-upscaler = { path = "../crates/sbmm-upscaler" }
 sbmm-vfs = { path = "../crates/sbmm-vfs" }
 

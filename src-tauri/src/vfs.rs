@@ -6,14 +6,48 @@
 
 use std::path::{Path, PathBuf};
 
-use sbmm_app::dto::{ApplyReport, DeploymentMode};
+use sbmm_app::dto::{ApplyReport, DeploymentMode, VfsEntry, VfsListing};
 use sbmm_game::InstallSource;
+use tauri::Manager;
 use tauri_plugin_opener::OpenerExt;
 
 use crate::{fail, AppState};
 
 /// Built by `build.rs` from `crates/sbmm-vfs-hook`. Empty off Windows.
 const HOOK: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/sbmm_vfs_hook.dll"));
+
+/// One directory of the virtual file tree, for the Files view.
+#[tauri::command]
+pub fn vfs_tree(
+    state: tauri::State<'_, AppState>,
+    dir: Option<String>,
+) -> Result<VfsListing, String> {
+    crate::with_app!(state, |app| app.vfs_tree(dir.as_deref().unwrap_or("")))
+}
+
+/// Every clashing path, or only those `mod_id` takes part in.
+#[tauri::command]
+pub fn vfs_conflicts(
+    state: tauri::State<'_, AppState>,
+    mod_id: Option<i64>,
+) -> Result<Vec<VfsEntry>, String> {
+    crate::with_app!(state, |app| app.vfs_conflicts(mod_id))
+}
+
+/// Move everything in overwrite into a new, enabled mod.
+#[tauri::command]
+pub fn create_mod_from_overwrite(
+    state: tauri::State<'_, AppState>,
+    name: String,
+) -> Result<i64, String> {
+    crate::with_app!(state, |app| app.create_mod_from_overwrite(&name))
+}
+
+/// Delete everything in overwrite; returns how many files went.
+#[tauri::command]
+pub fn clear_overwrite(state: tauri::State<'_, AppState>) -> Result<u32, String> {
+    crate::with_app!(state, |app| app.clear_overwrite())
+}
 
 #[tauri::command]
 pub fn set_deployment_mode(
@@ -26,22 +60,35 @@ pub fn set_deployment_mode(
 /// Start the game the way the current mode needs: through the virtual file
 /// system, or the ordinary way with the mods already in the folder.
 #[tauri::command]
-pub async fn launch_game(
-    app_handle: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
-) -> Result<String, String> {
+pub async fn launch_game(app_handle: tauri::AppHandle) -> Result<String, String> {
+    launch(&app_handle).await
+}
+
+/// The launch itself, shared by the Play button and the command line.
+pub async fn launch(app_handle: &tauri::AppHandle) -> Result<String, String> {
+    let state = app_handle.state::<AppState>();
     let (mode, game) = crate::with_app!(state, |app| app
         .deployment_mode()
         .and_then(|mode| Ok((mode, app.game()?))))?;
     let game = game.ok_or("choose the game folder first")?;
+    // A mod that goes wrong in game can take the saves with it.
+    crate::with_app!(state, |app| {
+        app.back_up_saves_before_launch();
+        Ok::<_, sbmm_app::AppError>(())
+    })?;
 
     if mode == DeploymentMode::Hardlink {
         // Steam's own launch keeps the overlay, cloud saves and playtime.
         if game.source == InstallSource::Steam {
             let url = format!("steam://rungameid/{}", sbmm_game::STEAM_APP_ID);
-            app_handle.opener().open_url(url, None::<&str>).map_err(fail)?;
+            app_handle
+                .opener()
+                .open_url(url, None::<&str>)
+                .map_err(fail)?;
         } else {
-            let exe = game.executable_path().ok_or("the game executable was not found")?;
+            let exe = game
+                .executable_path()
+                .ok_or("the game executable was not found")?;
             std::process::Command::new(&exe)
                 .current_dir(game.binaries_dir())
                 .spawn()
@@ -56,11 +103,17 @@ pub async fn launch_game(
     let vfs_dir = crate::with_app!(state, |app| Ok::<_, sbmm_app::AppError>(app.vfs_dir()))?;
     let hook = install_hook(&vfs_dir)?;
     let options = crate::with_app!(state, |app| app.launch_options(hook))?;
+    let log = vfs_dir.join("launch.log");
 
     let pid = tauri::async_runtime::spawn_blocking(move || sbmm_vfs::launch::launch(&options))
         .await
         .map_err(fail)?
-        .map_err(fail)?;
+        .map_err(|error| {
+            format!(
+                "{error}\nLaunch log: {}\nSettings → Diagnostics packs it with everything else.",
+                log.display()
+            )
+        })?;
     Ok(format!(
         "Started Stellar Blade under the virtual file system (process {pid})."
     ))
@@ -75,7 +128,9 @@ fn install_hook(vfs_dir: &Path) -> Result<PathBuf, String> {
     let path = vfs_dir.join("sbmm_vfs_hook.dll");
     if std::fs::read(&path).ok().as_deref() != Some(HOOK) {
         std::fs::write(&path, HOOK).map_err(|e| {
-            format!("could not update the virtual file system hook (is the game still running?): {e}")
+            format!(
+                "could not update the virtual file system hook (is the game still running?): {e}"
+            )
         })?;
     }
     Ok(path)

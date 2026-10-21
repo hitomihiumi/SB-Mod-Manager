@@ -62,13 +62,27 @@ fn detect_game_relative(entries: &[TreeEntry]) -> Vec<DetectedComponent> {
     // Bucket by destination. UE4SS mods additionally key on their folder name
     // so two bundled mods do not get merged into one.
     let mut buckets: BTreeMap<(ModType, Option<String>), Vec<TreeEntry>> = BTreeMap::new();
+    // A UE4SS distribution shipped as an `SB/` tree brings its own mods
+    // folder: those are part of the runtime and stay with it, switched on or
+    // off by the `mods.txt` it ships, rather than becoming mods of their own.
+    let ships_runtime = entries.iter().any(|e| e.file_name() == "ue4ss.dll");
 
     for entry in entries {
         let rel = match entry.norm.strip_prefix("sb/") {
             Some(r) => r,
             None => continue, // the bare `SB` directory entry itself
         };
-        let (mod_type, ue4ss_name) = classify_game_relative(rel, entry);
+        // The proxy that loads the runtime goes with it too, so switching
+        // UE4SS off takes the loader out of the game folder as well.
+        let part_of_runtime = rel.starts_with("binaries/win64/ue4ss/")
+            || (rel.starts_with("binaries/win64/")
+                && rel.matches('/').count() == 2
+                && paths::PROXY_DLLS.contains(&entry.file_name()));
+        let (mod_type, ue4ss_name) = if ships_runtime && part_of_runtime {
+            (ModType::Ue4ssFramework, None)
+        } else {
+            classify_game_relative(rel, entry)
+        };
         buckets
             .entry((mod_type, ue4ss_name))
             .or_default()
@@ -187,10 +201,19 @@ fn claim_ue4ss_framework(
         return;
     }
 
+    // Inside the runtime folder a `.txt` is configuration, not a readme:
+    // `Mods/mods.txt` switches the bundled mods on — BPModLoaderMod among
+    // them, without which no logic mod loads — and `load_order.txt` and
+    // `enabled.txt` belong to the mods beside them. Only outside it does a
+    // text file get the benefit of the doubt as documentation.
     let entries: Vec<TreeEntry> = tree
         .entries()
         .iter()
-        .filter(|e| !claimed.contains(&e.norm) && !is_junk(e))
+        .filter(|e| {
+            !claimed.contains(&e.norm)
+                && !is_system_junk(e)
+                && (e.segments().contains(&"ue4ss") || !is_junk(e))
+        })
         .cloned()
         .collect();
     if entries.is_empty() {

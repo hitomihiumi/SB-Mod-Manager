@@ -24,6 +24,24 @@ wrong is the usual reason a mod "doesn't work".
 - **Handles IoStore properly.** Stellar Blade is UE 4.26 with IoStore, so pak
   mods are `.pak`/`.utoc`/`.ucas` triplets that must share a base name and end
   in `_P`. Missing suffixes are fixed, incomplete sets are flagged.
+- **Asks which version, when an archive holds several.** Outfit mods often
+  ship `Black/`, `White/` and `Red/` in one archive, each a complete mod that
+  replaces the same files. Installing all of them means whichever loads last
+  wins, so the manager asks which to install — as Mod Organizer 2's installers
+  do — keeps only that, and remembers the answer: the next version of the same
+  mod, from Nexus or dropped in by hand, installs the same way without asking.
+  Folders that do not clash, like a pack of separate Lua mods, still install
+  together without a question. The pictures each version carries are shown
+  next to it, so the choice is made by looking rather than by folder name.
+- **Runs FOMOD installers.** An archive with `fomod/ModuleConfig.xml` opens as
+  a step-by-step wizard, the way Mod Organizer 2 runs one: option groups with
+  their rules (choose one, any, at least one), required and unavailable
+  options locked, steps and options that depend on earlier answers or on
+  files in the game folder shown and hidden as the script says, and the
+  picture and description of the option under the pointer beside the list.
+  Conditional file installs and priorities are honoured, the answers are
+  remembered for the next version of the mod, and the chosen picture becomes
+  the mod's preview.
 - **Load order that actually applies.** `~mods` is mounted alphanumerically, so
   priority is written into the deployed file names (`0010_Outfit_P.pak`) with
   every file of a set renamed together. Logic mods are left alone, because
@@ -93,6 +111,78 @@ wrong is the usual reason a mod "doesn't work".
 - **Updates itself** from GitHub releases, on either the stable or the nightly
   channel, with the download checked against a signature before anything is
   replaced.
+- **Knows when a mod needs UE4SS.** Lua, C++ and Blueprint logic mods do
+  nothing without UE4SS, and nothing on the outside says so. Every enabled
+  mod that needs it is flagged while the game will not load UE4SS, with one
+  button to install the build Stellar Blade needs — Chrisr0's fork of
+  RE-UE4SS, from its GitHub releases — and an update check after that.
+  Updating keeps your `UE4SS-settings.ini`, and UE4SS's own bundled mods
+  (BPModLoaderMod among them, which every logic mod relies on) stay switched
+  on under both deployment modes.
+- **Profiles.** Keep several setups — say, vanilla, cosmetics only and
+  everything — each with its own enabled mods and load order, and switch
+  between them from the mod list; the game folder is brought in line on the
+  spot. A new profile keeps the current order with nothing enabled; a
+  duplicate keeps the enabled set too.
+- **Edits settings files.** A mod's INI, JSON, Lua and other settings
+  files open in an editor from the mod's details panel — INI files as a
+  form, a field per setting with the comments above it as help, or as text.
+  The game's own INI files (`%LOCALAPPDATA%\SB\Saved\Config`) are edited
+  from Settings, in whatever encoding Unreal wrote them. Each file can be
+  reset to the copy it was installed (or first found) as.
+- **Keeps your settings across reinstalls.** Every mod's settings files are
+  kept as installed, so when frame generation or UE4SS is reinstalled or
+  updated, the values you changed in `dlssg_sm86.ini` or
+  `UE4SS-settings.ini` are carried into the new version's file — and only
+  those: settings you never touched take the new version's defaults.
+- **Notes, tags and a picture for every mod**, in the details panel that
+  opens when one mod is selected. Tags show in the list and the search box
+  finds mods by tag and note as well as name.
+- **Notices game updates.** The installed build is remembered — Steam's
+  build id, or the executable for other installs — and when it changes the
+  mod list says so, with how many modded files the update replaced or
+  removed, until it is acknowledged.
+- **Repairs files changed behind its back.** Deployed files that were
+  deleted or replaced are put back with one click, and nothing found in
+  their place is thrown away: a settings file edited in the game folder
+  becomes the mod's own copy, and a file a game update restored becomes the
+  one disabling the mod puts back — not the stale copy from before the
+  update.
+- **Restore points.** Every time changes reach the game, the profile's
+  enabled set and load order are kept (the last 30, plus any the user names),
+  and any of them can be gone back to. Going back keeps the setup being left
+  as a point too, so it can be undone.
+- **Save backups.** The saves folder (`%LOCALAPPDATA%\SB\Saved\SaveGames`,
+  or one chosen in Settings) is zipped before each launch when something in
+  it changed, and on request. Restoring one first backs up the saves it
+  replaces.
+- **Profile shortcuts and a command line.** As with Mod Organizer 2, a
+  shortcut on the desktop or in the Start menu can start the game with a
+  chosen profile without opening the manager:
+
+  ```text
+  sbmm.exe --profile "Cosmetics only" --launch
+  ```
+
+  `--profile` (`-p`) makes the profile active, `--launch` (`-l`) starts the
+  game; either works alone. Started only to launch, the manager stays hidden
+  and closes once the game is on its way; if anything stops it, the window
+  opens and says what. A manager that is already open takes the request
+  over. The profile shortcut dialog shows the exact command for this
+  install, to paste into Steam, Playnite or any other launcher.
+- **A Files view, like Mod Organizer 2's Data tab.** Browse the game folder as
+  the enabled mods make it: every file is labelled with the mod, the game or
+  the overwrite folder that provides it, and with the mods it hides. A
+  Conflicts mode lists every clashing path at once.
+- **Conflict flags in the mod list.** Beside each mod, as in Mod Organizer 2:
+  `+N` when it replaces files of earlier mods, `−N` when later mods replace
+  its own, both together, and *Redundant* when every file it has is replaced
+  so it does nothing. Clicking a flag shows exactly which files.
+- **Overwrite as a mod.** What the game creates under the virtual file system
+  is listed under the mod list; one click turns it into a mod of its own,
+  enabled where overwrite sat, so nothing the game sees changes.
+- **One-click diagnostics.** Settings → Diagnostics writes a zip with a
+  summary of the setup and every relevant log, for attaching to a report.
 - **Leaves nothing behind.** Every file written and every original displaced is
   recorded, so disabling everything restores the folder byte for byte —
   including removing directories and the `mods.txt` it created, while never
@@ -119,19 +209,15 @@ worth knowing before the first real run:
   whether the game will actually load the proxy, which is why the other proxy
   names are offered. Edits to `dlssg_sm86.ini` are replaced when the package
   is reinstalled or updated.
-
 - **The virtual file system is new.** Its rules are tested against real
-  deployments, and the hook and launcher are tested end to end under Wine
-  (`scripts/test-vfs-wine.sh`), but not yet against the game on Windows. The
+  deployments, and the hook and launcher run end to end on every push —
+  natively on Windows in CI, and under Wine with `scripts/test-vfs-wine.sh` —
+  with a stand-in for the game, but not yet against the game itself. The
   hook redirects the Win32 file functions through import tables; code that
   reaches the file system some other way — directly through `ntdll`, say —
   sees the real folder. A Steam install started this way is told its app id
   so it does not relaunch itself through Steam; an Epic install may need the
   Epic launcher running.
-
-Not built:
-
-- Profiles (the schema already stores state per profile)
 
 ## Building
 
@@ -221,6 +307,7 @@ runs on any machine — `src-tauri` is only command wrappers.
 | `sbmm-upscaler` | Finding DLSS/FSR DLLs, reading their PE version, GPU capability rules, vendor release catalogue; the RTX 20/30 frame generation package (`framegen`): compatibility check, release verification, proxy layout |
 | `sbmm-vfs` | The virtual file system: the layered view of the game folder, Mod Organizer's redirect and overwrite rules, the mapping file, and the launcher that starts the game with the hook |
 | `sbmm-vfs-hook` | The DLL loaded into the game: rewrites import tables so file calls are answered from the mapping |
+| `sbmm-shell` | The command line (`--profile`, `--launch`) and profile shortcuts, written through the Windows shell's link object |
 | `sbmm-app` | The application service the UI drives |
 | `src-tauri` | Tauri commands, window, bundling |
 
@@ -262,6 +349,9 @@ cargo test --workspace          # domain crates
 # The virtual file system end to end under Wine: real launcher, real hook, a
 # stand-in for the game (needs wine64, mingw-w64 and the windows-gnu target)
 scripts/test-vfs-wine.sh
+
+# Install the real Stellar Blade UE4SS release end to end (download it first)
+SBMM_UE4SS_ARCHIVE=/path/to/UE4SS_v3.1.0-6.zip cargo test -p sbmm-app --test lifecycle real_ue4ss
 
 # Check a real dlssg_for_sm86 release against the package rules (unpack it first)
 SBMM_SM86_PACKAGE=/path/to/unpacked cargo test -p sbmm-upscaler --test framegen_release

@@ -14,6 +14,7 @@ export type View =
   | "mods"
   | "order"
   | "conflicts"
+  | "files"
   | "downloads"
   | "collections"
   | "settings";
@@ -49,6 +50,8 @@ interface AppStore {
   toasts: Toast[];
 
   init: () => Promise<void>;
+  /** Show what a shortcut or command line did, and the state it left. */
+  takeNotices: () => Promise<void>;
   refresh: () => Promise<void>;
   refreshDownloads: () => Promise<void>;
   /** Apply a progress event without a round trip to the backend. */
@@ -60,16 +63,27 @@ interface AppStore {
   refreshConflicts: () => Promise<void>;
   reindexAssets: () => Promise<void>;
   setView: (view: View) => void;
+  /** The mod the Files view's conflict list is narrowed to, if any. */
+  conflictFocus: { modId: number; name: string } | null;
+  /** Open the Files view on the clashes one mod takes part in. */
+  showFileConflicts: (modId: number, name: string) => void;
+  setConflictFocus: (focus: { modId: number; name: string } | null) => void;
   setSearch: (search: string) => void;
   setSelection: (ids: number[]) => void;
 
   toggle: (ids: number[], enabled: boolean) => Promise<void>;
   reorder: (ids: number[]) => Promise<void>;
   applyChanges: () => Promise<void>;
+  /** Put deployed files changed outside the manager back. */
+  repairDrift: () => Promise<void>;
   uninstall: (id: number) => Promise<void>;
 
   stagePaths: (paths: string[]) => Promise<void>;
-  confirmInstall: (name: string, typeOverride?: ModTypeId) => Promise<void>;
+  confirmInstall: (name: string, typeOverride?: ModTypeId, variants?: string[]) => Promise<void>;
+  /** Install the staged FOMOD at the head of the queue, as the wizard was answered. */
+  confirmFomod: (name: string, selection: [number, number, number][]) => Promise<void>;
+  /** Ask about an install that arrived from elsewhere — a download that holds several versions. */
+  enqueueStaged: (staged: StagedInstall) => void;
   cancelInstall: () => Promise<void>;
   skipRemaining: () => Promise<void>;
 
@@ -83,6 +97,7 @@ let toastSeq = 0;
 export const useApp = create<AppStore>((set, get) => ({
   ready: false,
   view: "mods",
+  conflictFocus: null,
   snapshot: null,
   selection: [],
   search: "",
@@ -97,6 +112,19 @@ export const useApp = create<AppStore>((set, get) => ({
     await get().refresh();
     await get().refreshDownloads();
     set({ ready: true });
+    await get().takeNotices();
+  },
+
+  async takeNotices() {
+    try {
+      const notices = await ipc.takeNotices();
+      if (notices.length === 0) return;
+      // A profile switched from outside changes the whole list.
+      await get().refresh();
+      for (const notice of notices) get().toast(notice.kind, notice.message);
+    } catch (error) {
+      get().toast("error", String(error));
+    }
   },
 
   async refresh() {
@@ -190,6 +218,8 @@ export const useApp = create<AppStore>((set, get) => ({
   },
 
   setView: (view) => set({ view }),
+  showFileConflicts: (modId, name) => set({ view: "files", conflictFocus: { modId, name } }),
+  setConflictFocus: (conflictFocus) => set({ conflictFocus }),
   setSearch: (search) => set({ search }),
   setSelection: (selection) => set({ selection }),
 
@@ -242,6 +272,36 @@ export const useApp = create<AppStore>((set, get) => ({
     }
   },
 
+  async repairDrift() {
+    set({ busy: { label: "Repairing files", done: 0, total: 1 } });
+    try {
+      const report = await ipc.repairDrift();
+      const fixed = report.relinked + report.displaced + report.adopted + report.recorded;
+      if (report.failed.length > 0) {
+        get().toast(
+          "error",
+          `${report.failed.length} file(s) could not be repaired: ` +
+            report.failed.map((f) => `${f.name} — ${f.reason}`).join("; "),
+        );
+      } else {
+        const notes = [
+          report.displaced > 0 &&
+            `${report.displaced} replaced by the game kept as its own file again`,
+          report.adopted > 0 && `${report.adopted} settings edit${report.adopted === 1 ? "" : "s"} kept in the mod`,
+        ].filter(Boolean);
+        get().toast(
+          "success",
+          `Repaired ${fixed} file${fixed === 1 ? "" : "s"}${notes.length ? ` (${notes.join(", ")})` : ""}.`,
+        );
+      }
+      await get().refresh();
+    } catch (error) {
+      get().toast("error", String(error));
+    } finally {
+      set({ busy: null });
+    }
+  },
+
   async uninstall(id) {
     set({ busy: { label: "Removing", done: 0, total: 1 } });
     try {
@@ -285,7 +345,7 @@ export const useApp = create<AppStore>((set, get) => ({
     await get().refresh();
 
     if (installed > 0) {
-      const waiting = pending.length > 0 ? `, ${pending.length} need a type` : "";
+      const waiting = pending.length > 0 ? `, ${pending.length} need a choice` : "";
       const broke = failed > 0 ? `, ${failed} failed` : "";
       get().toast(
         "success",
@@ -294,12 +354,32 @@ export const useApp = create<AppStore>((set, get) => ({
     }
   },
 
-  async confirmInstall(name, typeOverride) {
+  async confirmFomod(name, selection) {
     const staged = get().queue[0];
     if (!staged) return;
     set({ busy: { label: name, done: 0, total: 1 } });
     try {
-      await ipc.confirmInstall(staged.stagingId, name, typeOverride);
+      await ipc.confirmInstallFomod(staged.stagingId, name, selection);
+      set((state) => ({ queue: state.queue.slice(1) }));
+      await get().refresh();
+      get().toast("success", `Installed ${name}.`);
+    } catch (error) {
+      get().toast("error", String(error));
+    } finally {
+      set({ busy: null });
+    }
+  },
+
+  enqueueStaged(staged) {
+    set((state) => ({ queue: [...state.queue, staged] }));
+  },
+
+  async confirmInstall(name, typeOverride, variants) {
+    const staged = get().queue[0];
+    if (!staged) return;
+    set({ busy: { label: name, done: 0, total: 1 } });
+    try {
+      await ipc.confirmInstall(staged.stagingId, name, typeOverride, variants);
       set((state) => ({ queue: state.queue.slice(1) }));
       await get().refresh();
       get().toast("success", `Installed ${name}.`);
@@ -369,5 +449,11 @@ export function visibleMods(snapshot: AppSnapshot | null, search: string): ModVi
   if (!snapshot) return [];
   const needle = search.trim().toLowerCase();
   if (!needle) return snapshot.mods;
-  return snapshot.mods.filter((m) => m.name.toLowerCase().includes(needle));
+  // Tags and notes are searched too, so a tag works as a filter.
+  return snapshot.mods.filter(
+    (m) =>
+      m.name.toLowerCase().includes(needle) ||
+      m.tags.some((tag) => tag.toLowerCase().includes(needle)) ||
+      (m.notes ?? "").toLowerCase().includes(needle),
+  );
 }
