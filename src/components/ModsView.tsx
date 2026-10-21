@@ -19,6 +19,7 @@ import { ipc, modPageUrl, MOD_TYPE_META, type GroupView, type ModView } from "..
 import { useApp, visibleMods } from "../store/useApp";
 import { OverwriteBar } from "./OverwriteBar";
 import { ProfileSwitcher } from "./ProfileSwitcher";
+import { Ue4ssBanner } from "./Ue4ssSection";
 import { Badge, Button, Checkbox, Empty } from "./ui";
 
 const ROW_HEIGHT = 38;
@@ -123,6 +124,8 @@ export function ModsView({ onAdd }: { onAdd: () => void }) {
           await refresh();
         }}
       />
+
+      <Ue4ssBanner />
 
       {rows.length === 0 ? (
         <Empty
@@ -395,6 +398,16 @@ function ModRow({
           <title>{mod.warnings.join("\n")}</title>
         </AlertTriangle>
       )}
+
+      {mod.missingRequirements.map((requirement) => (
+        <Badge
+          key={requirement}
+          tone="danger"
+          title={`This mod does nothing without ${requirement}, and the game will not load it. Install it from Settings.`}
+        >
+          Needs {requirement}
+        </Badge>
+      ))}
 
       {mod.fileConflicts && <FileConflictFlag mod={mod} />}
 

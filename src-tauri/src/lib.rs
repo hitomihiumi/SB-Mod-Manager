@@ -8,6 +8,7 @@ mod collections;
 mod discord;
 mod downloads;
 mod framegen;
+mod ue4ss;
 mod upscaler;
 mod vfs;
 
@@ -750,6 +751,8 @@ pub fn run() {
             vfs::vfs_conflicts,
             vfs::create_mod_from_overwrite,
             vfs::clear_overwrite,
+            ue4ss::ue4ss_latest,
+            ue4ss::install_ue4ss,
         ])
         .run(tauri::generate_context!())
         .expect("failed to start SB Mod Manager");

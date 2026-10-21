@@ -28,6 +28,25 @@ pub struct AppSnapshot {
     pub profiles: Vec<sbmm_store::ProfileRecord>,
     /// What the game created under the virtual file system.
     pub overwrite: OverwriteView,
+    /// Whether UE4SS will be loaded, and which mods need it.
+    pub ue4ss: Ue4ssStatus,
+}
+
+/// UE4SS at a glance.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Ue4ssStatus {
+    /// `missing`, `disabled` (installed as a mod but switched off), `managed`
+    /// (installed as a mod and enabled) or `manual` (in the game folder,
+    /// put there by hand).
+    pub state: String,
+    /// The UE4SS mod, when the manager installed it.
+    pub mod_id: Option<i64>,
+    pub version: Option<String>,
+    /// Enabled mods that do nothing without UE4SS.
+    pub needed_by: Vec<String>,
+    /// Where the Stellar Blade build comes from.
+    pub project_url: String,
 }
 
 /// The overwrite folder at a glance.
@@ -86,6 +105,8 @@ pub struct ModView {
     /// Loose files this mod shares with other enabled mods. `None` when it
     /// shares none, or is disabled.
     pub file_conflicts: Option<FileConflicts>,
+    /// What this enabled mod needs and the game will not have, e.g. `UE4SS`.
+    pub missing_requirements: Vec<String>,
 }
 
 /// How a mod's loose files fare against the other enabled mods — the flags

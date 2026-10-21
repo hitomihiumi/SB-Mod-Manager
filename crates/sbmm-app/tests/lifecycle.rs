@@ -1698,3 +1698,237 @@ fn clearing_overwrite_empties_it_and_keeps_the_folder() {
     assert!(overwrite.is_dir());
     assert!(fs::read_dir(&overwrite).unwrap().next().is_none());
 }
+
+/// A zip shaped like the Stellar Blade UE4SS release: a version-named wrapper
+/// around the proxy and the runtime, with UE4SS's own `mods.txt`.
+fn ue4ss_release(path: &Path, settings: &str) {
+    use std::io::Write;
+    let file = fs::File::create(path).unwrap();
+    let mut zip = zip::ZipWriter::new(file);
+    let options: zip::write::FileOptions<'_, ()> = zip::write::FileOptions::default();
+    for (name, contents) in [
+        ("UE4SS_v3.1.0-6/dwmapi.dll", "MZ proxy"),
+        ("UE4SS_v3.1.0-6/ue4ss/UE4SS.dll", "MZ runtime"),
+        ("UE4SS_v3.1.0-6/ue4ss/UE4SS-settings.ini", settings),
+        (
+            "UE4SS_v3.1.0-6/ue4ss/Mods/mods.txt",
+            "ActorDumperMod : 0\nBPModLoaderMod : 1\n",
+        ),
+        (
+            "UE4SS_v3.1.0-6/ue4ss/Mods/BPModLoaderMod/Scripts/main.lua",
+            "-- bpml",
+        ),
+        (
+            "UE4SS_v3.1.0-6/ue4ss/Mods/BPModLoaderMod/load_order.txt",
+            "",
+        ),
+        (
+            "UE4SS_v3.1.0-6/ue4ss/Mods/ActorDumperMod/Scripts/main.lua",
+            "-- dumper",
+        ),
+    ] {
+        zip.start_file(name, options).unwrap();
+        zip.write_all(contents.as_bytes()).unwrap();
+    }
+    zip.finish().unwrap();
+}
+
+/// A mod that needs UE4SS says so until UE4SS is there, and installing it
+/// keeps UE4SS's own bundled mods switched on beside the user's.
+#[test]
+fn a_mod_needing_ue4ss_is_flagged_until_ue4ss_is_installed() {
+    let mut fx = Fixture::new();
+    let skip = fx.install_folder(
+        "Cutscene Skip",
+        &[("CutsceneSkip/scripts/main.lua", "-- lua")],
+    );
+    let outfit = fx.install_folder("Outfit", &[("Outfit_P.pak", "outfit")]);
+    fx.app.set_enabled(&[skip, outfit], true).unwrap();
+
+    let snap = fx.app.snapshot().unwrap();
+    assert_eq!(snap.ue4ss.state, "missing");
+    assert_eq!(snap.ue4ss.needed_by, vec!["Cutscene Skip".to_string()]);
+    let missing = |snap: &sbmm_app::dto::AppSnapshot, id: i64| {
+        snap.mods
+            .iter()
+            .find(|m| m.id == id)
+            .unwrap()
+            .missing_requirements
+            .clone()
+    };
+    assert_eq!(missing(&snap, skip), vec!["UE4SS".to_string()]);
+    assert!(missing(&snap, outfit).is_empty(), "a pak needs nothing");
+
+    let archive = fx.source.join("UE4SS_v3.1.0-6.zip");
+    ue4ss_release(&archive, "[General]\nConsole=0\n");
+    fx.app.install_ue4ss(&archive, "3.1.0-6").unwrap();
+
+    let snap = fx.app.snapshot().unwrap();
+    assert_eq!(snap.ue4ss.state, "managed");
+    assert_eq!(snap.ue4ss.version.as_deref(), Some("3.1.0-6"));
+    assert!(missing(&snap, skip).is_empty());
+
+    let win64 = fx.game.join("SB/Binaries/Win64");
+    assert!(win64.join("dwmapi.dll").is_file());
+    assert!(win64.join("ue4ss/UE4SS.dll").is_file());
+    let mods_txt = fs::read_to_string(win64.join("ue4ss/Mods/mods.txt")).unwrap();
+    assert!(mods_txt.contains("BPModLoaderMod : 1"), "{mods_txt}");
+    assert!(mods_txt.contains("ActorDumperMod : 0"), "{mods_txt}");
+    assert!(mods_txt.contains("CutsceneSkip : 1"), "{mods_txt}");
+
+    // Switching the UE4SS mod off brings the warning back.
+    fx.app
+        .set_enabled(&[snap.ue4ss.mod_id.unwrap()], false)
+        .unwrap();
+    let snap = fx.app.snapshot().unwrap();
+    assert_eq!(snap.ue4ss.state, "disabled");
+    assert_eq!(missing(&snap, skip), vec!["UE4SS".to_string()]);
+}
+
+/// Updating replaces the previous install rather than stacking a second
+/// one, and keeps the user's UE4SS settings.
+#[test]
+fn updating_ue4ss_keeps_the_users_settings() {
+    let mut fx = Fixture::new();
+    let first = fx.source.join("first.zip");
+    ue4ss_release(&first, "[General]\nConsole=0\n");
+    let id = fx.app.install_ue4ss(&first, "3.1.0-5").unwrap();
+
+    // The user turns the console on, in the deployed file.
+    let settings = fx.game.join("SB/Binaries/Win64/ue4ss/UE4SS-settings.ini");
+    fs::write(&settings, "[General]\nConsole=1\n").unwrap();
+
+    let second = fx.source.join("second.zip");
+    ue4ss_release(&second, "[General]\nConsole=0\n");
+    let new_id = fx.app.install_ue4ss(&second, "3.1.0-6").unwrap();
+    assert_ne!(id, new_id);
+
+    assert_eq!(
+        fs::read_to_string(&settings).unwrap(),
+        "[General]\nConsole=1\n"
+    );
+    let ue4ss_mods: Vec<_> = fx
+        .app
+        .snapshot()
+        .unwrap()
+        .mods
+        .into_iter()
+        .filter(|m| m.source == "ue4ss")
+        .collect();
+    assert_eq!(ue4ss_mods.len(), 1);
+    assert_eq!(ue4ss_mods[0].version.as_deref(), Some("3.1.0-6"));
+}
+
+#[test]
+fn a_hand_placed_ue4ss_counts_and_a_wrong_archive_is_refused() {
+    let mut fx = Fixture::new();
+    let skip = fx.install_folder("Skip", &[("Skip/scripts/main.lua", "-- lua")]);
+    fx.app.set_enabled(&[skip], true).unwrap();
+
+    let dll = fx.game.join("SB/Binaries/Win64/ue4ss/UE4SS.dll");
+    fs::create_dir_all(dll.parent().unwrap()).unwrap();
+    fs::write(&dll, "MZ").unwrap();
+    let snap = fx.app.snapshot().unwrap();
+    assert_eq!(snap.ue4ss.state, "manual");
+    assert!(snap.mods.iter().all(|m| m.missing_requirements.is_empty()));
+
+    let not_ue4ss = fx.source.join("outfit.zip");
+    {
+        use std::io::Write;
+        let mut zip = zip::ZipWriter::new(fs::File::create(&not_ue4ss).unwrap());
+        let options: zip::write::FileOptions<'_, ()> = zip::write::FileOptions::default();
+        zip.start_file("Outfit_P.pak", options).unwrap();
+        zip.write_all(b"pak").unwrap();
+        zip.finish().unwrap();
+    }
+    let before = fx.app.snapshot().unwrap().mods.len();
+    assert!(fx.app.install_ue4ss(&not_ue4ss, "1.0").is_err());
+    assert_eq!(fx.app.snapshot().unwrap().mods.len(), before);
+}
+
+/// Under the virtual file system `mods.txt` is generated, and it has to start
+/// from UE4SS's own, or BPModLoaderMod — and with it every logic mod — would
+/// silently stop loading.
+#[test]
+fn the_generated_mods_txt_keeps_ue4ss_bundled_mods_switched_on() {
+    use sbmm_app::dto::DeploymentMode;
+
+    let mut fx = Fixture::new();
+    fx.app.set_deployment_mode(DeploymentMode::Virtual).unwrap();
+    let archive = fx.source.join("ue4ss.zip");
+    ue4ss_release(&archive, "");
+    fx.app.install_ue4ss(&archive, "3.1.0-6").unwrap();
+    let skip = fx.install_folder("Skip", &[("Skip/scripts/main.lua", "-- lua")]);
+    fx.app.set_enabled(&[skip], true).unwrap();
+
+    let vfs = sbmm_vfs::Mapping::load(&fx.app.write_vfs_mapping().unwrap())
+        .unwrap()
+        .into_vfs();
+    let path = sbmm_vfs::VPath::from_relative("SB/Binaries/Win64/ue4ss/Mods/mods.txt").unwrap();
+    let file = vfs.overlay().file(&path).unwrap();
+    assert_eq!(file.origin, sbmm_vfs::Origin::Generated);
+    let text = fs::read_to_string(&file.source).unwrap();
+    assert!(text.contains("BPModLoaderMod : 1"), "{text}");
+    assert!(text.contains("ActorDumperMod : 0"), "{text}");
+    assert!(text.contains("Skip : 1"), "{text}");
+    assert!(
+        !fx.game
+            .join("SB/Binaries/Win64/ue4ss/Mods/mods.txt")
+            .exists(),
+        "the real one is never written under the virtual file system"
+    );
+}
+
+/// With automatic apply off, installing UE4SS puts UE4SS in and nothing else
+/// the user has staged.
+#[test]
+fn installing_ue4ss_leaves_staged_changes_staged() {
+    let mut fx = Fixture::new();
+    fx.app.set_auto_apply(false).unwrap();
+    let outfit = fx.install_folder("Outfit", &[("Outfit_P.pak", "outfit")]);
+    fx.app.set_enabled(&[outfit], true).unwrap();
+
+    let archive = fx.source.join("ue4ss.zip");
+    ue4ss_release(&archive, "");
+    fx.app.install_ue4ss(&archive, "3.1.0-6").unwrap();
+
+    assert!(fx.game.join("SB/Binaries/Win64/ue4ss/UE4SS.dll").is_file());
+    assert!(!fx.game.join("SB/Content/Paks/~mods").exists());
+    let pending = fx.app.snapshot().unwrap().pending;
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].name, "Outfit");
+}
+
+/// The real Stellar Blade UE4SS release, installed end to end. The archive is
+/// not part of the suite: download `UE4SS_v3.1.0-6.zip` and point
+/// `SBMM_UE4SS_ARCHIVE` at it to run this.
+#[test]
+fn the_real_ue4ss_release_installs_with_its_bundled_mods_switched_on() {
+    let Some(archive) = std::env::var_os("SBMM_UE4SS_ARCHIVE").map(PathBuf::from) else {
+        eprintln!("SBMM_UE4SS_ARCHIVE is not set; skipping");
+        return;
+    };
+    let mut fx = Fixture::new();
+    let skip = fx.install_folder("Skip", &[("Skip/scripts/main.lua", "-- lua")]);
+    fx.app.set_enabled(&[skip], true).unwrap();
+    fx.app.install_ue4ss(&archive, "3.1.0-6").unwrap();
+
+    let win64 = fx.game.join("SB/Binaries/Win64");
+    assert!(win64.join("dwmapi.dll").is_file());
+    assert!(win64.join("ue4ss/UE4SS.dll").is_file());
+    assert!(win64
+        .join("ue4ss/Mods/BPModLoaderMod/Scripts/main.lua")
+        .is_file());
+    let mods_txt = fs::read_to_string(win64.join("ue4ss/Mods/mods.txt")).unwrap();
+    assert!(mods_txt.contains("BPModLoaderMod : 1"), "{mods_txt}");
+    assert!(mods_txt.contains("Keybinds : 1"), "{mods_txt}");
+    assert!(mods_txt.contains("Skip : 1"), "{mods_txt}");
+    let snap = fx.app.snapshot().unwrap();
+    assert_eq!(snap.ue4ss.state, "managed");
+    assert!(snap.mods.iter().all(|m| m.missing_requirements.is_empty()));
+    assert_eq!(
+        snap.mods.iter().filter(|m| m.source == "ue4ss").count(),
+        1,
+        "one UE4SS mod, not one per bundled mod"
+    );
+}

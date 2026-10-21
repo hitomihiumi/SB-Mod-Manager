@@ -8,6 +8,7 @@ pub mod credentials;
 pub mod diagnostics;
 pub mod dto;
 pub mod library;
+pub mod ue4ss;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -16,7 +17,7 @@ use sbmm_core::model::{Confidence, DetectedComponent, ModType};
 use sbmm_core::plan::{self, build_plan, DeployPlan};
 use sbmm_core::{detect_components, FileTree};
 use sbmm_deploy::backend::DeployContext;
-use sbmm_deploy::{ue4ss, DeployBackend, HardlinkBackend, Manifest};
+use sbmm_deploy::{ue4ss as mods_txt, DeployBackend, HardlinkBackend, Manifest};
 use sbmm_game::GameInstall;
 use sbmm_store::{ModRecord, NewMod, Store};
 
@@ -1015,6 +1016,7 @@ impl App {
 
         let virtual_mode = self.deployment_mode()? == DeploymentMode::Virtual;
         let file_conflicts = self.file_conflict_counts(&records)?;
+        let ue4ss_loads = self.ue4ss_presence(&records)?.loads();
         for record in &records {
             let components = self.store.components_for(record.id)?;
             let planned = self.deploy_plan_for(record, &components)?;
@@ -1054,6 +1056,14 @@ impl App {
                 latest_version: newer_version(&record.version, &record.latest_version),
                 nexus_mod_id: record.nexus_mod_id,
                 file_conflicts: file_conflicts.get(&record.id).cloned(),
+                missing_requirements: if record.enabled
+                    && !ue4ss_loads
+                    && ue4ss::requires_ue4ss(&components)
+                {
+                    vec!["UE4SS".to_string()]
+                } else {
+                    Vec::new()
+                },
             });
         }
 
@@ -1083,6 +1093,7 @@ impl App {
             deployment_mode: self.deployment_mode()?,
             profiles: self.store.list_profiles()?,
             overwrite: self.overwrite_summary(),
+            ue4ss: self.ue4ss_status()?,
         })
     }
 
@@ -1417,11 +1428,11 @@ impl App {
         }
 
         if states.values().any(|enabled| *enabled) {
-            ue4ss::sync_mods_txt(&ctx.game_root, &ctx.backup_root, &states)?;
+            mods_txt::sync_mods_txt(&ctx.game_root, &ctx.backup_root, &states)?;
         } else {
             // Nothing left for UE4SS to load: take our mods.txt back out and
             // let the folders it lived in go with it.
-            ue4ss::clear_registrations(&ctx.game_root, &ctx.backup_root)?;
+            mods_txt::clear_registrations(&ctx.game_root, &ctx.backup_root)?;
             self.prune_empty_dirs(ctx)?;
         }
         Ok(())
@@ -1580,8 +1591,20 @@ impl App {
         }
 
         if registrations.values().any(|enabled| *enabled) {
-            let real = std::fs::read_to_string(game.root.join(sbmm_core::paths::UE4SS_MODS_TXT))
-                .unwrap_or_default();
+            // Start from the `mods.txt` the game would otherwise see: the one
+            // the highest enabled mod ships — UE4SS's own, which switches on
+            // BPModLoaderMod and its other bundled mods — or else the real
+            // one. Starting from the real file alone would drop those, and
+            // logic mods need BPModLoaderMod to load at all.
+            let mods_txt = comparable_path(sbmm_core::paths::UE4SS_MODS_TXT);
+            let shipped = layers
+                .iter()
+                .rev()
+                .flat_map(|layer| layer.files.iter())
+                .find(|file| comparable_path(&file.target.to_string_lossy()) == mods_txt)
+                .map(|file| file.source.clone());
+            let real = shipped.unwrap_or_else(|| game.root.join(sbmm_core::paths::UE4SS_MODS_TXT));
+            let real = std::fs::read_to_string(real).unwrap_or_default();
             let generated = self
                 .vfs_dir()
                 .join("generated")
@@ -1589,7 +1612,7 @@ impl App {
             if let Some(parent) = generated.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
             }
-            std::fs::write(&generated, ue4ss::render_mods_txt(&real, &registrations))
+            std::fs::write(&generated, mods_txt::render_mods_txt(&real, &registrations))
                 .map_err(|e| AppError::io(&generated, e))?;
             layers.push(sbmm_vfs::Layer {
                 origin: sbmm_vfs::Origin::Generated,

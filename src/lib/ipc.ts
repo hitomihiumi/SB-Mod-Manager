@@ -47,6 +47,19 @@ export interface ModView {
   nexusModId: number | null;
   /** Loose files shared with other enabled mods; null when none. */
   fileConflicts: FileConflicts | null;
+  /** What this enabled mod needs and the game will not have, e.g. "UE4SS". */
+  missingRequirements: string[];
+}
+
+/** UE4SS at a glance. */
+export interface Ue4ssStatus {
+  /** Installed as a mod and enabled, installed but off, by hand, or not at all. */
+  state: "managed" | "disabled" | "manual" | "missing";
+  modId: number | null;
+  version: string | null;
+  /** Enabled mods that do nothing without UE4SS. */
+  neededBy: string[];
+  projectUrl: string;
 }
 
 /** The flags Mod Organizer 2 shows beside a mod. */
@@ -101,6 +114,7 @@ export interface AppSnapshot {
   /** Every profile, the active one marked. */
   profiles: ProfileView[];
   overwrite: OverwriteView;
+  ue4ss: Ue4ssStatus;
 }
 
 /** A named set of enabled mods and a load order. */
@@ -453,6 +467,9 @@ export const ipc = {
   vfsConflicts: (modId: number | null) => invoke<VfsEntry[]>("vfs_conflicts", { modId }),
   createModFromOverwrite: (name: string) => invoke<number>("create_mod_from_overwrite", { name }),
   clearOverwrite: () => invoke<number>("clear_overwrite"),
+  /** Null when GitHub could not be asked. */
+  ue4ssLatest: () => invoke<string | null>("ue4ss_latest"),
+  installUe4ss: () => invoke<string>("install_ue4ss"),
   /** Write the diagnostics zip to `path`; resolves to where it went. */
   collectDiagnostics: (path: string) => invoke<string>("collect_diagnostics", { path }),
   createProfile: (name: string, copyEnabled: boolean) =>

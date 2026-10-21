@@ -330,3 +330,84 @@ fn a_stray_image_is_not_mistaken_for_splash_art() {
         "only the name Unreal loads, or a Splash folder, means splash art"
     );
 }
+
+/// The Stellar Blade build of UE4SS (Chrisr0's fork, 3.1.0-6), exactly as
+/// its release archive lays it out: a version-named wrapper folder around
+/// the `dwmapi.dll` proxy and the `ue4ss` runtime with its bundled mods.
+#[test]
+fn the_stellar_blade_ue4ss_release_is_one_framework_install_beside_the_executable() {
+    let files = [
+        "UE4SS_v3.1.0-6/dwmapi.dll",
+        "UE4SS_v3.1.0-6/ue4ss/Default_UVTD_Configs/Config/case_preserving_variants.json",
+        "UE4SS_v3.1.0-6/ue4ss/Default_UVTD_Configs/Config/member_rename_map.json",
+        "UE4SS_v3.1.0-6/ue4ss/Default_UVTD_Configs/Config/object_items.json",
+        "UE4SS_v3.1.0-6/ue4ss/Default_UVTD_Configs/Config/pdbs_to_dump.json",
+        "UE4SS_v3.1.0-6/ue4ss/Default_UVTD_Configs/Config/private_variables.json",
+        "UE4SS_v3.1.0-6/ue4ss/Default_UVTD_Configs/Config/types_not_to_dump.json",
+        "UE4SS_v3.1.0-6/ue4ss/Default_UVTD_Configs/Config/uprefix_to_fprefix.json",
+        "UE4SS_v3.1.0-6/ue4ss/Default_UVTD_Configs/Config/valid_udt_names.json",
+        "UE4SS_v3.1.0-6/ue4ss/Default_UVTD_Configs/Config/virtual_generator_includes.json",
+        "UE4SS_v3.1.0-6/ue4ss/LICENSE",
+        "UE4SS_v3.1.0-6/ue4ss/Mods/ActorDumperMod/Scripts/main.lua",
+        "UE4SS_v3.1.0-6/ue4ss/Mods/BPML_GenericFunctions/Scripts/main.lua",
+        "UE4SS_v3.1.0-6/ue4ss/Mods/BPModLoaderMod/load_order.txt",
+        "UE4SS_v3.1.0-6/ue4ss/Mods/BPModLoaderMod/Scripts/main.lua",
+        "UE4SS_v3.1.0-6/ue4ss/Mods/CheatManagerEnablerMod/Scripts/main.lua",
+        "UE4SS_v3.1.0-6/ue4ss/Mods/ConsoleCommandsMod/Scripts/dump_object.lua",
+        "UE4SS_v3.1.0-6/ue4ss/Mods/ConsoleCommandsMod/Scripts/main.lua",
+        "UE4SS_v3.1.0-6/ue4ss/Mods/ConsoleCommandsMod/Scripts/set.lua",
+        "UE4SS_v3.1.0-6/ue4ss/Mods/ConsoleCommandsMod/Scripts/summon_unloaded_assets.lua",
+        "UE4SS_v3.1.0-6/ue4ss/Mods/ConsoleEnablerMod/Scripts/main.lua",
+        "UE4SS_v3.1.0-6/ue4ss/Mods/jsbLuaProfilerMod/Scripts/main.lua",
+        "UE4SS_v3.1.0-6/ue4ss/Mods/Keybinds/Scripts/main.lua",
+        "UE4SS_v3.1.0-6/ue4ss/Mods/LineTraceMod/Scripts/main.lua",
+        "UE4SS_v3.1.0-6/ue4ss/Mods/mods.json",
+        "UE4SS_v3.1.0-6/ue4ss/Mods/mods.txt",
+        "UE4SS_v3.1.0-6/ue4ss/Mods/shared/jsbProfiler/jsbProfi.lua",
+        "UE4SS_v3.1.0-6/ue4ss/Mods/shared/Types.lua",
+        "UE4SS_v3.1.0-6/ue4ss/Mods/shared/UEHelpers/UEHelpers.lua",
+        "UE4SS_v3.1.0-6/ue4ss/Mods/SplitScreenMod/Scripts/main.lua",
+        "UE4SS_v3.1.0-6/ue4ss/UE4SS-settings.ini",
+        "UE4SS_v3.1.0-6/ue4ss/UE4SS.dll",
+        "UE4SS_v3.1.0-6/ue4ss/UE4SS_Signatures/FName_ToString.lua.example",
+        "UE4SS_v3.1.0-6/ue4ss/UE4SS_Signatures/FText_Constructor.lua",
+        "UE4SS_v3.1.0-6/ue4ss/UE4SS_Signatures/GNatives.lua",
+        "UE4SS_v3.1.0-6/ue4ss/UE4SS_Signatures/GUObjectArray.lua",
+        "UE4SS_v3.1.0-6/ue4ss/UE4SS_Signatures/GUObjectArray.lua.example",
+        "UE4SS_v3.1.0-6/ue4ss/VTableLayout.ini",
+    ];
+    let c = only(&files);
+    assert_eq!(c.mod_type, ModType::Ue4ssFramework);
+    let t = targets(&c);
+    assert!(t.contains(&"SB/Binaries/Win64/dwmapi.dll".to_string()));
+    assert!(t.contains(&"SB/Binaries/Win64/ue4ss/UE4SS.dll".to_string()));
+    assert!(t.contains(&"SB/Binaries/Win64/ue4ss/Mods/mods.txt".to_string()));
+    assert!(t.contains(&"SB/Binaries/Win64/ue4ss/Mods/BPModLoaderMod/Scripts/main.lua".to_string()));
+    assert!(
+        t.iter().all(|p| !p.contains("UE4SS_v3.1.0-6")),
+        "the version-named wrapper folder is not part of the install"
+    );
+}
+
+/// The same runtime shipped as an `SB/` tree, the way Nexus uploads of it
+/// are packaged: its bundled mods stay part of it rather than becoming mods
+/// of their own, which would switch on the ones its `mods.txt` leaves off.
+#[test]
+fn ue4ss_shipped_as_an_sb_tree_keeps_its_bundled_mods() {
+    let c = only(&[
+        "SB/Binaries/Win64/dwmapi.dll",
+        "SB/Binaries/Win64/ue4ss/UE4SS.dll",
+        "SB/Binaries/Win64/ue4ss/UE4SS-settings.ini",
+        "SB/Binaries/Win64/ue4ss/Mods/mods.txt",
+        "SB/Binaries/Win64/ue4ss/Mods/BPModLoaderMod/Scripts/main.lua",
+        "SB/Binaries/Win64/ue4ss/Mods/BPModLoaderMod/load_order.txt",
+        "SB/Binaries/Win64/ue4ss/Mods/ActorDumperMod/Scripts/main.lua",
+    ]);
+    assert_eq!(c.mod_type, ModType::Ue4ssFramework);
+    assert_eq!(c.ue4ss_mod_name, None);
+    assert_eq!(
+        c.files.len(),
+        7,
+        "the dwmapi proxy goes with the runtime it loads"
+    );
+}

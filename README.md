@@ -93,6 +93,14 @@ wrong is the usual reason a mod "doesn't work".
 - **Updates itself** from GitHub releases, on either the stable or the nightly
   channel, with the download checked against a signature before anything is
   replaced.
+- **Knows when a mod needs UE4SS.** Lua, C++ and Blueprint logic mods do
+  nothing without UE4SS, and nothing on the outside says so. Every enabled
+  mod that needs it is flagged while the game will not load UE4SS, with one
+  button to install the build Stellar Blade needs — Chrisr0's fork of
+  RE-UE4SS, from its GitHub releases — and an update check after that.
+  Updating keeps your `UE4SS-settings.ini`, and UE4SS's own bundled mods
+  (BPModLoaderMod among them, which every logic mod relies on) stay switched
+  on under both deployment modes.
 - **Profiles.** Keep several setups — say, vanilla, cosmetics only and
   everything — each with its own enabled mods and load order, and switch
   between them from the mod list; the game folder is brought in line on the
@@ -276,6 +284,9 @@ cargo test --workspace          # domain crates
 # The virtual file system end to end under Wine: real launcher, real hook, a
 # stand-in for the game (needs wine64, mingw-w64 and the windows-gnu target)
 scripts/test-vfs-wine.sh
+
+# Install the real Stellar Blade UE4SS release end to end (download it first)
+SBMM_UE4SS_ARCHIVE=/path/to/UE4SS_v3.1.0-6.zip cargo test -p sbmm-app --test lifecycle real_ue4ss
 
 # Check a real dlssg_for_sm86 release against the package rules (unpack it first)
 SBMM_SM86_PACKAGE=/path/to/unpacked cargo test -p sbmm-upscaler --test framegen_release
