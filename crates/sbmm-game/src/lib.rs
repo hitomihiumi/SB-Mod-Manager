@@ -12,6 +12,9 @@ pub const STEAM_APP_ID: &str = "3489700";
 /// Nexus Mods game domain, used when building API and `nxm://` URLs.
 pub const NEXUS_DOMAIN: &str = "stellarblade";
 
+/// Nexus Mods' numeric id for the game, which the v2 API asks for.
+pub const NEXUS_GAME_ID: u64 = 7804;
+
 pub use discover::{discover, validate, DiscoveryError};
 pub use version::GameBuild;
 

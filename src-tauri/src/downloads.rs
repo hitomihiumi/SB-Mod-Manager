@@ -100,7 +100,10 @@ pub fn spawn_driver(app: tauri::AppHandle) {
         let Ok(transport) = ReqwestTransport::new(USER_AGENT) else {
             let _ = app.emit(
                 "download-install-failed",
-                ("", "could not start the HTTP client; downloads are disabled"),
+                (
+                    "",
+                    "could not start the HTTP client; downloads are disabled",
+                ),
             );
             return;
         };
@@ -162,7 +165,14 @@ async fn install_finished(app: &tauri::AppHandle, finished: &Finished) -> bool {
             };
 
             match outcome {
-                Ok(_) => {
+                Ok(id) => {
+                    // What it needs, its page picture: fetched now, so a
+                    // missing requirement shows in the list straight away.
+                    let handle = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let _ = crate::insight::refresh(&handle, id, false).await;
+                        let _ = handle.emit("downloads-changed", ());
+                    });
                     // The archive has been extracted into the library; keeping
                     // it would double the space every Nexus mod costs.
                     let _ = std::fs::remove_file(&path);

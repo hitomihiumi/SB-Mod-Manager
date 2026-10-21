@@ -2686,3 +2686,166 @@ fn a_mod_carries_notes_tags_and_a_chosen_picture() {
     let view = fx.app.snapshot().unwrap().mods.remove(0);
     assert_eq!((view.notes, view.image), (None, None));
 }
+
+// -- stage 9: what a mod changes, load order rules, Nexus pages ------------
+
+#[test]
+fn load_order_rules_are_reported_when_broken_and_sorted_by() {
+    let mut fx = Fixture::new();
+    let a = fx.install_folder("Base Outfit", &[("A_P.pak", "a")]);
+    let b = fx.install_folder("Hair", &[("B_P.pak", "b")]);
+    let c = fx.install_folder("Outfit Recolour", &[("C_P.pak", "c")]);
+    fx.app.set_order(&[c, a, b]).unwrap();
+
+    // The recolour has to win over the base outfit.
+    fx.app.add_order_rule(a, c).unwrap();
+    let mods = fx.app.snapshot().unwrap().mods;
+    let recolour = mods.iter().find(|m| m.id == c).unwrap();
+    assert_eq!(recolour.misordered, ["should load after Base Outfit"]);
+    assert!(fx.app.order_rules().unwrap()[0].broken);
+
+    assert!(
+        fx.app.add_order_rule(c, a).is_err(),
+        "contradicts the first"
+    );
+    assert!(fx.app.add_order_rule(a, a).is_err());
+
+    assert_eq!(fx.app.sort_by_rules().unwrap(), 2);
+    let order: Vec<i64> = fx
+        .app
+        .snapshot()
+        .unwrap()
+        .mods
+        .iter()
+        .map(|m| m.id)
+        .collect();
+    assert_eq!(order, [a, c, b]);
+    assert!(!fx.app.order_rules().unwrap()[0].broken);
+    assert_eq!(fx.app.sort_by_rules().unwrap(), 0);
+
+    fx.app.uninstall(c).unwrap();
+    assert!(fx.app.order_rules().unwrap().is_empty());
+}
+
+#[test]
+fn a_mods_contents_say_what_it_changes_and_who_else_does() {
+    let mut fx = Fixture::new();
+    let a = fx.install_folder(
+        "Intro A",
+        &[("Movies/Intro.mp4", "a"), ("Movies/Credits.mp4", "c")],
+    );
+    let b = fx.install_folder("Intro B", &[("Movies/Intro.mp4", "b")]);
+    fx.app.set_enabled(&[a, b], true).unwrap();
+
+    let contents = fx.app.mod_contents(a).unwrap();
+    assert_eq!(contents.file_count, 2);
+    assert!(contents
+        .files
+        .iter()
+        .any(|f| f.ends_with("Movies/Intro.mp4")));
+    assert_eq!(contents.clashes.len(), 1);
+    let clash = &contents.clashes[0];
+    assert_eq!((clash.mod_id, clash.shared, clash.wins), (b, 1, false));
+    assert!(
+        fx.app.mod_contents(b).unwrap().clashes[0].wins,
+        "later wins"
+    );
+}
+
+#[test]
+fn nexus_requirements_are_checked_against_what_is_installed() {
+    use sbmm_nexus::{ModDetails, Requirement};
+    let mut fx = Fixture::new();
+    let install = |fx: &mut Fixture, name: &str, nexus: i64| {
+        let folder = fx.source.join(name);
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(folder.join(format!("{name}_P.pak")), name).unwrap();
+        let staged = fx.app.stage_folder(&folder).unwrap();
+        fx.app
+            .commit_install(
+                &staged.staging_id,
+                name,
+                None,
+                sbmm_app::Origin {
+                    source: "nexus".into(),
+                    nexus_mod_id: Some(nexus),
+                    nexus_file_id: None,
+                    version: None,
+                },
+            )
+            .unwrap()
+    };
+    let suit = install(&mut fx, "Suit", 1496);
+    fx.app.set_enabled(&[suit], true).unwrap();
+    assert!(fx.app.nexus_details_due(suit).unwrap());
+
+    let details = ModDetails {
+        mod_id: 1496,
+        name: "CNS".into(),
+        author: Some("Someone".into()),
+        version: Some("2.1".into()),
+        summary: None,
+        endorsements: 1,
+        downloads: 2,
+        picture_url: Some(
+            "https://staticdelivery.nexusmods.com/mods/7804/images/1496/a.jpg".into(),
+        ),
+        updated_at: None,
+        adult: false,
+        category: None,
+        tags: vec![],
+        requirements: vec![
+            Requirement {
+                mod_id: Some(5),
+                name: "Body Framework".into(),
+                url: String::new(),
+                notes: None,
+            },
+            Requirement {
+                mod_id: None,
+                name: "Some Tool".into(),
+                url: String::new(),
+                notes: None,
+            },
+        ],
+    };
+    fx.app.record_nexus_details(&details).unwrap();
+    assert!(!fx.app.nexus_details_due(suit).unwrap());
+
+    let view = fx.app.nexus_view(suit).unwrap().unwrap();
+    let states: Vec<&str> = view.requirements.iter().map(|r| r.state.as_str()).collect();
+    assert_eq!(states, ["missing", "external"]);
+    let suit_view = |fx: &Fixture| {
+        fx.app
+            .snapshot()
+            .unwrap()
+            .mods
+            .into_iter()
+            .find(|m| m.id == suit)
+            .unwrap()
+    };
+    assert_eq!(suit_view(&fx).missing_requirements, ["Body Framework"]);
+
+    let body = install(&mut fx, "Body", 5);
+    assert_eq!(
+        fx.app.nexus_view(suit).unwrap().unwrap().requirements[0].state,
+        "disabled"
+    );
+    fx.app.set_enabled(&[body], true).unwrap();
+    assert!(suit_view(&fx).missing_requirements.is_empty());
+
+    // The page picture goes beside the mod's own and becomes its picture.
+    let picture = fx
+        .app
+        .nexus_picture_path(suit, details.picture_url.as_deref().unwrap())
+        .unwrap()
+        .unwrap();
+    fs::write(&picture, "jpg").unwrap();
+    fx.app.adopt_nexus_picture(suit, &picture).unwrap();
+    assert_eq!(suit_view(&fx).image.as_deref(), Some("_nexus.jpg"));
+    assert!(fx
+        .app
+        .mod_images(suit)
+        .unwrap()
+        .contains(&"_nexus.jpg".to_string()));
+}

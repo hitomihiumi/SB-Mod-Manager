@@ -124,6 +124,20 @@ wrong is the usual reason a mod "doesn't work".
   between them from the mod list; the game folder is brought in line on the
   spot. A new profile keeps the current order with nothing enabled; a
   duplicate keeps the enabled set too.
+- **Shows what a mod changes.** The details panel lists where a mod's
+  assets land (read from its pak and utoc indexes and grouped by folder,
+  e.g. `Characters/Eve`), the files it puts in the game, and every other
+  mod changing the same things — with which of the two wins.
+- **Load order rules.** "This mod loads after that one", kept whatever else
+  moves, as LOOT and Vortex allow. Adding a rule sorts the list to obey all
+  of them while moving as little as possible; a contradicting rule is
+  refused, and mods whose rules the order breaks are flagged until sorted.
+- **Reads the mod's Nexus page.** For mods from Nexus: author, summary,
+  category, tags, endorsements, the page picture, and the mods it requires
+  — each checked against what is installed, with an enable button for one
+  installed but switched off. A required mod that is missing shows in the
+  mod list. Fetched after a Nexus install and again when a day old; no API
+  key is needed.
 - **Edits settings files.** A mod's INI, JSON, Lua and other settings
   files open in an editor from the mod's details panel — INI files as a
   form, a field per setting with the comments above it as help, or as text.

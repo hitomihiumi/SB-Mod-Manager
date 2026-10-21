@@ -576,6 +576,24 @@ impl Store {
         Ok(out)
     }
 
+    /// Every asset one mod provides, as `(asset, named)`.
+    pub fn mod_assets(&self, mod_id: i64) -> Result<Vec<(String, bool)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT asset, named FROM mod_assets WHERE mod_id = ?1 ORDER BY asset")?;
+        let rows = stmt.query_map([mod_id], |r| Ok((r.get(0)?, r.get::<_, i64>(1)? != 0)))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// Whether a timestamp this store wrote is more than `hours` old.
+    pub fn older_than_hours(&self, at: &str, hours: i64) -> Result<bool> {
+        Ok(self.conn.query_row(
+            "SELECT ?1 < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?2)",
+            params![at, format!("-{hours} hours")],
+            |r| r.get::<_, bool>(0),
+        )?)
+    }
+
     /// How many assets one mod provides.
     pub fn asset_count(&self, mod_id: i64) -> Result<i64> {
         Ok(self.conn.query_row(
@@ -875,6 +893,54 @@ impl Store {
         Ok(())
     }
 
+    // -- load order rules ---------------------------------------------------
+
+    /// `before` loads before `after`. Adding a rule that exists is a no-op.
+    pub fn add_order_rule(&self, before: i64, after: i64) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO order_rules (before_mod, after_mod) VALUES (?1, ?2)",
+            params![before, after],
+        )?;
+        Ok(())
+    }
+
+    /// Every rule as `(id, before, after)`.
+    pub fn order_rules(&self) -> Result<Vec<(i64, i64, i64)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, before_mod, after_mod FROM order_rules ORDER BY id")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    pub fn delete_order_rule(&self, id: i64) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM order_rules WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    // -- what Nexus says ------------------------------------------------------
+
+    pub fn put_nexus_details(&self, nexus_mod_id: i64, details: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO nexus_details (nexus_mod_id, details) VALUES (?1, ?2)
+             ON CONFLICT(nexus_mod_id) DO UPDATE
+                SET details = excluded.details,
+                    fetched_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')",
+            params![nexus_mod_id, details],
+        )?;
+        Ok(())
+    }
+
+    /// Every cached answer as `nexus mod id → (details JSON, fetched at)`.
+    pub fn nexus_details(&self) -> Result<std::collections::BTreeMap<i64, (String, String)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT nexus_mod_id, details, fetched_at FROM nexus_details")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?))))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
     // -- learned detection overrides ---------------------------------------
 
     pub fn remember_detection(&self, pattern: &str, mod_type: &str) -> Result<()> {
@@ -915,6 +981,27 @@ mod tests {
             size_bytes: 42,
             image_path: None,
         }
+    }
+
+    #[test]
+    fn order_rules_go_with_their_mods() {
+        let store = Store::open_in_memory().unwrap();
+        let a = store.insert_mod(&sample("Alpha")).unwrap();
+        let b = store.insert_mod(&sample("Beta")).unwrap();
+        store.add_order_rule(a, b).unwrap();
+        store.add_order_rule(a, b).unwrap();
+        assert_eq!(store.order_rules().unwrap().len(), 1);
+        store.delete_mod(b).unwrap();
+        assert!(store.order_rules().unwrap().is_empty());
+    }
+
+    #[test]
+    fn nexus_answers_are_cached_per_mod() {
+        let store = Store::open_in_memory().unwrap();
+        store.put_nexus_details(5, "{\"a\":1}").unwrap();
+        store.put_nexus_details(5, "{\"a\":2}").unwrap();
+        let cached = store.nexus_details().unwrap();
+        assert_eq!(cached[&5].0, "{\"a\":2}");
     }
 
     #[test]

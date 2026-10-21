@@ -158,6 +158,24 @@ const MIGRATIONS: &[&str] = &[
     r#"
     ALTER TABLE mods ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';
     "#,
+    // v8 — load order rules ("this mod loads after that one"), which are
+    // about the mods themselves and so hold in every profile; and what Nexus
+    // last said about each mod, kept so the details panel and requirement
+    // checks work offline and without asking again.
+    r#"
+    CREATE TABLE order_rules (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        before_mod INTEGER NOT NULL REFERENCES mods(id) ON DELETE CASCADE,
+        after_mod  INTEGER NOT NULL REFERENCES mods(id) ON DELETE CASCADE,
+        UNIQUE (before_mod, after_mod)
+    );
+
+    CREATE TABLE nexus_details (
+        nexus_mod_id INTEGER PRIMARY KEY,
+        details      TEXT NOT NULL,
+        fetched_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+    );
+    "#,
 ];
 
 pub fn migrate(conn: &Connection) -> Result<()> {

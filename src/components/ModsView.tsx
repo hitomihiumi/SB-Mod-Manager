@@ -460,6 +460,15 @@ function ModRow({
         </Badge>
       ))}
 
+      {mod.misordered.length > 0 && (
+        <Badge
+          tone="warn"
+          title={`Load order rules this breaks: ${mod.name} ${mod.misordered.join("; ")}. Sort the order from the mod's details or the Load order screen.`}
+        >
+          Order
+        </Badge>
+      )}
+
       {mod.fileConflicts && <FileConflictFlag mod={mod} />}
 
       {/* Enabled, but a mod further down the order replaces some of it. */}

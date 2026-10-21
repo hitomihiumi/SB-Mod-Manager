@@ -55,6 +55,8 @@ export interface ModView {
   image: string | null;
   notes: string | null;
   tags: string[];
+  /** What the load order rules this mod breaks ask of it. */
+  misordered: string[];
 }
 
 /** UE4SS at a glance. */
@@ -615,9 +617,72 @@ export const ipc = {
   modImages: (modId: number) => invoke<string[]>("mod_images", { modId }),
   setModImage: (modId: number, image: string | null) =>
     invoke<void>("set_mod_image", { modId, image }),
+  modContents: (modId: number) => invoke<ModContents>("mod_contents", { modId }),
+  orderRules: () => invoke<OrderRule[]>("order_rules"),
+  /** Adds the rule and sorts the list by all rules; resolves to how many mods moved. */
+  addOrderRule: (before: number, after: number) =>
+    invoke<number>("add_order_rule", { before, after }),
+  deleteOrderRule: (id: number) => invoke<void>("delete_order_rule", { id }),
+  sortByRules: () => invoke<number>("sort_by_rules"),
+  nexusView: (modId: number) => invoke<NexusView | null>("nexus_view", { modId }),
+  refreshNexusDetails: (modId: number, force: boolean) =>
+    invoke<NexusView | null>("refresh_nexus_details", { modId, force }),
 };
 
 export type ShortcutPlace = "desktop" | "startMenu";
+
+/** What one mod changes. */
+export interface ModContents {
+  /** Paths it puts in the game folder (the first 500). */
+  files: string[];
+  fileCount: number;
+  /** Its paks have been read; without that `areas` is empty, not "none". */
+  indexed: boolean;
+  assetCount: number;
+  areas: { area: string; count: number; examples: string[] }[];
+  clashes: { modId: number; name: string; shared: number; enabled: boolean; wins: boolean }[];
+}
+
+export interface OrderRule {
+  id: number;
+  beforeId: number;
+  before: string;
+  afterId: number;
+  after: string;
+  broken: boolean;
+}
+
+export interface NexusDetails {
+  modId: number;
+  name: string;
+  author: string | null;
+  version: string | null;
+  summary: string | null;
+  endorsements: number;
+  downloads: number;
+  pictureUrl: string | null;
+  updatedAt: string | null;
+  adult: boolean;
+  category: string | null;
+  tags: string[];
+}
+
+export interface RequirementView {
+  /** Null for something hosted off Nexus. */
+  modId: number | null;
+  name: string;
+  url: string;
+  notes: string | null;
+  state: "enabled" | "disabled" | "missing" | "external";
+  installedAs: number | null;
+}
+
+export interface NexusView {
+  nexusModId: number;
+  details: NexusDetails | null;
+  fetchedAt: string | null;
+  requirements: RequirementView[];
+}
 
 /** Whose settings files: one mod's, or the game's own. */
 export type ConfigScope = { kind: "mod"; modId: number } | { kind: "game" };
