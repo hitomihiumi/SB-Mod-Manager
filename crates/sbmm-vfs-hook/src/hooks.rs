@@ -338,14 +338,22 @@ fn in_overwrite(real: &Path) -> bool {
 static TRACE_LEFT: AtomicUsize = AtomicUsize::new(400);
 
 fn trace(message: impl FnOnce() -> String) {
-    let left = TRACE_LEFT.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1));
-    match left {
-        Ok(1) => {
-            log(&message());
-            log("(trace limit reached)");
+    // A plain compare-exchange loop: `fetch_update` is deprecated on newer
+    // toolchains and its replacement does not exist on older ones.
+    let mut left = TRACE_LEFT.load(Ordering::Relaxed);
+    loop {
+        if left == 0 {
+            return;
         }
-        Ok(_) => log(&message()),
-        Err(_) => {}
+        match TRACE_LEFT.compare_exchange_weak(left, left - 1, Ordering::Relaxed, Ordering::Relaxed)
+        {
+            Ok(_) => break,
+            Err(now) => left = now,
+        }
+    }
+    log(&message());
+    if left == 1 {
+        log("(trace limit reached)");
     }
 }
 
