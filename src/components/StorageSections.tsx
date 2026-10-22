@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { formatBytes } from "../lib/format";
 import { ipc, type Cleanup, type StorageReport, type WatchSettings } from "../lib/ipc";
 import { useApp } from "../store/useApp";
+import { askConfirm } from "./Ask";
 import { Button, Checkbox, Section } from "./ui";
 
 /** Which cleanup frees what in each part of the library. */
@@ -135,7 +136,13 @@ export function StorageSection() {
                       size="sm"
                       variant="danger"
                       onClick={async () => {
-                        if (!window.confirm(`Remove "${mod.name}" and delete its files?`)) return;
+                        const sure = await askConfirm({
+                          title: "Uninstall mod",
+                          message: `Remove “${mod.name}” and delete its files from the library?`,
+                          confirmLabel: "Uninstall",
+                          danger: true,
+                        });
+                        if (!sure) return;
                         await uninstall(mod.id);
                         await scan();
                       }}

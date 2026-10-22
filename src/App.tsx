@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   Download,
   FolderTree,
+  Keyboard,
   Layers,
   ListOrdered,
   Loader2,
@@ -19,7 +20,9 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { AskHost, isAsking } from "./components/Ask";
 import { CollectionsView } from "./components/CollectionsView";
+import { ContextMenuHost } from "./components/ContextMenu";
 import { ConflictsView } from "./components/ConflictsView";
 import { DownloadsView } from "./components/DownloadsView";
 import { FilesView } from "./components/FilesView";
@@ -29,7 +32,7 @@ import { ModsView } from "./components/ModsView";
 import { SettingsView } from "./components/SettingsView";
 import { SetupWizard } from "./components/SetupWizard";
 import { TitleBar } from "./components/TitleBar";
-import { Button } from "./components/ui";
+import { Button, Dialog } from "./components/ui";
 import { ipc, type FoundArchive, type QueueItem, type StagedInstall } from "./lib/ipc";
 import { useApp, type View } from "./store/useApp";
 
@@ -54,6 +57,7 @@ export default function App() {
   const downloads = useApp((s) => s.downloads);
 
   const [dropping, setDropping] = useState(false);
+  const [shortcuts, setShortcuts] = useState(false);
 
   // Anything still in flight, so the rail can say how many.
   const active = downloads.filter(
@@ -127,6 +131,41 @@ export default function App() {
     };
   }, []);
 
+  // Shortcuts that work on every screen. Ones about the mod list live with
+  // the list; none of them fire while a dialog or a question has the keys.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (isAsking() || document.querySelector('[role="dialog"]')) return;
+      const target = event.target as HTMLElement | null;
+      const typing = !!target?.closest("input, textarea, select, [contenteditable=true]");
+      const ctrl = event.ctrlKey || event.metaKey;
+      const key = event.key.toLowerCase();
+      const state = useApp.getState();
+
+      if (event.key === "F5") {
+        event.preventDefault();
+        void state.refresh();
+      } else if (event.key === "F1" || (!typing && event.key === "?")) {
+        event.preventDefault();
+        setShortcuts(true);
+      } else if (ctrl && key === "o") {
+        event.preventDefault();
+        void pickFiles();
+      } else if (ctrl && key === "s") {
+        event.preventDefault();
+        if ((state.snapshot?.pending.length ?? 0) > 0) void state.applyChanges();
+      } else if (ctrl && /^[1-9]$/.test(event.key)) {
+        const item = NAV[Number(event.key) - 1];
+        if (item) {
+          event.preventDefault();
+          state.setView(item.id);
+        }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
   async function pickFiles() {
     const picked = await open({
       multiple: true,
@@ -157,7 +196,7 @@ export default function App() {
                 <button
                   key={item.id}
                   onClick={() => setView(item.id)}
-                  title={item.label}
+                  title={`${item.label} (Ctrl+${NAV.indexOf(item) + 1})`}
                   aria-label={item.label}
                   aria-current={view === item.id}
                   className={clsx(
@@ -180,6 +219,14 @@ export default function App() {
               );
             })}
             <span className="flex-1" />
+            <button
+              onClick={() => setShortcuts(true)}
+              title="Keyboard shortcuts (F1)"
+              aria-label="Keyboard shortcuts"
+              className="mb-1 grid size-10 place-items-center rounded-lg text-ink-muted transition-colors hover:bg-hover/60 hover:text-ink-soft"
+            >
+              <Keyboard size={16} />
+            </button>
             <PlayButton />
           </nav>
 
@@ -219,6 +266,9 @@ export default function App() {
 
       <FoundBar />
       <InstallDialog />
+      {shortcuts && <ShortcutsDialog onClose={() => setShortcuts(false)} />}
+      <AskHost />
+      <ContextMenuHost />
       <Toasts />
     </div>
   );
@@ -306,35 +356,104 @@ function FoundBar() {
 function Toasts() {
   const toasts = useApp((s) => s.toasts);
   const dismiss = useApp((s) => s.dismissToast);
+  const dismissAll = useApp((s) => s.dismissAllToasts);
 
   if (toasts.length === 0) return null;
   return (
-    <div className="fixed right-4 bottom-14 z-50 flex w-80 flex-col gap-2">
-      {toasts.map((toast) => (
-        <div
-          key={toast.id}
-          className={clsx(
-            "flex items-start gap-2 rounded-lg border px-3 py-2.5 shadow-lg",
-            toast.kind === "error"
-              ? "border-danger/40 bg-danger/10"
-              : toast.kind === "success"
-                ? "border-ok/40 bg-ok/10"
-                : "border-line bg-raised",
-          )}
+    <div className="fixed right-4 bottom-14 z-50 flex max-h-[70vh] w-80 flex-col gap-2">
+      {toasts.length > 1 && (
+        <button
+          onClick={dismissAll}
+          className="self-end rounded-md border border-line bg-raised px-2 py-1 text-[11px] text-ink-soft shadow hover:text-ink"
         >
-          <p className="min-w-0 flex-1 text-[12px] leading-relaxed break-words">
-            {toast.message}
-          </p>
-          <button
-            onClick={() => dismiss(toast.id)}
-            className="shrink-0 text-ink-muted hover:text-ink"
-            aria-label="Dismiss"
+          Dismiss all ({toasts.length})
+        </button>
+      )}
+      <div className="flex min-h-0 flex-col gap-2 overflow-y-auto">
+        {toasts.map((toast) => (
+          <div
+            key={toast.id}
+            className={clsx(
+              // Opaque, so whatever is underneath never shows through.
+              "flex shrink-0 items-start gap-2 rounded-lg border border-l-4 bg-raised px-3 py-2.5 shadow-lg",
+              toast.kind === "error"
+                ? "border-danger/50 border-l-danger"
+                : toast.kind === "success"
+                  ? "border-ok/40 border-l-ok"
+                  : "border-line border-l-accent",
+            )}
           >
-            <X size={13} />
-          </button>
-        </div>
-      ))}
+            <p className="min-w-0 flex-1 text-[12px] leading-relaxed break-words">
+              {toast.message}
+            </p>
+            <button
+              onClick={() => dismiss(toast.id)}
+              className="shrink-0 text-ink-muted hover:text-ink"
+              aria-label="Dismiss"
+            >
+              <X size={13} />
+            </button>
+          </div>
+        ))}
+      </div>
     </div>
+  );
+}
+
+const SHORTCUTS: { group: string; keys: [string, string][] }[] = [
+  {
+    group: "Everywhere",
+    keys: [
+      ["Ctrl+O", "Add mods from archives"],
+      ["Ctrl+S", "Apply pending changes"],
+      ["Ctrl+1 … Ctrl+7", "Mods, Load order, Conflicts, Files, Downloads, Collections, Settings"],
+      ["F5", "Re-read the mod list"],
+      ["F1 or ?", "This list"],
+    ],
+  },
+  {
+    group: "Mod list",
+    keys: [
+      ["Ctrl+F or /", "Search"],
+      ["↑ ↓, Home, End", "Move the selection (Shift extends it)"],
+      ["Ctrl+A", "Select every mod shown"],
+      ["Space", "Enable or disable the selection"],
+      ["F2", "Rename the selected mod"],
+      ["Ctrl+G", "Group the selection"],
+      ["Delete", "Uninstall the selection"],
+      ["Esc", "Clear the selection (or the search)"],
+      ["Right click", "Everything else for a mod"],
+    ],
+  },
+  {
+    group: "Settings files",
+    keys: [["Ctrl+S", "Save the open file"]],
+  },
+];
+
+function ShortcutsDialog({ onClose }: { onClose: () => void }) {
+  return (
+    <Dialog open title="Keyboard shortcuts" width="520px" onClose={onClose}>
+      <div className="space-y-4">
+        {SHORTCUTS.map((section) => (
+          <section key={section.group}>
+            <h3 className="mb-1.5 text-[11px] font-semibold tracking-wide text-ink-muted uppercase">
+              {section.group}
+            </h3>
+            <ul className="space-y-1">
+              {section.keys.map(([keys, what]) => (
+                <li key={keys} className="flex items-center gap-3 text-[12px]">
+                  <kbd className="w-36 shrink-0 rounded border border-line bg-base px-1.5 py-0.5 text-center font-mono text-[11px] text-ink-soft">
+                    {keys}
+                  </kbd>
+                  <span className="text-ink-soft">{what}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
+      </div>
+    </Dialog>
   );
 }
 

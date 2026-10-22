@@ -6,6 +6,7 @@ import { parseIni, setIniValue } from "../lib/ini";
 import { formatBytes } from "../lib/format";
 import { ipc, type ConfigFile, type ConfigScope } from "../lib/ipc";
 import { useApp } from "../store/useApp";
+import { askConfirm, isAsking } from "./Ask";
 import { Badge, Button, Dialog, Section } from "./ui";
 
 /**
@@ -52,6 +53,18 @@ export function ConfigEditor({
 
   const dirty = loaded !== null && text !== loaded;
 
+  // Ctrl+S saves, as in any editor.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        if (dirty && !saving && !isAsking()) void save();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
   async function save() {
     setSaving(true);
     try {
@@ -70,8 +83,17 @@ export function ConfigEditor({
       open
       width="760px"
       title={title}
-      onClose={() => {
-        if (!dirty || window.confirm("Close without saving your changes?")) onClose(false);
+      onClose={async () => {
+        if (isAsking()) return;
+        const leave =
+          !dirty ||
+          (await askConfirm({
+            title: "Unsaved changes",
+            message: "Close without saving your changes?",
+            confirmLabel: "Discard",
+            danger: true,
+          }));
+        if (leave) onClose(false);
       }}
       footer={
         <>

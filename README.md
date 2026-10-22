@@ -16,11 +16,19 @@ wrong is the usual reason a mod "doesn't work".
 
 ## What it does
 
-- **Detects the mod type and destination.** Nine layouts are recognised from
+- **Detects the mod type and destination.** Ten layouts are recognised from
   structural markers rather than guesswork, and a single archive can contain
   several — a logic mod bundled with a cosmetic pak is routed as two
-  independent components. When nothing is conclusive it asks once and
+  independent components. Readmes, source art, metadata and nested archives
+  beside a recognised payload are set aside and named rather than turning the
+  whole archive "unknown". When nothing is conclusive it asks once and
   remembers the answer.
+- **Engine.ini tweaks.** `Engine.ini`, `GameUserSettings.ini`,
+  `Scalability.ini` and the other Unreal settings files a mod ships are merged
+  into the game's own (`%LOCALAPPDATA%\SB\Saved\Config\WindowsNoEditor`)
+  key by key, in load order, instead of being copied over them; disabling the
+  mod puts back exactly what each key held, leaving alone anything you changed
+  since.
 - **Handles IoStore properly.** Stellar Blade is UE 4.26 with IoStore, so pak
   mods are `.pak`/`.utoc`/`.ucas` triplets that must share a base name and end
   in `_P`. Missing suffixes are fixed, incomplete sets are flagged.
@@ -42,6 +50,12 @@ wrong is the usual reason a mod "doesn't work".
   Conditional file installs and priorities are honoured, the answers are
   remembered for the next version of the mod, and the chosen picture becomes
   the mod's preview.
+- **A list that keeps up with large libraries.** Filter by enabled,
+  disabled, updates, problems or not-yet-applied, by type or tag; sort by
+  load order, name, size, install date or type. Right-click a mod (or a
+  selection) for enable, rename, its folder, its Nexus page, groups and
+  uninstall, and drive it all from the keyboard — F1 lists the shortcuts.
+  Installing dozens of archives at once no longer freezes the window.
 - **Load order that actually applies.** `~mods` is mounted alphanumerically, so
   priority is written into the deployed file names (`0010_Outfit_P.pak`) with
   every file of a set renamed together. Logic mods are left alone, because

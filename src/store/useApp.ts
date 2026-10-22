@@ -11,6 +11,29 @@ import {
   type StagedInstall,
 } from "../lib/ipc";
 
+/** Which mods the list shows. */
+export type ModFilter = "all" | "enabled" | "disabled" | "updates" | "problems" | "pending";
+/** How the list is ordered; `order` is the load order. */
+export type ModSort = "order" | "name" | "size" | "installed" | "type";
+
+export interface ListView {
+  filter: ModFilter;
+  /** Only mods with a component of this type. */
+  type: ModTypeId | null;
+  /** Only mods carrying this tag. */
+  tag: string | null;
+  sort: ModSort;
+  descending: boolean;
+}
+
+export const DEFAULT_LIST_VIEW: ListView = {
+  filter: "all",
+  type: null,
+  tag: null,
+  sort: "order",
+  descending: false,
+};
+
 export type View =
   | "mods"
   | "order"
@@ -39,6 +62,8 @@ interface AppStore {
   snapshot: AppSnapshot | null;
   selection: number[];
   search: string;
+  listView: ListView;
+  setListView: (change: Partial<ListView>) => void;
   busy: Busy | null;
   /** Archives the detector could not classify, waiting to be asked about. */
   queue: StagedInstall[];
@@ -99,6 +124,7 @@ interface AppStore {
   answerFound: (install: boolean) => Promise<void>;
   toast: (kind: Toast["kind"], message: string) => void;
   dismissToast: (id: number) => void;
+  dismissAllToasts: () => void;
 }
 
 let toastSeq = 0;
@@ -110,6 +136,8 @@ export const useApp = create<AppStore>((set, get) => ({
   snapshot: null,
   selection: [],
   search: "",
+  listView: DEFAULT_LIST_VIEW,
+  setListView: (change) => set((state) => ({ listView: { ...state.listView, ...change } })),
   busy: null,
   queue: [],
   downloads: [],
@@ -470,6 +498,10 @@ export const useApp = create<AppStore>((set, get) => ({
     }
   },
 
+  dismissAllToasts() {
+    set({ toasts: [] });
+  },
+
   dismissToast(id) {
     set((state) => ({ toasts: state.toasts.filter((t) => t.id !== id) }));
   },
@@ -494,15 +526,69 @@ function looksLikeArchive(path: string): boolean {
 }
 
 /** Mods matching the current search, in load order. */
-export function visibleMods(snapshot: AppSnapshot | null, search: string): ModView[] {
+/** Something about the mod wants attention. */
+export function hasProblem(mod: ModView): boolean {
+  return (
+    mod.warnings.length > 0 ||
+    mod.missingRequirements.length > 0 ||
+    mod.misordered.length > 0 ||
+    mod.componentTypes.includes("unknown") ||
+    mod.fileConflicts?.redundant === true
+  );
+}
+
+/** Mods matching the search and the list's filters, in the chosen order. */
+export function visibleMods(
+  snapshot: AppSnapshot | null,
+  search: string,
+  view: ListView = DEFAULT_LIST_VIEW,
+): ModView[] {
   if (!snapshot) return [];
   const needle = search.trim().toLowerCase();
-  if (!needle) return snapshot.mods;
-  // Tags and notes are searched too, so a tag works as a filter.
-  return snapshot.mods.filter(
-    (m) =>
-      m.name.toLowerCase().includes(needle) ||
-      m.tags.some((tag) => tag.toLowerCase().includes(needle)) ||
-      (m.notes ?? "").toLowerCase().includes(needle),
-  );
+  const shown = snapshot.mods.filter((m) => {
+    // Tags and notes are searched too, so a tag works as a filter.
+    if (
+      needle &&
+      !m.name.toLowerCase().includes(needle) &&
+      !m.tags.some((tag) => tag.toLowerCase().includes(needle)) &&
+      !(m.notes ?? "").toLowerCase().includes(needle)
+    ) {
+      return false;
+    }
+    if (view.type && !m.componentTypes.includes(view.type)) return false;
+    if (view.tag && !m.tags.includes(view.tag)) return false;
+    switch (view.filter) {
+      case "enabled":
+        return m.enabled;
+      case "disabled":
+        return !m.enabled;
+      case "updates":
+        return m.latestVersion !== null;
+      case "problems":
+        return hasProblem(m);
+      case "pending":
+        return m.enabled !== m.deployed;
+      default:
+        return true;
+    }
+  });
+  if (view.sort === "order") return view.descending ? shown.reverse() : shown;
+  const key = (m: ModView): string | number => {
+    switch (view.sort) {
+      case "name":
+        return m.name.toLowerCase();
+      case "size":
+        return m.sizeBytes;
+      case "installed":
+        return m.installedAt;
+      default:
+        return m.componentTypes[0] ?? "";
+    }
+  };
+  const sorted = [...shown].sort((a, b) => {
+    const [x, y] = [key(a), key(b)];
+    const by = x < y ? -1 : x > y ? 1 : a.name.localeCompare(b.name);
+    return view.descending ? -by : by;
+  });
+  return sorted;
 }

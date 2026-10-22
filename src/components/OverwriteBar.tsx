@@ -6,6 +6,7 @@ import { formatBytes } from "../lib/format";
 import { ipc } from "../lib/ipc";
 import { useApp } from "../store/useApp";
 import { Button, Dialog } from "./ui";
+import { askConfirm } from "./Ask";
 
 /**
  * The overwrite folder, shown under the mod list as Mod Organizer 2 shows it:
@@ -62,12 +63,14 @@ export function OverwriteBar() {
         size="sm"
         variant="danger"
         disabled={working}
-        onClick={() => {
-          if (
-            window.confirm(
-              `Delete the ${overwrite.files} file(s) in overwrite? Logs and settings the game created will be lost.`,
-            )
-          ) {
+        onClick={async () => {
+          const sure = await askConfirm({
+            title: "Clear overwrite",
+            message: `Delete the ${overwrite.files} file(s) in overwrite? Logs and settings the game created will be lost.`,
+            confirmLabel: "Delete",
+            danger: true,
+          });
+          if (sure) {
             void run(async () => `Removed ${await ipc.clearOverwrite()} file(s) from overwrite.`);
           }
         }}
