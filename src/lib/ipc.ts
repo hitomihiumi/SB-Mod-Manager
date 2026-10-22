@@ -643,9 +643,19 @@ export const ipc = {
   updatableMods: () => invoke<UpdatableMod[]>("updatable_mods"),
   /** Queue the newest files; each replaces its old version on install. */
   updateMods: (ids: number[]) => invoke<UpdatesQueued>("update_mods", { ids }),
+  /** All installed mods when `ids` is null. */
+  redetectMods: (ids: number[] | null) => invoke<RedetectReport>("redetect_mods", { ids }),
 };
 
 export type ShortcutPlace = "desktop" | "startMenu";
+
+/** What detecting installed mods again changed. */
+export interface RedetectReport {
+  changed: string[];
+  unchanged: number;
+  unsure: string[];
+  applied: ApplyReport | null;
+}
 
 /** One entry of a mod list being imported. */
 export interface ImportEntry {

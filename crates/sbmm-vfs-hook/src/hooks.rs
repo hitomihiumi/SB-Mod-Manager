@@ -13,13 +13,14 @@ use std::collections::HashMap;
 use std::ffi::c_void;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock, RwLock};
 
 use sbmm_vfs::{pattern, Access, Mapping, Redirect, VPath, Vfs};
 use windows_sys::core::BOOL;
 use windows_sys::Win32::Foundation::{
-    SetLastError, ERROR_ALREADY_EXISTS, ERROR_FILE_NOT_FOUND, ERROR_NO_MORE_FILES, HANDLE, HMODULE,
-    INVALID_HANDLE_VALUE,
+    GetLastError, SetLastError, ERROR_ALREADY_EXISTS, ERROR_FILE_NOT_FOUND, ERROR_NO_MORE_FILES,
+    HANDLE, HMODULE, INVALID_HANDLE_VALUE,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     GetFullPathNameW, CREATE_ALWAYS, CREATE_NEW, FILE_ATTRIBUTE_DIRECTORY, INVALID_FILE_ATTRIBUTES,
@@ -299,7 +300,20 @@ unsafe fn locate(ptr: *const u16) -> Option<(VPath, String)> {
     let text = read_wide(ptr)?;
     let full = full_path(&wide(&text))?;
     let vfs = VFS.get()?.read().ok()?;
-    let path = vfs.locate(&full)?;
+    let Some(path) = vfs.locate(&full) else {
+        // A pak folder the view does not recognise as the game's own: the
+        // engine spelling the game folder some other way would explain mods
+        // not loading.
+        if about_paks(&full) {
+            trace(|| {
+                format!(
+                    "not in the game folder ({}): {text} -> {full}",
+                    vfs.game_root().display()
+                )
+            });
+        }
+        return None;
+    };
     Some((path, full))
 }
 
@@ -315,6 +329,30 @@ fn in_overwrite(real: &Path) -> bool {
     VFS.get()
         .and_then(|v| v.read().ok().map(|v| real.starts_with(v.overwrite_root())))
         .unwrap_or(false)
+}
+
+/// Trace lines still to write. What the game does with the pak folders is
+/// what decides whether mods load, so the first few hundred of those
+/// requests are written down — enough to see why, without the log growing
+/// for the whole session.
+static TRACE_LEFT: AtomicUsize = AtomicUsize::new(400);
+
+fn trace(message: impl FnOnce() -> String) {
+    let left = TRACE_LEFT.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1));
+    match left {
+        Ok(1) => {
+            log(&message());
+            log("(trace limit reached)");
+        }
+        Ok(_) => log(&message()),
+        Err(_) => {}
+    }
+}
+
+/// Whether a path is about the game's pak folders, the ones traced.
+fn about_paks(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase().replace('/', "\\");
+    lower.contains("\\content\\paks")
 }
 
 fn log(message: &str) {
@@ -354,7 +392,35 @@ unsafe extern "system" fn hook_create_file(
     } else {
         Access::Read
     };
-    match redirect(&path, wants, real_exists(&full)) {
+    let traced = path.as_str().starts_with("sb/content/paks");
+    let decision = redirect(&path, wants, real_exists(&full));
+    if traced {
+        let handle = open_redirected(decision, &path, name, call);
+        let error = GetLastError();
+        trace(|| {
+            format!(
+                "open {path}: {}",
+                if handle == INVALID_HANDLE_VALUE {
+                    format!("failed (error {error})")
+                } else {
+                    "ok".to_string()
+                }
+            )
+        });
+        SetLastError(error);
+        return handle;
+    }
+    open_redirected(decision, &path, name, call)
+}
+
+/// Open what `decision` says the game's request is really for.
+unsafe fn open_redirected(
+    decision: Option<Redirect>,
+    path: &VPath,
+    name: *const u16,
+    call: impl Fn(*const u16) -> HANDLE,
+) -> HANDLE {
+    match decision {
         Some(Redirect::To(target)) => {
             let new_in_overwrite = in_overwrite(&target) && !target.exists();
             if new_in_overwrite {
@@ -366,7 +432,7 @@ unsafe extern "system" fn hook_create_file(
             if handle != INVALID_HANDLE_VALUE && new_in_overwrite {
                 if let Some(vfs) = VFS.get() {
                     if let Ok(mut vfs) = vfs.write() {
-                        vfs.created(&path, target);
+                        vfs.created(path, target);
                     }
                 }
             }
@@ -377,7 +443,7 @@ unsafe extern "system" fn hook_create_file(
         Some(Redirect::VirtualDir) => {
             let Some(target) = VFS
                 .get()
-                .and_then(|v| v.read().ok().map(|v| v.overwrite_path(&path)))
+                .and_then(|v| v.read().ok().map(|v| v.overwrite_path(path)))
             else {
                 return call(name);
             };
@@ -500,8 +566,21 @@ unsafe fn virtual_search(name: *const u16) -> Option<Vec<WIN32_FIND_DATAW>> {
     let (directory, pattern) = (&full[..split], &full[split + 1..]);
 
     let vfs = VFS.get()?.read().ok()?;
-    let dir = vfs.locate(directory)?;
+    let Some(dir) = vfs.locate(directory) else {
+        if about_paks(directory) {
+            trace(|| {
+                format!(
+                    "list outside the game folder ({}): {text} -> {full}",
+                    vfs.game_root().display()
+                )
+            });
+        }
+        return None;
+    };
     if !vfs.overlay().is_dir(&dir) {
+        if dir.as_str().starts_with("sb/content/paks") {
+            trace(|| format!("list {dir}: not a folder in the view, left to the real one"));
+        }
         return None;
     }
 
@@ -531,6 +610,19 @@ unsafe fn virtual_search(name: *const u16) -> Option<Vec<WIN32_FIND_DATAW>> {
         };
         set_name(&mut entry, &listed.name);
         out.push(entry);
+    }
+    if dir.as_str().starts_with("sb/content/paks") {
+        let from_mods = vfs
+            .list(&dir, Vec::new())
+            .iter()
+            .filter(|l| l.source.is_some())
+            .count();
+        trace(|| {
+            format!(
+                "list {dir}\\{pattern}: {} entries, {from_mods} of the folder's from mods",
+                out.len()
+            )
+        });
     }
     // A folder only the overlay has still lists `.` and `..`, as every real
     // folder does, since some code skips the first two entries blindly.

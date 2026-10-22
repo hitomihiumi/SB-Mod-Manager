@@ -319,6 +319,15 @@ fn delete_profile(state: tauri::State<'_, AppState>, id: i64) -> Result<(), Stri
     with_app!(state, |app| app.delete_profile(id))
 }
 
+/// Run detection again on installed mods (all, or `ids`).
+#[tauri::command(async)]
+fn redetect_mods(
+    state: tauri::State<'_, AppState>,
+    ids: Option<Vec<i64>>,
+) -> Result<sbmm_app::dto::RedetectReport, String> {
+    with_app!(state, |app| app.redetect_mods(ids.as_deref()))
+}
+
 /// Make another profile active and reconcile the game folder with it.
 #[tauri::command(async)]
 fn switch_profile(state: tauri::State<'_, AppState>, id: i64) -> Result<ApplyReport, String> {
@@ -827,6 +836,7 @@ pub fn run() {
             rename_profile,
             delete_profile,
             switch_profile,
+            redetect_mods,
             conflicts,
             index_mod_assets,
             set_library_root,

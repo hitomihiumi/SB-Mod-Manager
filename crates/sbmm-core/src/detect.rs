@@ -193,6 +193,8 @@ fn detect_heuristic(tree: &FileTree) -> Vec<DetectedComponent> {
     claim_ue4ss_framework(tree, &mut claimed, &mut components);
     claim_logic_mods(tree, &mut claimed, &mut components);
     claim_ue4ss_mods(tree, &mut claimed, &mut components);
+    claim_ue4ss_files(tree, &mut claimed, &mut components);
+    claim_cns_definitions(tree, &mut claimed, &mut components);
     claim_splash(tree, &mut claimed, &mut components);
     claim_movies(tree, &mut claimed, &mut components);
     claim_root_binaries(tree, &mut claimed, &mut components);
@@ -258,6 +260,113 @@ fn detect_heuristic(tree: &FileTree) -> Vec<DetectedComponent> {
         components.push(unknown_component(&payload));
     }
     components
+}
+
+/// A Custom Nanosuit System outfit definition: `*.dekcns.json`,
+/// `*.dekani.json` and the like. They ship beside the outfit's paks, but CNS
+/// only reads them from its own folder under `~mods`, so they go there —
+/// keeping any subfolder the archive puts under `CustomNanosuitSystem`.
+fn is_cns_definition(entry: &TreeEntry) -> bool {
+    let name = entry.file_name();
+    name.ends_with(".json")
+        && name
+            .rsplit_once('.')
+            .and_then(|(stem, _)| stem.rsplit_once('.'))
+            .is_some_and(|(_, kind)| kind.starts_with("dek"))
+}
+
+fn claim_cns_definitions(
+    tree: &FileTree,
+    claimed: &mut HashSet<String>,
+    out: &mut Vec<DetectedComponent>,
+) {
+    let entries: Vec<TreeEntry> = tree
+        .entries()
+        .iter()
+        .filter(|e| !claimed.contains(&e.norm) && is_cns_definition(e))
+        .cloned()
+        .collect();
+    if entries.is_empty() {
+        return;
+    }
+    let files = entries
+        .iter()
+        .map(|e| {
+            let segments: Vec<&str> = e.norm.split('/').collect();
+            let inside = segments
+                .iter()
+                .position(|s| *s == "customnanosuitsystem")
+                .map(|at| at + 1)
+                .unwrap_or(segments.len() - 1);
+            let rel = strip_leading(&e.rel, inside)
+                .unwrap_or_else(|| PathBuf::from(e.rel.file_name().unwrap_or_default()));
+            ComponentFile {
+                source: e.path.clone(),
+                target: Path::new(paths::CNS_DEFINITIONS).join(rel),
+            }
+        })
+        .collect();
+    mark_claimed(&entries, claimed);
+    out.push(DetectedComponent {
+        mod_type: ModType::GameRootOverlay,
+        confidence: Confidence::High,
+        files,
+        target_subdir: PathBuf::from(paths::CNS_DEFINITIONS),
+        ue4ss_mod_name: None,
+        pak_sets: Vec::new(),
+        warnings: Vec::new(),
+        notes: vec![
+            "Outfit definitions for Custom Nanosuit System, which has to be installed for them \
+             to do anything."
+                .into(),
+        ],
+    });
+}
+
+/// Files a mod puts in UE4SS's own folder — settings, shared scripts —
+/// beside or instead of a mod folder. The generated `mods.txt` is the
+/// manager's, so a copy in an archive is left out.
+fn claim_ue4ss_files(
+    tree: &FileTree,
+    claimed: &mut HashSet<String>,
+    out: &mut Vec<DetectedComponent>,
+) {
+    let mut files = Vec::new();
+    let mut entries = Vec::new();
+    for e in tree.entries() {
+        if claimed.contains(&e.norm) || is_junk(e) {
+            continue;
+        }
+        let segments: Vec<&str> = e.norm.split('/').collect();
+        let Some(at) = segments.iter().position(|s| *s == "ue4ss") else {
+            continue;
+        };
+        if at + 1 >= segments.len() || matches!(e.file_name(), "mods.txt" | "mods.json") {
+            continue;
+        }
+        let Some(rel) = strip_leading(&e.rel, at + 1) else {
+            continue;
+        };
+        files.push(ComponentFile {
+            source: e.path.clone(),
+            target: Path::new(paths::UE4SS_DIR).join(rel),
+        });
+        entries.push(e.clone());
+    }
+    if files.is_empty() {
+        return;
+    }
+    mark_claimed(&entries, claimed);
+    out.push(DetectedComponent {
+        mod_type: ModType::GameRootOverlay,
+        confidence: Confidence::High,
+        files,
+        target_subdir: PathBuf::from(paths::UE4SS_DIR),
+        ue4ss_mod_name: None,
+        pak_sets: Vec::new(),
+        warnings: Vec::new(),
+        notes: vec!["Goes into UE4SS's own folder, over its files.".into()],
+    });
 }
 
 /// Unreal settings files anywhere in the archive, as a settings tweak.

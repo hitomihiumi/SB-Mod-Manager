@@ -471,3 +471,69 @@ fn engine_ini_is_a_settings_tweak() {
     let types: Vec<ModType> = mixed.iter().map(|c| c.mod_type).collect();
     assert_eq!(types, [ModType::ConfigTweak, ModType::GenericPak]);
 }
+
+/// A CNS outfit as it ships: paks and its definition, sometimes under
+/// `~mods/CustomNanosuitSystem`, sometimes loose.
+#[test]
+fn a_cns_outfit_definition_goes_where_cns_reads_it() {
+    let nested = detect(&[
+        "(CNS) EVE - Herald of Goddess/~mods/CustomNanosuitSystem/Herald_of_Goddess_P.pak",
+        "(CNS) EVE - Herald of Goddess/~mods/CustomNanosuitSystem/Herald_of_Goddess_P.utoc",
+        "(CNS) EVE - Herald of Goddess/~mods/CustomNanosuitSystem/Herald_of_Goddess_P.ucas",
+        "(CNS) EVE - Herald of Goddess/~mods/CustomNanosuitSystem/Herald_of_Goddess.dekcns.json",
+    ]);
+    assert!(
+        nested.iter().all(|c| c.confidence == Confidence::High),
+        "{nested:?}"
+    );
+    let definition = nested
+        .iter()
+        .find(|c| c.mod_type == ModType::GameRootOverlay)
+        .unwrap();
+    assert_eq!(
+        targets(definition),
+        ["SB/Content/Paks/~mods/CustomNanosuitSystem/Herald_of_Goddess.dekcns.json"]
+    );
+
+    let loose = detect(&[
+        "EroticEve/joven2_EroticEve-R3-CNS_P.pak",
+        "EroticEve/joven2_EroticEve-R3-CNS_P.utoc",
+        "EroticEve/joven2_EroticEve-R3-CNS_P.ucas",
+        "EroticEve/joven2_EroticEve-R3.dekcns.json",
+        "EroticEve/Cosmetics/Extra.dekani.json",
+    ]);
+    let definition = loose
+        .iter()
+        .find(|c| c.mod_type == ModType::GameRootOverlay)
+        .unwrap();
+    assert_eq!(
+        targets(definition),
+        [
+            "SB/Content/Paks/~mods/CustomNanosuitSystem/Extra.dekani.json",
+            "SB/Content/Paks/~mods/CustomNanosuitSystem/joven2_EroticEve-R3.dekcns.json",
+        ]
+    );
+}
+
+/// A Lua mod shipped with a UE4SS settings file beside it: both recognised,
+/// nothing asked, and the mod folder not nested inside itself.
+#[test]
+fn a_lua_mod_with_ue4ss_settings_needs_no_question() {
+    let components = detect(&[
+        "Better Jiggle Mod v2.6.3/ue4ss/Mods/JiggleUpdate/Scripts/main.lua",
+        "Better Jiggle Mod v2.6.3/ue4ss/Mods/JiggleUpdate/Scripts/config.txt",
+        "Better Jiggle Mod v2.6.3/ue4ss/UE4SS-settings.ini",
+        "Better Jiggle Mod v2.6.3/ue4ss/Mods/mods.txt",
+    ]);
+    assert!(
+        components.iter().all(|c| c.confidence == Confidence::High),
+        "{components:?}"
+    );
+    let all: Vec<String> = components.iter().flat_map(targets).collect();
+    assert!(all.contains(&"SB/Binaries/Win64/ue4ss/Mods/JiggleUpdate/Scripts/main.lua".to_string()));
+    assert!(all.contains(&"SB/Binaries/Win64/ue4ss/UE4SS-settings.ini".to_string()));
+    assert!(
+        !all.iter().any(|t| t.ends_with("mods.txt")),
+        "the manager writes mods.txt"
+    );
+}

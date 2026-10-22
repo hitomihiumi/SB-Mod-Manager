@@ -612,3 +612,17 @@ pub struct UpdatableMod {
     pub version: Option<String>,
     pub latest: String,
 }
+
+/// What detecting installed mods again changed.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RedetectReport {
+    /// Mods now laid out differently.
+    pub changed: Vec<String>,
+    /// Already as the detector would have them.
+    pub unchanged: usize,
+    /// Still not fully recognised; left as they were.
+    pub unsure: Vec<String>,
+    /// Set when the changes were applied at once.
+    pub applied: Option<ApplyReport>,
+}

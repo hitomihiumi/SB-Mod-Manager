@@ -104,6 +104,8 @@ interface AppStore {
   /** Reorder to obey the load order rules; `adding` adds one first. */
   sortByRules: (adding?: { before: number; after: number }) => Promise<void>;
   applyChanges: () => Promise<void>;
+  /** Detect installed mods again (all with null) and say what changed. */
+  redetect: (ids: number[] | null) => Promise<void>;
   /** Put deployed files changed outside the manager back. */
   repairDrift: () => Promise<void>;
   uninstall: (id: number) => Promise<void>;
@@ -323,6 +325,26 @@ export const useApp = create<AppStore>((set, get) => ({
         get().toast("success", `Applied ${changed} change${changed === 1 ? "" : "s"}.`);
       }
       await get().refresh();
+    } catch (error) {
+      get().toast("error", String(error));
+    } finally {
+      set({ busy: null });
+    }
+  },
+
+  async redetect(ids) {
+    set({ busy: { label: "Detecting mods again", done: 0, total: 1 } });
+    try {
+      const report = await ipc.redetectMods(ids);
+      await get().refresh();
+      const parts = [
+        report.changed.length > 0
+          ? `${report.changed.length} mod${report.changed.length === 1 ? "" : "s"} now laid out correctly` +
+            (report.applied ? " and applied" : " — apply to put them in place")
+          : "Nothing needed changing",
+        report.unsure.length > 0 && `${report.unsure.length} still not fully recognised, left as they were`,
+      ].filter(Boolean);
+      get().toast("success", `${parts.join("; ")}.`);
     } catch (error) {
       get().toast("error", String(error));
     } finally {

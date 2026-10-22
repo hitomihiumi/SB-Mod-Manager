@@ -1117,9 +1117,20 @@ impl App {
         let mut components = detect_components(&tree);
 
         if let Some(forced) = type_override {
+            // The user's choice answers the question that was asked — where
+            // the files nobody recognised belong. Parts that were recognised
+            // keep their own destinations: forcing a whole CNS outfit to
+            // "pak" put its outfit definition among the paks, and forcing a
+            // Lua mod's archive re-nested the mod inside itself.
             components = components
                 .iter()
-                .map(|c| plan::retarget(c, forced, name))
+                .map(|c| {
+                    if c.mod_type == ModType::Unknown || c.confidence == Confidence::AskUser {
+                        plan::retarget(c, forced, name)
+                    } else {
+                        c.clone()
+                    }
+                })
                 .collect();
             // Remember the correction so an archive shaped like this one is
             // classified without asking next time.
@@ -1395,6 +1406,62 @@ impl App {
     pub fn set_group_collapsed(&mut self, group_id: i64, collapsed: bool) -> Result<()> {
         self.store.set_group_collapsed(group_id, collapsed)?;
         Ok(())
+    }
+
+    /// Look at installed mods' files again with the current detector, and
+    /// take its answer wherever it is sure and differs from what the mod
+    /// has — repairing mods installed before the detector understood their
+    /// layout, or installed with a type that was forced on the whole archive.
+    /// Mods it is still unsure about keep what they have. Changes reach the
+    /// game at once when changes apply automatically.
+    pub fn redetect_mods(&mut self, ids: Option<&[i64]>) -> Result<RedetectReport> {
+        let mut report = RedetectReport::default();
+        for record in self.store.list_mods()? {
+            if ids.is_some_and(|ids| !ids.contains(&record.id))
+                || matches!(record.source.as_str(), "upscaler" | "framegen")
+            {
+                continue;
+            }
+            let root = self.staging_path(&record.staging_folder);
+            if !root.is_dir() {
+                continue;
+            }
+            let fresh = detect_components(&FileTree::new(sbmm_archive::walk_relative(&root)));
+            if fresh.is_empty()
+                || fresh
+                    .iter()
+                    .any(|c| c.mod_type == ModType::Unknown || c.confidence == Confidence::AskUser)
+            {
+                report.unsure.push(record.name);
+                continue;
+            }
+            let targets = |components: &[DetectedComponent]| {
+                let mut all: Vec<String> = components
+                    .iter()
+                    .flat_map(|c| {
+                        c.files
+                            .iter()
+                            .map(|f| f.target.to_string_lossy().replace('\\', "/"))
+                    })
+                    .collect();
+                all.sort();
+                all
+            };
+            let current = self.store.components_for(record.id)?;
+            let types = |components: &[DetectedComponent]| {
+                components.iter().map(|c| c.mod_type).collect::<Vec<_>>()
+            };
+            if targets(&current) == targets(&fresh) && types(&current) == types(&fresh) {
+                report.unchanged += 1;
+                continue;
+            }
+            self.store.set_components(record.id, &fresh)?;
+            report.changed.push(record.name);
+        }
+        if !report.changed.is_empty() && self.game()?.is_some() && self.auto_apply()? {
+            report.applied = Some(self.apply()?);
+        }
+        Ok(report)
     }
 
     /// The user's note on a mod; blank clears it.

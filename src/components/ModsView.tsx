@@ -9,6 +9,7 @@ import {
   ChevronRight,
   ExternalLink,
   FolderMinus,
+  ScanSearch,
   FolderOpen,
   FolderPlus,
   Info,
@@ -835,6 +836,7 @@ function useModActions() {
   const refresh = useApp((s) => s.refresh);
   const setSelection = useApp((s) => s.setSelection);
   const toast = useApp((s) => s.toast);
+  const redetect = useApp((s) => s.redetect);
   const mods = snapshot?.mods ?? [];
   const named = (ids: number[]) => mods.filter((m) => ids.includes(m.id));
 
@@ -969,6 +971,11 @@ function useModActions() {
         icon: <FolderMinus size={13} />,
         disabled: all.every((m) => m.groupId === null),
         onSelect: () => void moveToGroup(ids, null),
+      },
+      {
+        label: many ? `Detect ${ids.length} mods again` : "Detect again",
+        icon: <ScanSearch size={13} />,
+        onSelect: () => void redetect(ids),
       },
       "separator",
       {

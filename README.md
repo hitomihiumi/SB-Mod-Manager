@@ -23,6 +23,9 @@ wrong is the usual reason a mod "doesn't work".
   beside a recognised payload are set aside and named rather than turning the
   whole archive "unknown". When nothing is conclusive it asks once and
   remembers the answer.
+- **Custom Nanosuit System outfits.** An outfit's `*.dekcns.json`
+  definition goes to `~mods\CustomNanosuitSystem`, where CNS reads it, while
+  its paks go in with the others.
 - **Engine.ini tweaks.** `Engine.ini`, `GameUserSettings.ini`,
   `Scalability.ini` and the other Unreal settings files a mod ships are merged
   into the game's own (`%LOCALAPPDATA%\SB\Saved\Config\WindowsNoEditor`)

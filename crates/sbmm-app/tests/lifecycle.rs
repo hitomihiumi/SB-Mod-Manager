@@ -3178,3 +3178,94 @@ fn an_engine_ini_tweak_is_merged_in_and_taken_back_out() {
     fx.app.uninstall(sharp).unwrap();
     assert_eq!(fs::read_to_string(&engine).unwrap(), before);
 }
+
+// -- installs repaired from a real library ----------------------------------
+
+/// A CNS outfit installed while the dialog forced "pak" on the whole
+/// archive had its definition among the paks; choosing a type now only
+/// places the unrecognised files, and detecting again repairs old installs.
+#[test]
+fn a_forced_type_only_places_what_was_not_recognised() {
+    let mut fx = Fixture::new();
+    let folder = fx.source.join("Herald");
+    for (rel, body) in [
+        ("~mods/CustomNanosuitSystem/Herald_P.pak", "p"),
+        ("~mods/CustomNanosuitSystem/Herald_P.utoc", "u"),
+        ("~mods/CustomNanosuitSystem/Herald_P.ucas", "c"),
+        ("~mods/CustomNanosuitSystem/Herald.dekcns.json", "{}"),
+        ("tool.dll", "MZ"),
+    ] {
+        let path = folder.join(rel);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, body).unwrap();
+    }
+    let staged = fx.app.stage_folder(&folder).unwrap();
+    assert!(staged.needs_confirmation, "the dll is asked about");
+    let id = fx
+        .app
+        .confirm_install(&staged.staging_id, "Herald", Some(ModType::RootBinary))
+        .unwrap();
+    fx.app.set_enabled(&[id], true).unwrap();
+    fx.app.apply().unwrap();
+    let game = fx.game_snapshot();
+    assert!(
+        game.contains_key("SB/Content/Paks/~mods/CustomNanosuitSystem/Herald.dekcns.json"),
+        "{:?}",
+        game.keys()
+    );
+    assert!(game.contains_key("SB/Binaries/Win64/tool.dll"));
+}
+
+#[test]
+fn detecting_again_repairs_a_mod_installed_the_old_way() {
+    let mut fx = Fixture::new();
+    let id = fx.install_folder(
+        "Better Jiggle",
+        &[
+            ("ue4ss/Mods/JiggleUpdate/Scripts/main.lua", "print(1)"),
+            ("ue4ss/UE4SS-settings.ini", "[General]\n"),
+        ],
+    );
+    // As the old installer left it: the whole archive forced to "Lua".
+    let staging = fx.app.folders().unwrap().mods;
+    let folder = fx.app.snapshot().unwrap().mods[0].folder.clone();
+    let broken = vec![sbmm_core::model::DetectedComponent {
+        mod_type: ModType::Ue4ssLua,
+        confidence: sbmm_core::model::Confidence::High,
+        files: vec![sbmm_core::model::ComponentFile {
+            source: "ue4ss/Mods/JiggleUpdate/Scripts/main.lua".into(),
+            target:
+                "SB/Binaries/Win64/ue4ss/Mods/JiggleUpdate/ue4ss/Mods/JiggleUpdate/Scripts/main.lua"
+                    .into(),
+        }],
+        target_subdir: "SB/Binaries/Win64/ue4ss/Mods/JiggleUpdate".into(),
+        ue4ss_mod_name: Some("JiggleUpdate".into()),
+        pak_sets: vec![],
+        warnings: vec![],
+        notes: vec![],
+    }];
+    fx.store().set_components(id, &broken).unwrap();
+    assert!(Path::new(&staging).join(&folder).is_dir());
+    fx.app.set_enabled(&[id], true).unwrap();
+    fx.app.apply().unwrap();
+    assert!(fx
+        .game_snapshot()
+        .keys()
+        .any(|k| k.contains("JiggleUpdate/ue4ss/Mods")));
+
+    let report = fx.app.redetect_mods(None).unwrap();
+    assert_eq!(report.changed, ["Better Jiggle"]);
+    assert!(report.applied.is_some());
+    let game = fx.game_snapshot();
+    assert!(
+        game.contains_key("SB/Binaries/Win64/ue4ss/Mods/JiggleUpdate/Scripts/main.lua"),
+        "{:?}",
+        game.keys()
+    );
+    assert!(game.contains_key("SB/Binaries/Win64/ue4ss/UE4SS-settings.ini"));
+    assert!(!game.keys().any(|k| k.contains("JiggleUpdate/ue4ss/Mods")));
+
+    let again = fx.app.redetect_mods(None).unwrap();
+    assert!(again.changed.is_empty());
+    assert_eq!(again.unchanged, 1);
+}
