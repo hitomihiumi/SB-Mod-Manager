@@ -170,6 +170,150 @@ pub fn merge(pristine: Option<&str>, user: &str, fresh: &str) -> Merged {
     Merged { text, carried }
 }
 
+// -- editing one setting -------------------------------------------------
+//
+// What a settings tweak needs: read, set and remove single keys, and add or
+// remove whole lines for Unreal's array entries, leaving every other line —
+// comments, order, line endings — as it was.
+
+/// A line that sets something, in file order: `(section, key, value)`.
+/// Keys keep Unreal's array prefixes (`+Paths`).
+pub fn entries(text: &str) -> Vec<(String, String, String)> {
+    lines(text)
+        .into_iter()
+        .filter_map(|line| line.setting.map(|(k, v)| (line.section, k, v)))
+        .collect()
+}
+
+/// Whether a key is one of Unreal's array operations rather than a value.
+pub fn is_array_op(key: &str) -> bool {
+    key.starts_with(['+', '-', '.', '!'])
+}
+
+fn newline_of(text: &str) -> &'static str {
+    if text.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    }
+}
+
+fn join(raw: Vec<String>, newline: &str, trailing: bool) -> String {
+    let mut text = raw.join(newline);
+    if trailing && !text.is_empty() {
+        text.push_str(newline);
+    }
+    text
+}
+
+/// The value of the first `key` in `section`, ignoring case.
+pub fn get(text: &str, section: &str, key: &str) -> Option<String> {
+    lines(text).into_iter().find_map(|line| {
+        let (k, v) = line.setting?;
+        (line.section.eq_ignore_ascii_case(section) && k.eq_ignore_ascii_case(key)).then_some(v)
+    })
+}
+
+/// Index of the line after the last non-blank line of `section`, or `None`
+/// when the section is not there.
+fn section_end(raw: &[String], parsed: &[Line], section: &str) -> Option<usize> {
+    let mut end = None;
+    for (index, (text, line)) in raw.iter().zip(parsed).enumerate() {
+        if line.section.eq_ignore_ascii_case(section) && !text.trim().is_empty() {
+            end = Some(index + 1);
+        }
+    }
+    end
+}
+
+fn append_to_section(raw: &mut Vec<String>, parsed: &[Line], section: &str, line: String) {
+    match section_end(raw, parsed, section) {
+        Some(at) => raw.insert(at, line),
+        None => {
+            if raw.last().is_some_and(|l| !l.trim().is_empty()) {
+                raw.push(String::new());
+            }
+            if !section.is_empty() {
+                raw.push(format!("[{section}]"));
+            }
+            raw.push(line);
+        }
+    }
+}
+
+/// `text` with `key` in `section` set to `value`: the first such line is
+/// changed in place, or the key is added at the end of the section (and the
+/// section at the end of the file).
+pub fn set(text: &str, section: &str, key: &str, value: &str) -> String {
+    let newline = newline_of(text);
+    let parsed = lines(text);
+    let mut raw: Vec<String> = text.lines().map(str::to_string).collect();
+    let existing = parsed.iter().position(|line| {
+        line.section.eq_ignore_ascii_case(section)
+            && line
+                .setting
+                .as_ref()
+                .is_some_and(|(k, _)| k.eq_ignore_ascii_case(key))
+    });
+    match existing {
+        Some(index) => {
+            let line = &raw[index];
+            let eq = line.find('=').unwrap_or(line.len());
+            raw[index] = format!("{}={value}", &line[..eq]);
+        }
+        None => append_to_section(&mut raw, &parsed, section, format!("{key}={value}")),
+    }
+    join(raw, newline, true)
+}
+
+/// `text` without the first `key` in `section`.
+pub fn remove(text: &str, section: &str, key: &str) -> String {
+    let newline = newline_of(text);
+    let parsed = lines(text);
+    let mut raw: Vec<String> = text.lines().map(str::to_string).collect();
+    if let Some(index) = parsed.iter().position(|line| {
+        line.section.eq_ignore_ascii_case(section)
+            && line
+                .setting
+                .as_ref()
+                .is_some_and(|(k, _)| k.eq_ignore_ascii_case(key))
+    }) {
+        raw.remove(index);
+    }
+    join(raw, newline, text.ends_with('\n'))
+}
+
+/// Whether `section` has exactly this line (trimmed).
+pub fn has_line(text: &str, section: &str, line: &str) -> bool {
+    text.lines()
+        .zip(lines(text))
+        .any(|(raw, parsed)| parsed.section.eq_ignore_ascii_case(section) && raw.trim() == line)
+}
+
+/// `text` with `line` added to the end of `section`.
+pub fn add_line(text: &str, section: &str, line: &str) -> String {
+    let newline = newline_of(text);
+    let parsed = lines(text);
+    let mut raw: Vec<String> = text.lines().map(str::to_string).collect();
+    append_to_section(&mut raw, &parsed, section, line.to_string());
+    join(raw, newline, true)
+}
+
+/// `text` without the first occurrence of `line` in `section`.
+pub fn remove_line(text: &str, section: &str, line: &str) -> String {
+    let newline = newline_of(text);
+    let parsed = lines(text);
+    let mut raw: Vec<String> = text.lines().map(str::to_string).collect();
+    if let Some(index) = raw
+        .iter()
+        .zip(&parsed)
+        .position(|(r, p)| p.section.eq_ignore_ascii_case(section) && r.trim() == line)
+    {
+        raw.remove(index);
+    }
+    join(raw, newline, text.ends_with('\n'))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -223,6 +367,47 @@ mod tests {
         let user = "[general]\nENABLED=0\n";
         let v2 = "[General]\r\nEnabled=1\r\n";
         assert_eq!(merge(None, user, v2).text, "[General]\r\nEnabled=0\r\n");
+    }
+
+    #[test]
+    fn single_settings_are_set_and_removed_in_place() {
+        let text = "; mine\r\n[SystemSettings]\r\nr.Shadow=1\r\n\r\n[Other]\r\nA=1\r\n";
+        let set_existing = set(text, "systemsettings", "R.SHADOW", "3");
+        assert_eq!(
+            set_existing,
+            "; mine\r\n[SystemSettings]\r\nr.Shadow=3\r\n\r\n[Other]\r\nA=1\r\n"
+        );
+        let added = set(&set_existing, "SystemSettings", "r.Fog", "0");
+        assert_eq!(
+            added,
+            "; mine\r\n[SystemSettings]\r\nr.Shadow=3\r\nr.Fog=0\r\n\r\n[Other]\r\nA=1\r\n"
+        );
+        assert_eq!(get(&added, "SystemSettings", "r.fog").as_deref(), Some("0"));
+        let new_section = set(
+            "",
+            "/Script/Engine.RendererSettings",
+            "r.Tonemapper.Sharpen",
+            "1",
+        );
+        assert_eq!(
+            new_section,
+            "[/Script/Engine.RendererSettings]\nr.Tonemapper.Sharpen=1\n"
+        );
+        assert_eq!(remove(&added, "SystemSettings", "r.Fog"), set_existing);
+    }
+
+    #[test]
+    fn array_lines_are_added_and_removed_whole() {
+        let text = "[Core.Log]\nGlobal=log\n";
+        let added = add_line(text, "Core.Log", "+Paths=../Mine");
+        assert_eq!(added, "[Core.Log]\nGlobal=log\n+Paths=../Mine\n");
+        assert!(has_line(&added, "core.log", "+Paths=../Mine"));
+        assert_eq!(remove_line(&added, "Core.Log", "+Paths=../Mine"), text);
+        assert!(is_array_op("+Paths") && !is_array_op("Paths"));
+        assert_eq!(
+            entries(&added)[1],
+            ("Core.Log".into(), "+Paths".into(), "../Mine".into())
+        );
     }
 
     #[test]

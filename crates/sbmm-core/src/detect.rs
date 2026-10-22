@@ -21,6 +21,31 @@ const JUNK_EXTS: &[&str] = &[
 
 const JUNK_NAMES: &[&str] = &["desktop.ini", "thumbs.db", ".ds_store"];
 
+/// Unreal's own settings files. A mod that ships one is a tweak to the game's
+/// settings, which live outside the game folder.
+const UNREAL_CONFIGS: &[&str] = &[
+    "engine.ini",
+    "game.ini",
+    "gameusersettings.ini",
+    "scalability.ini",
+    "input.ini",
+    "deviceprofiles.ini",
+    "hardware.ini",
+];
+
+/// Leftovers that could be a payload the detector does not understand, and
+/// so are worth asking about. Anything else left over beside a recognised
+/// payload — readmes without an extension, source art, metadata, nested
+/// archives of optional extras — is set aside with a note instead of making
+/// the whole archive "unknown".
+const PAYLOAD_EXTS: &[&str] = &[
+    "dll", "exe", "asi", "lua", "uasset", "uexp", "ubulk", "umap", "bk2", "mp4", "wem", "bnk",
+    "ini", "cfg", "toml",
+];
+
+/// Archives inside the archive: usually optional extras, worth naming.
+const ARCHIVE_EXTS: &[&str] = &["zip", "7z", "rar"];
+
 /// Extensions that mark a loose injector payload.
 const ROOT_BINARY_EXTS: &[&str] = &["asi", "addon", "addon64"];
 
@@ -171,20 +196,106 @@ fn detect_heuristic(tree: &FileTree) -> Vec<DetectedComponent> {
     claim_splash(tree, &mut claimed, &mut components);
     claim_movies(tree, &mut claimed, &mut components);
     claim_root_binaries(tree, &mut claimed, &mut components);
+    claim_config_tweaks(tree, &mut claimed, &mut components);
     claim_generic_paks(tree, &mut claimed, &mut components);
 
-    // Anything left that is not documentation means we genuinely do not know.
     let leftovers: Vec<TreeEntry> = tree
         .entries()
         .iter()
         .filter(|e| !claimed.contains(&e.norm) && !is_junk(e))
         .cloned()
         .collect();
-    if !leftovers.is_empty() {
-        components.push(unknown_component(&leftovers));
+    if leftovers.is_empty() {
+        return components;
     }
 
+    // With nothing recognised, there is nothing to go on: ask about it all.
+    if components.is_empty() {
+        components.push(unknown_component(&leftovers));
+        return components;
+    }
+
+    // Beside a recognised payload, only what could itself be a payload is
+    // worth a question; the rest is set aside and named.
+    let (payload, extras): (Vec<TreeEntry>, Vec<TreeEntry>) = leftovers
+        .into_iter()
+        .partition(|e| e.extension().is_some_and(|ext| PAYLOAD_EXTS.contains(&ext)));
+    if !extras.is_empty() {
+        // Named as the archive spells them, not as compared.
+        let name = |e: &TreeEntry| {
+            e.rel
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        };
+        let nested: Vec<String> = extras
+            .iter()
+            .filter(|e| e.extension().is_some_and(|ext| ARCHIVE_EXTS.contains(&ext)))
+            .map(name)
+            .collect();
+        let shown: Vec<String> = extras.iter().take(4).map(name).collect();
+        let mut note = format!(
+            "Not installed: {}{}.",
+            shown.join(", "),
+            if extras.len() > shown.len() {
+                format!(" and {} more", extras.len() - shown.len())
+            } else {
+                String::new()
+            }
+        );
+        if !nested.is_empty() {
+            note.push_str(&format!(
+                " {} {} an archive of its own — extract it and install it separately if you want what it holds.",
+                nested.join(", "),
+                if nested.len() == 1 { "is" } else { "are each" },
+            ));
+        }
+        if let Some(first) = components.first_mut() {
+            first.notes.push(note);
+        }
+    }
+    if !payload.is_empty() {
+        components.push(unknown_component(&payload));
+    }
     components
+}
+
+/// Unreal settings files anywhere in the archive, as a settings tweak.
+fn claim_config_tweaks(
+    tree: &FileTree,
+    claimed: &mut HashSet<String>,
+    out: &mut Vec<DetectedComponent>,
+) {
+    let entries: Vec<TreeEntry> = tree
+        .entries()
+        .iter()
+        .filter(|e| !claimed.contains(&e.norm) && UNREAL_CONFIGS.contains(&e.file_name()))
+        .cloned()
+        .collect();
+    if entries.is_empty() {
+        return;
+    }
+    mark_claimed(&entries, claimed);
+    out.push(DetectedComponent {
+        mod_type: ModType::ConfigTweak,
+        confidence: Confidence::High,
+        files: entries
+            .iter()
+            .map(|e| ComponentFile {
+                source: e.path.clone(),
+                target: PathBuf::from(e.rel.file_name().unwrap_or_default()),
+            })
+            .collect(),
+        target_subdir: PathBuf::new(),
+        ue4ss_mod_name: None,
+        pak_sets: Vec::new(),
+        warnings: Vec::new(),
+        notes: vec![
+            "Merged into the game's own settings in %LOCALAPPDATA%\\SB\\Saved\\Config; \
+             disabling the mod takes its settings back out."
+                .into(),
+        ],
+    });
 }
 
 /// The full UE4SS distribution: a DLL proxy plus the `ue4ss` runtime folder.
@@ -671,6 +782,23 @@ fn is_junk(entry: &TreeEntry) -> bool {
         || entry
             .extension()
             .is_some_and(|ext| JUNK_EXTS.contains(&ext))
+        || is_readme(entry)
+}
+
+/// `README`, `LICENSE`, `CHANGELOG` and friends without an extension.
+fn is_readme(entry: &TreeEntry) -> bool {
+    let name = entry.file_name();
+    !name.contains('.')
+        && [
+            "readme",
+            "license",
+            "licence",
+            "changelog",
+            "credits",
+            "install",
+        ]
+        .iter()
+        .any(|word| name.starts_with(word))
 }
 
 /// Litter the operating system or the archiver left behind, as opposed to

@@ -16,6 +16,7 @@ export type ModTypeId =
   | "rootBinary"
   | "genericPak"
   | "gameRootOverlay"
+  | "configTweak"
   | "unknown";
 
 export type Confidence = "high" | "medium" | "askUser";
@@ -873,6 +874,10 @@ export const MOD_TYPE_META: Record<ModTypeId, { label: string; hint: string }> =
   movie: { label: "Movie", hint: "SB/Content/Movies" },
   splash: { label: "Splash", hint: "SB/Content/Splash — the startup image" },
   gameRootOverlay: { label: "Overlay", hint: "Laid onto the game folder" },
+  configTweak: {
+    label: "Engine tweak",
+    hint: "Engine.ini and the like — merged into the game's settings in %LOCALAPPDATA%\\SB\\Saved\\Config",
+  },
   unknown: { label: "Unknown", hint: "Needs a type before it can install" },
 };
 
@@ -886,4 +891,5 @@ export const SELECTABLE_TYPES: ModTypeId[] = [
   "movie",
   "splash",
   "gameRootOverlay",
+  "configTweak",
 ];

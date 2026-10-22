@@ -29,6 +29,11 @@ pub enum ModType {
     /// and does not fit any narrower category — laid down as-is. This is how
     /// CNS-style packages ship.
     GameRootOverlay,
+    /// Unreal settings tweaks — `Engine.ini`, `GameUserSettings.ini` and the
+    /// like. The game reads these from `%LOCALAPPDATA%\SB\Saved\Config`,
+    /// not its own folder, so they are never deployed as files: their keys
+    /// are merged into the game's own INI files and taken out again.
+    ConfigTweak,
     /// Files whose type we could not infer; the user is asked to choose.
     Unknown,
 }
@@ -47,7 +52,7 @@ impl ModType {
             ModType::Splash => paths::CONTENT_SPLASH,
             ModType::GenericPak => paths::PAKS_MODS,
             ModType::GameRootOverlay => paths::GAME_SUBDIR,
-            ModType::Unknown => "",
+            ModType::ConfigTweak | ModType::Unknown => "",
         }
     }
 
@@ -70,7 +75,11 @@ impl ModType {
     pub fn is_flat_target(self) -> bool {
         matches!(
             self,
-            ModType::GenericPak | ModType::LogicMod | ModType::Movie | ModType::Splash
+            ModType::GenericPak
+                | ModType::LogicMod
+                | ModType::Movie
+                | ModType::Splash
+                | ModType::ConfigTweak
         )
     }
 
@@ -86,6 +95,7 @@ impl ModType {
             ModType::RootBinary => "rootBinary",
             ModType::GenericPak => "genericPak",
             ModType::GameRootOverlay => "gameRootOverlay",
+            ModType::ConfigTweak => "configTweak",
             ModType::Unknown => "unknown",
         }
     }
@@ -101,6 +111,7 @@ impl ModType {
             "rootBinary" => ModType::RootBinary,
             "genericPak" => ModType::GenericPak,
             "gameRootOverlay" => ModType::GameRootOverlay,
+            "configTweak" => ModType::ConfigTweak,
             "unknown" => ModType::Unknown,
             _ => return None,
         })
@@ -118,6 +129,7 @@ impl ModType {
             ModType::Movie,
             ModType::Splash,
             ModType::GameRootOverlay,
+            ModType::ConfigTweak,
         ]
     }
 }

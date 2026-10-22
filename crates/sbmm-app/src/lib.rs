@@ -15,6 +15,7 @@ pub mod modlist;
 pub mod safety;
 pub mod saves;
 pub mod storage;
+mod tweaks;
 pub mod ue4ss;
 
 use std::collections::BTreeMap;
@@ -1185,6 +1186,10 @@ impl App {
         }
         self.forget_pristine(&record.staging_folder);
         self.store.delete_mod(mod_id)?;
+        // Its settings tweaks come out of the game's settings with it.
+        if self.tweaked_mods()?.contains(&mod_id) {
+            self.sync_config_tweaks()?;
+        }
         Ok(())
     }
 
@@ -1211,13 +1216,28 @@ impl App {
         let ue4ss_loads = self.ue4ss_presence(&records)?.loads();
         let mut nexus_missing = self.missing_nexus_requirements(&records)?;
         let mut misordered = self.misordered(&records)?;
+        let tweaked = self.tweaked_mods()?;
         for record in &records {
             let components = self.store.components_for(record.id)?;
             let planned = self.deploy_plan_for(record, &components)?;
             let recorded = self.store.deployed_files_for(record.id)?;
-            let deployed = !recorded.is_empty();
+            // A settings tweak is "deployed" when its keys are in the game's
+            // settings, there being no files.
+            let tweak_only = !components.is_empty()
+                && components
+                    .iter()
+                    .all(|c| c.mod_type == ModType::ConfigTweak);
+            let deployed = !recorded.is_empty() || tweaked.contains(&record.id);
 
-            if let Some(kind) = change_kind(record.enabled, deployed, &planned, &recorded) {
+            let tweak_change = tweak_only.then_some(match (record.enabled, deployed) {
+                (true, false) => Some(ChangeKind::Enable),
+                (false, true) => Some(ChangeKind::Disable),
+                _ => None,
+            });
+            if let Some(kind) = tweak_change
+                .flatten()
+                .or_else(|| change_kind(record.enabled, deployed, &planned, &recorded))
+            {
                 pending.push(PendingChange {
                     mod_id: record.id,
                     name: record.name.clone(),
@@ -1561,6 +1581,30 @@ impl App {
         // view at launch; writing the real one would defeat the point.
         if self.deployment_mode()? == DeploymentMode::Hardlink {
             self.sync_ue4ss_registrations(&ctx)?;
+        }
+        // The game reads its settings from outside its folder under either
+        // mode, so settings tweaks are merged in for real. A failure there
+        // is reported like a mod's, not allowed to undo everything else.
+        let tweaks_before = self.tweaked_mods()?;
+        match self.sync_config_tweaks() {
+            Ok(()) => {
+                let tweaks_after = self.tweaked_mods()?;
+                for record in self.store.list_mods()? {
+                    let (was, is) = (
+                        tweaks_before.contains(&record.id),
+                        tweaks_after.contains(&record.id),
+                    );
+                    if is && !was && !report.deployed.contains(&record.name) {
+                        report.deployed.push(record.name);
+                    } else if was && !is && !report.removed.contains(&record.name) {
+                        report.removed.push(record.name);
+                    }
+                }
+            }
+            Err(error) => report.failed.push(ApplyFailure {
+                name: "Settings tweaks".into(),
+                reason: error.to_string(),
+            }),
         }
         Ok(report)
     }

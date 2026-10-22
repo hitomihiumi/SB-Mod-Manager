@@ -51,6 +51,10 @@ pub fn build_plan(
     let mut ue4ss_registrations = Vec::new();
 
     for component in components {
+        // Merged into the game's settings, never placed as files.
+        if component.mod_type == ModType::ConfigTweak {
+            continue;
+        }
         let mut component_files = component.files.clone();
 
         // A UE4SS mod with no folder of its own is nested under the mod name.
