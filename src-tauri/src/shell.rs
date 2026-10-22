@@ -91,7 +91,7 @@ async fn run(app: &tauri::AppHandle, request: &Request) -> Result<String, String
 }
 
 /// Hand the window what came in while it was not looking.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn take_notices(notices: tauri::State<'_, Notices>) -> Vec<Notice> {
     notices
         .0
@@ -101,7 +101,7 @@ pub fn take_notices(notices: tauri::State<'_, Notices>) -> Vec<Notice> {
 }
 
 /// What a profile's shortcut runs, ready to paste into another launcher.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn profile_command(
     state: tauri::State<'_, AppState>,
     profile_id: i64,
@@ -118,7 +118,7 @@ pub fn profile_command(
 /// Put a shortcut for a profile on the desktop or in the Start menu, and
 /// return where it went. With `launch` it starts the game with the profile;
 /// without, it opens the manager on it.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn create_profile_shortcut(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, AppState>,

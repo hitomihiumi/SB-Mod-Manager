@@ -57,7 +57,7 @@ macro_rules! with_app {
     }};
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn snapshot(
     state: tauri::State<'_, AppState>,
     discord: tauri::State<'_, Discord>,
@@ -90,7 +90,7 @@ fn presence_from(snapshot: &AppSnapshot, downloads: &Downloads) -> Presence {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_discord_rpc(
     state: tauri::State<'_, AppState>,
     discord: tauri::State<'_, Discord>,
@@ -105,7 +105,7 @@ fn set_discord_rpc(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn discover_games(state: tauri::State<'_, AppState>) -> Result<Vec<GameInstall>, String> {
     let guard = state
         .0
@@ -114,22 +114,63 @@ fn discover_games(state: tauri::State<'_, AppState>) -> Result<Vec<GameInstall>,
     Ok(guard.discover_games())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_game_root(state: tauri::State<'_, AppState>, path: String) -> Result<GameInstall, String> {
     with_app!(state, |app| app.set_game_root(path))
 }
 
+/// Extract an archive into the library and say what it holds. The extraction
+/// runs on a worker thread with the service free, so the window stays live
+/// and other commands are not held up while a large batch unpacks.
 #[tauri::command]
-fn stage_archive(state: tauri::State<'_, AppState>, path: String) -> Result<StagedInstall, String> {
-    with_app!(state, |app| app.stage_archive(path))
+async fn stage_archive(
+    state: tauri::State<'_, AppState>,
+    path: String,
+) -> Result<StagedInstall, String> {
+    let archive = std::path::PathBuf::from(&path);
+    let name = sbmm_app::archive_display_name(&archive);
+    stage_with(&state, name, move |dest| {
+        sbmm_archive::extract(&archive, &dest).map_err(fail)
+    })
+    .await
 }
 
 #[tauri::command]
-fn stage_folder(state: tauri::State<'_, AppState>, path: String) -> Result<StagedInstall, String> {
-    with_app!(state, |app| app.stage_folder(path))
+async fn stage_folder(
+    state: tauri::State<'_, AppState>,
+    path: String,
+) -> Result<StagedInstall, String> {
+    let folder = std::path::PathBuf::from(&path);
+    let name = folder
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "Mod".to_string());
+    stage_with(&state, name, move |dest| {
+        sbmm_app::copy_tree(&folder, &dest).map_err(fail)
+    })
+    .await
 }
 
-#[tauri::command]
+/// Reserve a staging folder, fill it off the service's lock, then inspect it.
+/// A failed fill leaves nothing behind.
+async fn stage_with(
+    state: &tauri::State<'_, AppState>,
+    name: String,
+    fill: impl FnOnce(std::path::PathBuf) -> Result<(), String> + Send + 'static,
+) -> Result<StagedInstall, String> {
+    let (staging_id, dest) = with_app!(state, |app| app.reserve_staging(&name))?;
+    let filled = tauri::async_runtime::spawn_blocking(move || fill(dest))
+        .await
+        .map_err(fail)
+        .and_then(|result| result);
+    if let Err(error) = filled {
+        let _ = with_app!(state, |app| app.cancel_install(&staging_id));
+        return Err(error);
+    }
+    with_app!(state, |app| app.inspect_reserved(staging_id, name))
+}
+
+#[tauri::command(async)]
 fn confirm_install(
     state: tauri::State<'_, AppState>,
     staging_id: String,
@@ -151,12 +192,12 @@ fn confirm_install(
     ))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn cancel_install(state: tauri::State<'_, AppState>, staging_id: String) -> Result<(), String> {
     with_app!(state, |app| app.cancel_install(&staging_id))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_enabled(
     state: tauri::State<'_, AppState>,
     mod_ids: Vec<i64>,
@@ -165,27 +206,27 @@ fn set_enabled(
     with_app!(state, |app| app.set_enabled(&mod_ids, enabled))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_order(state: tauri::State<'_, AppState>, mod_ids: Vec<i64>) -> Result<(), String> {
     with_app!(state, |app| app.set_order(&mod_ids))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn apply(state: tauri::State<'_, AppState>) -> Result<ApplyReport, String> {
     with_app!(state, |app| app.apply())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn uninstall(state: tauri::State<'_, AppState>, mod_id: i64) -> Result<(), String> {
     with_app!(state, |app| app.uninstall(mod_id))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn rename_mod(state: tauri::State<'_, AppState>, mod_id: i64, name: String) -> Result<(), String> {
     with_app!(state, |app| app.rename_mod(mod_id, &name))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn create_group(
     state: tauri::State<'_, AppState>,
     name: String,
@@ -194,12 +235,12 @@ fn create_group(
     with_app!(state, |app| app.create_group(&name, color.as_deref()))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn delete_group(state: tauri::State<'_, AppState>, group_id: i64) -> Result<(), String> {
     with_app!(state, |app| app.delete_group(group_id))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_group_collapsed(
     state: tauri::State<'_, AppState>,
     group_id: i64,
@@ -208,7 +249,7 @@ fn set_group_collapsed(
     with_app!(state, |app| app.set_group_collapsed(group_id, collapsed))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn assign_group(
     state: tauri::State<'_, AppState>,
     mod_ids: Vec<i64>,
@@ -217,19 +258,19 @@ fn assign_group(
     with_app!(state, |app| app.assign_group(&mod_ids, group_id))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_auto_apply(state: tauri::State<'_, AppState>, enabled: bool) -> Result<(), String> {
     with_app!(state, |app| app.set_auto_apply(enabled))
 }
 
 /// Where the library lives, and whether hard links to the game will work.
-#[tauri::command]
+#[tauri::command(async)]
 fn folders(state: tauri::State<'_, AppState>) -> Result<FoldersView, String> {
     with_app!(state, |app| app.folders())
 }
 
 /// The FOMOD wizard's state for a selection of `[step, group, option]`.
-#[tauri::command]
+#[tauri::command(async)]
 fn fomod_state(
     state: tauri::State<'_, AppState>,
     staging_id: String,
@@ -239,7 +280,7 @@ fn fomod_state(
 }
 
 /// Install a staged FOMOD the way the wizard was answered.
-#[tauri::command]
+#[tauri::command(async)]
 fn confirm_install_fomod(
     state: tauri::State<'_, AppState>,
     staging_id: String,
@@ -250,7 +291,7 @@ fn confirm_install_fomod(
 }
 
 /// A picture from a staged install or an installed mod, as a `data:` URL.
-#[tauri::command]
+#[tauri::command(async)]
 fn preview_image(
     state: tauri::State<'_, AppState>,
     folder: String,
@@ -259,7 +300,7 @@ fn preview_image(
     with_app!(state, |app| app.preview_data_url(&folder, &path))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn create_profile(
     state: tauri::State<'_, AppState>,
     name: String,
@@ -268,25 +309,25 @@ fn create_profile(
     with_app!(state, |app| app.create_profile(&name, copy_enabled))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn rename_profile(state: tauri::State<'_, AppState>, id: i64, name: String) -> Result<(), String> {
     with_app!(state, |app| app.rename_profile(id, &name))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn delete_profile(state: tauri::State<'_, AppState>, id: i64) -> Result<(), String> {
     with_app!(state, |app| app.delete_profile(id))
 }
 
 /// Make another profile active and reconcile the game folder with it.
-#[tauri::command]
+#[tauri::command(async)]
 fn switch_profile(state: tauri::State<'_, AppState>, id: i64) -> Result<ApplyReport, String> {
     with_app!(state, |app| app.switch_profile(id))
 }
 
 /// Write the diagnostics bundle to `path`, with what only the shell knows —
 /// the manager's version, the system and the graphics card — added to it.
-#[tauri::command]
+#[tauri::command(async)]
 fn collect_diagnostics(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
@@ -311,7 +352,7 @@ fn collect_diagnostics(
     Ok(written.to_string_lossy().into_owned())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_library_root(
     state: tauri::State<'_, AppState>,
     path: String,
@@ -364,7 +405,7 @@ async fn nexus_rate_limit(
 
 /// Which enabled mods are replacing the same assets, and which one the game
 /// actually loads.
-#[tauri::command]
+#[tauri::command(async)]
 fn conflicts(state: tauri::State<'_, AppState>) -> Result<ConflictReport, String> {
     with_app!(state, |app| app.conflicts())
 }
@@ -373,7 +414,7 @@ fn conflicts(state: tauri::State<'_, AppState>) -> Result<ConflictReport, String
 ///
 /// Covers mods installed before the feature existed and any whose scan failed
 /// at install time. Returns how many were looked at.
-#[tauri::command]
+#[tauri::command(async)]
 fn index_mod_assets(state: tauri::State<'_, AppState>) -> Result<usize, String> {
     with_app!(state, |app| app.index_missing_assets())
 }
@@ -549,17 +590,17 @@ async fn check_mod_updates(state: tauri::State<'_, AppState>) -> Result<UpdateCh
     Ok(UpdateCheckReport { checked, outdated })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn download_queue(downloads: tauri::State<'_, Downloads>) -> Vec<sbmm_nexus::QueueItem> {
     downloads.queue.items()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn cancel_download(downloads: tauri::State<'_, Downloads>, id: u64) {
     downloads.queue.cancel(id);
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn clear_finished_downloads(downloads: tauri::State<'_, Downloads>) {
     downloads.queue.clear_finished();
 }
@@ -663,7 +704,7 @@ async fn install_update(
     app.restart();
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_update_channel(state: tauri::State<'_, AppState>, channel: String) -> Result<(), String> {
     with_app!(state, |app| app.set_update_channel(&channel))
 }

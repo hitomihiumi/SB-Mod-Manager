@@ -383,6 +383,28 @@ impl App {
 
     /// Register a folder the user dropped in directly, treating it as if it
     /// had been extracted from an archive.
+    /// Pick and create the folder an archive will be unpacked into, so the
+    /// slow part — extracting — can run without holding the service: a
+    /// window waiting on it would freeze, and dozens of archives dropped at
+    /// once would hold up everything else until the last was done.
+    pub fn reserve_staging(&self, suggested_name: &str) -> Result<(String, PathBuf)> {
+        let staging_id = self.unique_staging_folder(suggested_name);
+        let dest = self.staging_path(&staging_id);
+        std::fs::create_dir_all(&dest).map_err(|e| AppError::io(&dest, e))?;
+        Ok((staging_id, dest))
+    }
+
+    /// Inspect a folder [`reserve_staging`](Self::reserve_staging) handed
+    /// out, once it has been filled.
+    pub fn inspect_reserved(
+        &self,
+        staging_id: String,
+        suggested_name: String,
+    ) -> Result<StagedInstall> {
+        let dest = self.staging_path(&staging_id);
+        self.inspect_staged(staging_id, suggested_name, dest)
+    }
+
     pub fn stage_folder(&mut self, folder: impl AsRef<Path>) -> Result<StagedInstall> {
         let folder = folder.as_ref();
         let suggested_name = folder
@@ -2286,7 +2308,7 @@ fn detection_pattern(tree: &FileTree) -> String {
     extensions.join(",")
 }
 
-fn archive_display_name(archive: &Path) -> String {
+pub fn archive_display_name(archive: &Path) -> String {
     let stem = archive
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
@@ -2393,7 +2415,7 @@ fn path_string(path: impl AsRef<Path>) -> String {
     path.as_ref().to_string_lossy().into_owned()
 }
 
-fn copy_tree(from: &Path, to: &Path) -> Result<()> {
+pub fn copy_tree(from: &Path, to: &Path) -> Result<()> {
     for relative in sbmm_archive::walk_relative(from) {
         let src = from.join(&relative);
         let dst = to.join(&relative);

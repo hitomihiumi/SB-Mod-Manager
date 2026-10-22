@@ -155,7 +155,7 @@ pub async fn install_framegen(
 }
 
 /// Take the package back out of the game folder.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn remove_framegen(state: tauri::State<'_, AppState>) -> Result<bool, String> {
     crate::with_app!(state, |app| app.remove_framegen())
 }

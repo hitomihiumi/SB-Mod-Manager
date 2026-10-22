@@ -5,7 +5,7 @@ use sbmm_app::dto::{ConfigFileView, ConfigText};
 
 use crate::{fail, with_app, AppState};
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn config_files(
     state: tauri::State<'_, AppState>,
     scope: ConfigScope,
@@ -13,7 +13,7 @@ pub fn config_files(
     with_app!(state, |app| app.config_files(scope))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn read_config(
     state: tauri::State<'_, AppState>,
     scope: ConfigScope,
@@ -22,7 +22,7 @@ pub fn read_config(
     with_app!(state, |app| app.read_config(scope, &path))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn write_config(
     state: tauri::State<'_, AppState>,
     scope: ConfigScope,
@@ -32,7 +32,7 @@ pub fn write_config(
     with_app!(state, |app| app.write_config(scope, &path, &text))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_mod_notes(
     state: tauri::State<'_, AppState>,
     mod_id: i64,
@@ -41,7 +41,7 @@ pub fn set_mod_notes(
     with_app!(state, |app| app.set_mod_notes(mod_id, &notes))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_mod_tags(
     state: tauri::State<'_, AppState>,
     mod_id: i64,
@@ -50,12 +50,12 @@ pub fn set_mod_tags(
     with_app!(state, |app| app.set_mod_tags(mod_id, &tags))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn mod_images(state: tauri::State<'_, AppState>, mod_id: i64) -> Result<Vec<String>, String> {
     with_app!(state, |app| app.mod_images(mod_id))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_mod_image(
     state: tauri::State<'_, AppState>,
     mod_id: i64,

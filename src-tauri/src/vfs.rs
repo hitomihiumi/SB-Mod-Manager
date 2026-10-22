@@ -17,7 +17,7 @@ use crate::{fail, AppState};
 const HOOK: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/sbmm_vfs_hook.dll"));
 
 /// One directory of the virtual file tree, for the Files view.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn vfs_tree(
     state: tauri::State<'_, AppState>,
     dir: Option<String>,
@@ -26,7 +26,7 @@ pub fn vfs_tree(
 }
 
 /// Every clashing path, or only those `mod_id` takes part in.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn vfs_conflicts(
     state: tauri::State<'_, AppState>,
     mod_id: Option<i64>,
@@ -35,7 +35,7 @@ pub fn vfs_conflicts(
 }
 
 /// Move everything in overwrite into a new, enabled mod.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn create_mod_from_overwrite(
     state: tauri::State<'_, AppState>,
     name: String,
@@ -44,12 +44,12 @@ pub fn create_mod_from_overwrite(
 }
 
 /// Delete everything in overwrite; returns how many files went.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn clear_overwrite(state: tauri::State<'_, AppState>) -> Result<u32, String> {
     crate::with_app!(state, |app| app.clear_overwrite())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_deployment_mode(
     state: tauri::State<'_, AppState>,
     mode: DeploymentMode,

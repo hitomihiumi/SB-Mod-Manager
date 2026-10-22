@@ -39,12 +39,12 @@ fn queue_file(
 }
 
 /// Write the active profile to `path`; returns how many mods it lists.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn export_mod_list(state: tauri::State<'_, AppState>, path: String) -> Result<usize, String> {
     with_app!(state, |app| app.export_mod_list(&PathBuf::from(&path)))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn plan_import(state: tauri::State<'_, AppState>, path: String) -> Result<ImportPlan, String> {
     with_app!(state, |app| app.plan_import(&PathBuf::from(&path)))
 }
@@ -93,7 +93,7 @@ pub async fn import_mod_list(
     Ok(outcome)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn updatable_mods(state: tauri::State<'_, AppState>) -> Result<Vec<UpdatableMod>, String> {
     with_app!(state, |app| app.updatable_mods())
 }
