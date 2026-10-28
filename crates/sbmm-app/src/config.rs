@@ -36,6 +36,16 @@ pub enum ConfigScope {
         mod_id: i64,
     },
     Game,
+    /// INI files in the game folder itself, such as ReShade presets the
+    /// user made there.
+    Install,
+}
+
+impl ConfigScope {
+    /// The game's own files: INI only, and the found copy kept to reset to.
+    fn is_game(self) -> bool {
+        matches!(self, ConfigScope::Game | ConfigScope::Install)
+    }
 }
 
 /// How a file was encoded, so it is written back the same way.
@@ -163,6 +173,7 @@ impl App {
             ConfigScope::Game => self.game_config_dir().ok_or_else(|| {
                 AppError::Invalid("the game's settings folder could not be found".into())
             }),
+            ConfigScope::Install => Ok(self.game()?.ok_or(AppError::NoGame)?.root),
         }
     }
 
@@ -175,6 +186,10 @@ impl App {
             ConfigScope::Game => self
                 .config_backup_dir()
                 .join(format!("{}.original", path.replace('/', "__"))),
+            ConfigScope::Install => self
+                .config_backup_dir()
+                .join("install")
+                .join(format!("{}.original", path.replace('/', "__"))),
         })
     }
 
@@ -184,16 +199,21 @@ impl App {
         let root = self.config_root(scope)?;
         let full = sbmm_deploy::backend::resolve_target(&root, Path::new(path))
             .map_err(|_| AppError::Invalid(format!("{path} is outside the folder")))?;
-        if !is_settings_file(&full, scope == ConfigScope::Game) || !full.is_file() {
+        if !is_settings_file(&full, scope.is_game()) || !full.is_file() {
             return Err(AppError::Invalid(format!("{path} is not a settings file")));
         }
         Ok(full)
     }
 
     pub fn config_files(&self, scope: ConfigScope) -> Result<Vec<ConfigFileView>> {
+        if scope == ConfigScope::Install {
+            // The whole game folder is no list to pick from; its files are
+            // opened from where they are shown.
+            return Ok(Vec::new());
+        }
         let root = self.config_root(scope)?;
         let mut views = Vec::new();
-        for path in settings_files(&root, scope == ConfigScope::Game) {
+        for path in settings_files(&root, scope.is_game()) {
             let full = root.join(&path);
             let original = self.original_of(scope, &path)?;
             let edited =
@@ -225,11 +245,14 @@ impl App {
         let full = self.config_path(scope, path)?;
         let (_, encoding) = read_text(&full)?;
 
-        if scope == ConfigScope::Game {
+        if scope.is_game() {
             // The first save keeps what was there, to reset to.
             let original = self.original_of(scope, path)?;
             if !original.exists() {
-                let dir = self.config_backup_dir();
+                let dir = original
+                    .parent()
+                    .unwrap_or(&self.config_backup_dir())
+                    .to_path_buf();
                 std::fs::create_dir_all(&dir).map_err(|e| AppError::io(&dir, e))?;
                 std::fs::copy(&full, &original).map_err(|e| AppError::io(&original, e))?;
             }

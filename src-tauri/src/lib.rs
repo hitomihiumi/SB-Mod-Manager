@@ -11,6 +11,7 @@ mod downloads;
 mod framegen;
 mod insight;
 mod modlist;
+mod reshade;
 mod safety;
 mod shell;
 mod storage;
@@ -867,6 +868,12 @@ pub fn run() {
             vfs::clear_overwrite,
             ue4ss::ue4ss_latest,
             ue4ss::install_ue4ss,
+            reshade::reshade_view,
+            reshade::set_reshade_preset,
+            reshade::set_profile_reshade_preset,
+            reshade::duplicate_reshade_preset,
+            reshade::rename_reshade_preset,
+            reshade::delete_reshade_preset,
             shell::take_notices,
             shell::profile_command,
             shell::create_profile_shortcut,

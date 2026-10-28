@@ -12,6 +12,7 @@ import {
   Layers,
   ListOrdered,
   Loader2,
+  Palette,
   Play,
   Settings,
   Swords,
@@ -29,6 +30,7 @@ import { FilesView } from "./components/FilesView";
 import { InstallDialog } from "./components/InstallDialog";
 import { LoadOrderView } from "./components/LoadOrderView";
 import { ModsView } from "./components/ModsView";
+import { ReshadeView } from "./components/ReshadeView";
 import { SettingsView } from "./components/SettingsView";
 import { SetupWizard } from "./components/SetupWizard";
 import { TitleBar } from "./components/TitleBar";
@@ -43,6 +45,7 @@ const NAV: { id: View; label: string; icon: typeof Layers }[] = [
   { id: "files", label: "Files", icon: FolderTree },
   { id: "downloads", label: "Downloads", icon: Download },
   { id: "collections", label: "Collections", icon: Boxes },
+  { id: "reshade", label: "ReShade", icon: Palette },
   { id: "settings", label: "Settings", icon: Settings },
 ];
 
@@ -237,6 +240,7 @@ export default function App() {
             {view === "files" && <FilesView />}
             {view === "downloads" && <DownloadsView />}
             {view === "collections" && <CollectionsView />}
+            {view === "reshade" && <ReshadeView />}
             {view === "settings" && <SettingsView />}
             <ApplyBar />
           </main>
@@ -406,7 +410,10 @@ const SHORTCUTS: { group: string; keys: [string, string][] }[] = [
     keys: [
       ["Ctrl+O", "Add mods from archives"],
       ["Ctrl+S", "Apply pending changes"],
-      ["Ctrl+1 … Ctrl+7", "Mods, Load order, Conflicts, Files, Downloads, Collections, Settings"],
+      [
+        "Ctrl+1 … Ctrl+8",
+        "Mods, Load order, Conflicts, Files, Downloads, Collections, ReShade, Settings",
+      ],
       ["F5", "Re-read the mod list"],
       ["F1 or ?", "This list"],
     ],

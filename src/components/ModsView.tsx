@@ -594,7 +594,11 @@ function ModRow({
         <Badge
           key={requirement}
           tone="danger"
-          title={`This mod does nothing without ${requirement}, and the game will not load it. Install it from Settings.`}
+          title={
+            requirement === "ReShade"
+              ? "ReShade presets do nothing without ReShade, and it is not beside the game executable. Get it from reshade.me — see the ReShade screen."
+              : `This mod does nothing without ${requirement}, and the game will not load it. Install it from Settings.`
+          }
         >
           Needs {requirement}
         </Badge>

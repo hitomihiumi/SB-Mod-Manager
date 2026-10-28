@@ -101,7 +101,7 @@ export function ConfigEditor({
             <Button
               variant="ghost"
               title={
-                scope.kind === "game"
+                scope.kind !== "mod"
                   ? "Back to the file as it was before the manager first saved it"
                   : "Back to the file as the mod was installed with it"
               }
@@ -142,6 +142,11 @@ export function ConfigEditor({
         <p className="mb-3 text-[11px] leading-relaxed text-warn">
           Close the game first: it writes its settings back when it exits, over anything saved
           here while it runs.
+        </p>
+      )}
+      {scope.kind === "install" && (
+        <p className="mb-3 text-[11px] leading-relaxed text-warn">
+          Close the game first: ReShade writes a preset back whenever it is changed in game.
         </p>
       )}
 

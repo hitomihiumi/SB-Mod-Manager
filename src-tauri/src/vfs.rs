@@ -76,6 +76,20 @@ pub async fn launch(app_handle: &tauri::AppHandle) -> Result<String, String> {
         app.back_up_saves_before_launch();
         Ok::<_, sbmm_app::AppError>(())
     })?;
+    // The look the profile was set up with, in case ReShade or the user
+    // switched preset since.
+    let preset_note = crate::with_app!(state, |app| Ok::<_, sbmm_app::AppError>(
+        match app.apply_profile_reshade_preset() {
+            Ok(note) => note,
+            Err(error) => Some(format!(
+                "The profile's ReShade preset could not be set: {error}"
+            )),
+        }
+    ))?;
+    let started = |message: String| match &preset_note {
+        Some(note) => format!("{message} {note}"),
+        None => message,
+    };
 
     if mode == DeploymentMode::Hardlink {
         // Steam's own launch keeps the overlay, cloud saves and playtime.
@@ -94,7 +108,7 @@ pub async fn launch(app_handle: &tauri::AppHandle) -> Result<String, String> {
                 .spawn()
                 .map_err(fail)?;
         }
-        return Ok("Starting Stellar Blade.".into());
+        return Ok(started("Starting Stellar Blade.".into()));
     }
 
     if HOOK.is_empty() {
@@ -114,9 +128,9 @@ pub async fn launch(app_handle: &tauri::AppHandle) -> Result<String, String> {
                 log.display()
             )
         })?;
-    Ok(format!(
+    Ok(started(format!(
         "Started Stellar Blade under the virtual file system (process {pid})."
-    ))
+    )))
 }
 
 /// Put the embedded hook where the launcher can load it from.

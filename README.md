@@ -16,7 +16,7 @@ wrong is the usual reason a mod "doesn't work".
 
 ## What it does
 
-- **Detects the mod type and destination.** Ten layouts are recognised from
+- **Detects the mod type and destination.** Eleven layouts are recognised from
   structural markers rather than guesswork, and a single archive can contain
   several — a logic mod bundled with a cosmetic pak is routed as two
   independent components. Readmes, source art, metadata and nested archives
@@ -136,6 +136,16 @@ wrong is the usual reason a mod "doesn't work".
   Updating keeps your `UE4SS-settings.ini`, and UE4SS's own bundled mods
   (BPModLoaderMod among them, which every logic mod relies on) stay switched
   on under both deployment modes.
+- **ReShade presets.** The ReShade screen lists every preset beside the
+  executable — from mods, your own, or saved from ReShade's overlay — with
+  the effects each switches on and the effect files ReShade will not find, so
+  a preset that needs a shader pack you lack says so before the game does.
+  Pick the one ReShade starts with (only `PresetPath` in `ReShade.ini`
+  changes, in the mod that shipped it if one did), give each profile its own
+  preset — set on switching profile and before every launch — and edit,
+  duplicate, rename or delete presets. Preset archives are recognised by
+  their contents and install into `reshade-presets` without asking; a preset
+  mod without ReShade installed is flagged in the list.
 - **Profiles.** Keep several setups — say, vanilla, cosmetics only and
   everything — each with its own enabled mods and load order, and switch
   between them from the mod list; the game folder is brought in line on the
@@ -389,6 +399,7 @@ All paths are relative to the folder containing `SB/`.
 | UE4SS C++ | `dlls/main.dll` | as above |
 | UE4SS runtime | `UE4SS.dll` | `SB/Binaries/Win64/` |
 | Root / ReShade | `ReShade.ini`, a proxy DLL | `SB/Binaries/Win64/` |
+| ReShade preset | an INI with `Techniques=` or `[*.fx]` sections | `SB/Binaries/Win64/reshade-presets/` |
 | Movie | `.mp4`/`.bk2`, a `Movies` directory | `SB/Content/Movies/` |
 | Splash art | `Splash.bmp`, a `Splash` directory | `SB/Content/Splash/` |
 | Game root overlay | an explicit `SB/` tree | laid onto the game folder |

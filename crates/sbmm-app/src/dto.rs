@@ -128,6 +128,76 @@ pub struct Ue4ssStatus {
     pub project_url: String,
 }
 
+/// ReShade's DLL beside the executable.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReshadeInstall {
+    /// The name it loads under, e.g. `dxgi.dll`.
+    pub dll: String,
+    pub version: Option<String>,
+    /// A mod's name, or "Game folder" for one put there by ReShade's installer.
+    pub provided_by: String,
+    pub mod_id: Option<i64>,
+}
+
+/// Where a preset can be opened for editing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresetSource {
+    pub scope: crate::config::ConfigScope,
+    pub path: String,
+}
+
+/// One ReShade preset.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReshadePreset {
+    /// Game-relative, `/`-separated.
+    pub path: String,
+    /// The file name without `.ini`.
+    pub name: String,
+    /// The folder it is in, relative to the executable's; empty beside it.
+    pub folder: String,
+    /// The effects it switches on.
+    pub techniques: Vec<String>,
+    /// Effect files it uses that ReShade will not find.
+    pub missing_effects: Vec<String>,
+    /// Techniques that do not say which file they are in (older presets),
+    /// so cannot be checked.
+    pub unchecked: u32,
+    /// The preset ReShade starts with.
+    pub active: bool,
+    pub bytes: u64,
+    pub provided_by: String,
+    /// `mod`, `game` (the user's own, in the game folder) or `overwrite`.
+    pub origin: String,
+    pub mod_id: Option<i64>,
+    /// Where to edit it; `None` for one in overwrite.
+    pub source: Option<PresetSource>,
+}
+
+/// ReShade at a glance.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReshadeView {
+    /// `None` when no ReShade DLL is beside the executable.
+    pub installed: Option<ReshadeInstall>,
+    /// Game-relative path of `ReShade.ini`, once there is one.
+    pub config: Option<String>,
+    pub config_provided_by: Option<String>,
+    /// The preset ReShade starts with: game-relative, or as written when it
+    /// is outside the game folder.
+    pub active: Option<String>,
+    /// False when the preset ReShade starts with is not there.
+    pub active_found: bool,
+    pub presets: Vec<ReshadePreset>,
+    /// How many effect files ReShade can find.
+    pub effects: u32,
+    /// The preset the active profile asks for.
+    pub profile_preset: Option<String>,
+    pub download_url: String,
+}
+
 /// The overwrite folder at a glance.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

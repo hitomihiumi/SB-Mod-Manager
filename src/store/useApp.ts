@@ -41,6 +41,7 @@ export type View =
   | "files"
   | "downloads"
   | "collections"
+  | "reshade"
   | "settings";
 
 interface Toast {

@@ -17,6 +17,7 @@ export type ModTypeId =
   | "genericPak"
   | "gameRootOverlay"
   | "configTweak"
+  | "reshadePreset"
   | "unknown";
 
 export type Confidence = "high" | "medium" | "askUser";
@@ -580,6 +581,15 @@ export const ipc = {
   /** Null when GitHub could not be asked. */
   ue4ssLatest: () => invoke<string | null>("ue4ss_latest"),
   installUe4ss: () => invoke<string>("install_ue4ss"),
+  reshadeView: () => invoke<ReshadeView>("reshade_view"),
+  setReshadePreset: (path: string) => invoke<void>("set_reshade_preset", { path }),
+  setProfileReshadePreset: (profileId: number, path: string | null) =>
+    invoke<void>("set_profile_reshade_preset", { profileId, path }),
+  duplicateReshadePreset: (path: string, name: string) =>
+    invoke<string>("duplicate_reshade_preset", { path, name }),
+  renameReshadePreset: (path: string, name: string) =>
+    invoke<string>("rename_reshade_preset", { path, name }),
+  deleteReshadePreset: (path: string) => invoke<void>("delete_reshade_preset", { path }),
   /** Write the diagnostics zip to `path`; resolves to where it went. */
   collectDiagnostics: (path: string) => invoke<string>("collect_diagnostics", { path }),
   createProfile: (name: string, copyEnabled: boolean) =>
@@ -787,7 +797,60 @@ export interface NexusView {
 }
 
 /** Whose settings files: one mod's, or the game's own. */
-export type ConfigScope = { kind: "mod"; modId: number } | { kind: "game" };
+/**
+ * Whose settings files: a mod's, the game's own (in %LOCALAPPDATA%), or INI
+ * files in the game folder itself (ReShade presets).
+ */
+export type ConfigScope =
+  | { kind: "mod"; modId: number }
+  | { kind: "game" }
+  | { kind: "install" };
+
+/** ReShade's DLL beside the executable. */
+export interface ReshadeInstall {
+  /** The name it loads under, e.g. `dxgi.dll`. */
+  dll: string;
+  version: string | null;
+  providedBy: string;
+  modId: number | null;
+}
+
+/** One ReShade preset. */
+export interface ReshadePreset {
+  /** Game-relative, `/`-separated. */
+  path: string;
+  name: string;
+  /** Folder relative to the executable's; empty beside it. */
+  folder: string;
+  techniques: string[];
+  /** Effect files it uses that ReShade will not find. */
+  missingEffects: string[];
+  /** Techniques that do not name their file (older presets). */
+  unchecked: number;
+  /** ReShade starts with it. */
+  active: boolean;
+  bytes: number;
+  providedBy: string;
+  origin: "mod" | "game" | "overwrite";
+  modId: number | null;
+  /** Where to edit it; null for one in overwrite. */
+  source: { scope: ConfigScope; path: string } | null;
+}
+
+export interface ReshadeView {
+  installed: ReshadeInstall | null;
+  config: string | null;
+  configProvidedBy: string | null;
+  /** The preset ReShade starts with. */
+  active: string | null;
+  activeFound: boolean;
+  presets: ReshadePreset[];
+  /** Effect files ReShade can find. */
+  effects: number;
+  /** The preset the active profile asks for. */
+  profilePreset: string | null;
+  downloadUrl: string;
+}
 
 export interface ConfigFile {
   path: string;
@@ -888,6 +951,10 @@ export const MOD_TYPE_META: Record<ModTypeId, { label: string; hint: string }> =
     label: "Engine tweak",
     hint: "Engine.ini and the like — merged into the game's settings in %LOCALAPPDATA%\\SB\\Saved\\Config",
   },
+  reshadePreset: {
+    label: "ReShade preset",
+    hint: "SB/Binaries/Win64/reshade-presets — picked on the ReShade screen",
+  },
   unknown: { label: "Unknown", hint: "Needs a type before it can install" },
 };
 
@@ -902,4 +969,5 @@ export const SELECTABLE_TYPES: ModTypeId[] = [
   "splash",
   "gameRootOverlay",
   "configTweak",
+  "reshadePreset",
 ];

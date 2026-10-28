@@ -12,6 +12,7 @@ pub mod insight;
 pub mod installer;
 pub mod library;
 pub mod modlist;
+pub mod reshade;
 pub mod safety;
 pub mod saves;
 pub mod storage;
@@ -426,7 +427,7 @@ impl App {
         dest: PathBuf,
     ) -> Result<StagedInstall> {
         let tree = FileTree::new(sbmm_archive::walk_relative(&dest));
-        let components = detect_components(&tree);
+        let components = detect_in(&dest, &tree);
         // A FOMOD says itself what to ask; guessing at variants on top of it
         // would ask twice.
         let fomod = self.fomod_view(&staging_id, &suggested_name, None)?;
@@ -1114,7 +1115,7 @@ impl App {
         }
 
         let tree = FileTree::new(sbmm_archive::walk_relative(&dest));
-        let mut components = detect_components(&tree);
+        let mut components = detect_in(&dest, &tree);
 
         if let Some(forced) = type_override {
             // The user's choice answers the question that was asked — where
@@ -1225,6 +1226,8 @@ impl App {
         let virtual_mode = self.deployment_mode()? == DeploymentMode::Virtual;
         let file_conflicts = self.file_conflict_counts(&records)?;
         let ue4ss_loads = self.ue4ss_presence(&records)?.loads();
+        // Only looked for when an enabled mod has presets to show.
+        let mut reshade_there: Option<bool> = None;
         let mut nexus_missing = self.missing_nexus_requirements(&records)?;
         let mut misordered = self.misordered(&records)?;
         let tweaked = self.tweaked_mods()?;
@@ -1288,6 +1291,15 @@ impl App {
                         } else {
                             Vec::new()
                         };
+                    if record.enabled && App::needs_reshade(&components) {
+                        let there = match reshade_there {
+                            Some(there) => there,
+                            None => *reshade_there.insert(self.reshade_likely_installed()?),
+                        };
+                        if !there {
+                            missing.push("ReShade".to_string());
+                        }
+                    }
                     missing.extend(nexus_missing.remove(&record.id).unwrap_or_default());
                     missing
                 },
@@ -1426,7 +1438,7 @@ impl App {
             if !root.is_dir() {
                 continue;
             }
-            let fresh = detect_components(&FileTree::new(sbmm_archive::walk_relative(&root)));
+            let fresh = detect_in(&root, &FileTree::new(sbmm_archive::walk_relative(&root)));
             if fresh.is_empty()
                 || fresh
                     .iter()
@@ -1568,11 +1580,22 @@ impl App {
             return Ok(ApplyReport::default());
         }
         self.store.set_active_profile(id)?;
-        if self.game()?.is_some() {
-            self.apply()
-        } else {
-            Ok(ApplyReport::default())
+        if self.game()?.is_none() {
+            return Ok(ApplyReport::default());
         }
+        let mut report = self.apply()?;
+        // The look this profile was set up with goes with it.
+        let preset = match self.apply_profile_reshade_preset() {
+            Ok(note) => note,
+            Err(error) => Some(error.to_string()),
+        };
+        if let Some(reason) = preset {
+            report.failed.push(ApplyFailure {
+                name: "ReShade preset".into(),
+                reason,
+            });
+        }
+        Ok(report)
     }
 
     fn valid_profile_name(&self, name: &str, renaming: Option<i64>) -> Result<String> {
@@ -2488,6 +2511,19 @@ impl OriginLabels {
 
 /// The staging folder of the RTX 20/30 frame generation package.
 const FRAMEGEN_STAGING: &str = "framegen-dlssg-sm86";
+
+/// What an extracted folder holds: detection by its paths, then a look
+/// inside the INI files nothing claimed, which is the only way to tell a
+/// ReShade preset from any other settings file.
+fn detect_in(root: &Path, tree: &FileTree) -> Vec<DetectedComponent> {
+    sbmm_core::reshade::claim_presets(detect_components(tree), |source| {
+        let full = root.join(source);
+        if std::fs::metadata(&full).ok()?.len() > 1024 * 1024 {
+            return None;
+        }
+        config::read_text(&full).ok().map(|(text, _)| text)
+    })
+}
 
 /// A game-relative path in a form two spellings of it agree on: Windows paths
 /// ignore case, and the deployment record may hold either separator.
