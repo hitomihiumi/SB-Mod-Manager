@@ -119,8 +119,9 @@ pnpm tauri build    # produce an installer
 **Releases.** The version lives only in `package.json`. Bump it on `master`,
 then push a matching tag (`v0.3.0` for `0.3.0`). The workflow refuses a
 mismatch, because such a release would never be offered as an update.
-Nightlies build at 03:00 UTC when `master` changed in the last 24 hours, or
-on demand from the *Release* workflow.
+Nightlies build daily when `master` has moved since the last one, or on
+demand from the *Release* workflow. Each is versioned as the next patch
+prerelease (`0.7.2-nightly.202610310300`), so the nightly channel offers it.
 
 **Update signing.** Updates must be signed. A fork needs its own keypair:
 
