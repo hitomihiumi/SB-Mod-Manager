@@ -383,24 +383,50 @@ mod windows {
             .file_name()
             .map(|n| n.to_string_lossy().to_lowercase())
             .unwrap_or_default();
-        match module_base(pid, &name) {
-            Some(base) => Ok(base),
-            None => {
-                diag.log(format!("{name} is not among the game's loaded modules"));
-                Err(LaunchError::HookNotLoaded)
+        // A process this young can refuse a module list, or hand back one
+        // that is cut short, while its loader is still busy; Windows' advice
+        // is to ask again. LoadLibraryW has already returned, so a list that
+        // does come back whole has the hook in it.
+        let mut last_error = 0;
+        for attempt in 0..MODULE_LIST_ATTEMPTS {
+            match module_base(pid, &name) {
+                Ok(Some(base)) => {
+                    if attempt > 0 {
+                        diag.log(format!("module list read on attempt {}", attempt + 1));
+                    }
+                    return Ok(base);
+                }
+                Ok(None) => last_error = 0,
+                Err(code) => last_error = code,
             }
+            std::thread::sleep(std::time::Duration::from_millis(MODULE_LIST_PAUSE_MS));
         }
+        diag.log(if last_error == 0 {
+            format!("{name} is not among the game's loaded modules")
+        } else {
+            format!("the game's module list could not be read (error {last_error})")
+        });
+        Err(LaunchError::HookNotLoaded)
     }
 
-    /// Where a module is loaded in another process, by file name.
-    fn module_base(pid: u32, name: &str) -> Option<usize> {
+    /// How often, and how far apart, to ask for the module list.
+    const MODULE_LIST_ATTEMPTS: u32 = 40;
+    const MODULE_LIST_PAUSE_MS: u64 = 25;
+
+    /// Where a module is loaded in another process, by file name: `Ok(None)`
+    /// when a whole list was read without it, `Err` with the system's error
+    /// code when no list could be read.
+    fn module_base(pid: u32, name: &str) -> Result<Option<usize>, u32> {
         let snapshot = Owned(unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, pid) });
         if snapshot.0.is_null() || snapshot.0 as isize == -1 {
-            return None;
+            return Err(unsafe { GetLastError() });
         }
         let mut entry: MODULEENTRY32W = unsafe { std::mem::zeroed() };
         entry.dwSize = std::mem::size_of::<MODULEENTRY32W>() as u32;
         let mut more = unsafe { Module32FirstW(snapshot.0, &mut entry) } != 0;
+        if !more {
+            return Err(unsafe { GetLastError() });
+        }
         while more {
             let len = entry
                 .szModule
@@ -408,11 +434,11 @@ mod windows {
                 .position(|&c| c == 0)
                 .unwrap_or(entry.szModule.len());
             if String::from_utf16_lossy(&entry.szModule[..len]).to_lowercase() == name {
-                return Some(entry.modBaseAddr as usize);
+                return Ok(Some(entry.modBaseAddr as usize));
             }
             more = unsafe { Module32NextW(snapshot.0, &mut entry) } != 0;
         }
-        None
+        Ok(None)
     }
 
     /// The address of the init export inside the game, from its offset in a
