@@ -120,10 +120,33 @@ pub extern "system" fn sbmm_vfs_init(_parameter: *mut c_void) -> u32 {
     let _ = REAL.set(real);
 
     let patched = iat::patch_all(&patches(), &skipped_modules());
+    let total: usize = patched.iter().map(|p| p.slots).sum();
     log(&format!(
-        "virtual file system ready: {files} files mapped, {patched} imports redirected"
+        "virtual file system ready: {files} files mapped, {total} imports redirected"
     ));
+    log_patched("redirected in", &patched);
+    // The game's own calls are the ones that find the paks: say plainly when
+    // none of them go through the overlay.
+    let exe = unsafe { GetModuleHandleW(std::ptr::null()) } as usize;
+    if !patched.iter().any(|p| p.base == exe && p.slots > 0) {
+        log("the game executable has no file imports redirected");
+    }
     OK
+}
+
+/// Lines about modules patched after start, still to write.
+static LOADS_LEFT: AtomicUsize = AtomicUsize::new(60);
+
+/// Name the modules a pass rewrote, with how many imports each.
+fn log_patched(what: &str, patched: &[iat::Patched]) {
+    let listed: Vec<String> = patched
+        .iter()
+        .filter(|p| p.slots > 0)
+        .map(|p| format!("{} {}", p.name, p.slots))
+        .collect();
+    if !listed.is_empty() {
+        log(&format!("{what}: {}", listed.join(", ")));
+    }
 }
 
 /// Each hook is cast to the real function's type first, so a signature that
@@ -338,24 +361,35 @@ fn in_overwrite(real: &Path) -> bool {
 static TRACE_LEFT: AtomicUsize = AtomicUsize::new(400);
 
 fn trace(message: impl FnOnce() -> String) {
-    // A plain compare-exchange loop: `fetch_update` is deprecated on newer
-    // toolchains and its replacement does not exist on older ones.
-    let mut left = TRACE_LEFT.load(Ordering::Relaxed);
-    loop {
-        if left == 0 {
-            return;
-        }
-        match TRACE_LEFT.compare_exchange_weak(left, left - 1, Ordering::Relaxed, Ordering::Relaxed)
-        {
-            Ok(_) => break,
-            Err(now) => left = now,
-        }
+    let left = TRACE_LEFT.load(Ordering::Relaxed);
+    if !take(&TRACE_LEFT) {
+        return;
     }
     log(&message());
     if left == 1 {
         log("(trace limit reached)");
     }
 }
+
+/// Take one from a budget of log lines; false once it is spent.
+fn take(budget: &AtomicUsize) -> bool {
+    // A plain compare-exchange loop: `fetch_update` is deprecated on newer
+    // toolchains and its replacement does not exist on older ones.
+    let mut left = budget.load(Ordering::Relaxed);
+    loop {
+        if left == 0 {
+            return false;
+        }
+        match budget.compare_exchange_weak(left, left - 1, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => return true,
+            Err(now) => left = now,
+        }
+    }
+}
+
+/// The first files opened through the hook, whatever they are: proof that
+/// the game's calls reach it at all.
+static OPENS_LEFT: AtomicUsize = AtomicUsize::new(25);
 
 /// Whether a path is about the game's pak folders, the ones traced.
 fn about_paks(text: &str) -> bool {
@@ -389,6 +423,11 @@ unsafe extern "system" fn hook_create_file(
     let call = |path: *const u16| unsafe {
         (real().create_file)(path, access, share, security, disposition, flags, template)
     };
+    if take(&OPENS_LEFT) {
+        if let Some(text) = read_wide(name) {
+            log(&format!("seen: {text}"));
+        }
+    }
     let Some((path, full)) = locate(name) else {
         return call(name);
     };
@@ -868,7 +907,10 @@ unsafe fn library_path(name: *const u16) -> Option<Vec<u16>> {
 /// the same treatment — UE4SS's C++ mods arrive this way.
 fn after_load(module: HMODULE) -> HMODULE {
     if !module.is_null() {
-        iat::patch_all(&patches(), &skipped_modules());
+        let patched = iat::patch_all(&patches(), &skipped_modules());
+        if patched.iter().any(|p| p.slots > 0) && take(&LOADS_LEFT) {
+            log_patched("loaded, redirected in", &patched);
+        }
     }
     module
 }
