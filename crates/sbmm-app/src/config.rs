@@ -22,6 +22,8 @@ use crate::{App, AppError, Result};
 const EXTENSIONS: &[&str] = &[
     "ini", "cfg", "conf", "txt", "json", "toml", "yaml", "yml", "xml", "lua",
 ];
+/// Where the game's settings are, when not where Stellar Blade keeps them.
+const SETTING_GAME_CONFIG_DIR: &str = "gameConfigDir";
 /// Anything larger is not a settings file.
 const MAX_BYTES: u64 = 1024 * 1024;
 
@@ -34,11 +36,21 @@ pub enum ConfigScope {
         mod_id: i64,
     },
     Game,
+    /// INI files in the game folder itself, such as ReShade presets the
+    /// user made there.
+    Install,
+}
+
+impl ConfigScope {
+    /// The game's own files: INI only, and the found copy kept to reset to.
+    fn is_game(self) -> bool {
+        matches!(self, ConfigScope::Game | ConfigScope::Install)
+    }
 }
 
 /// How a file was encoded, so it is written back the same way.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Encoding {
+pub(crate) enum Encoding {
     Utf8 { bom: bool },
     Utf16Le,
 }
@@ -62,7 +74,7 @@ fn decode(bytes: &[u8]) -> Option<(String, Encoding)> {
         .map(|text| (text, Encoding::Utf8 { bom }))
 }
 
-fn encode(text: &str, encoding: Encoding) -> Vec<u8> {
+pub(crate) fn encode(text: &str, encoding: Encoding) -> Vec<u8> {
     match encoding {
         Encoding::Utf8 { bom } => {
             let mut out = if bom {
@@ -83,7 +95,7 @@ fn encode(text: &str, encoding: Encoding) -> Vec<u8> {
     }
 }
 
-fn read_text(path: &Path) -> Result<(String, Encoding)> {
+pub(crate) fn read_text(path: &Path) -> Result<(String, Encoding)> {
     let bytes = std::fs::read(path).map_err(|e| AppError::io(path, e))?;
     decode(&bytes)
         .ok_or_else(|| AppError::Invalid(format!("{} is not a text file", path.display())))
@@ -121,11 +133,28 @@ pub(crate) struct KeptSettings {
 impl App {
     /// The game's own settings: `%LOCALAPPDATA%\SB\Saved\Config`.
     pub fn game_config_dir(&self) -> Option<PathBuf> {
-        if let Some(dir) = std::env::var_os("SBMM_GAME_CONFIG_DIR") {
+        if let Some(dir) = self
+            .store
+            .get_setting(SETTING_GAME_CONFIG_DIR)
+            .ok()
+            .flatten()
+        {
             return Some(PathBuf::from(dir));
         }
         std::env::var_os("LOCALAPPDATA")
             .map(|local| PathBuf::from(local).join("SB").join("Saved").join("Config"))
+    }
+
+    /// Use another folder for the game's settings, or the usual one with
+    /// `None`.
+    pub fn set_game_config_dir(&mut self, dir: Option<&Path>) -> Result<()> {
+        match dir {
+            Some(dir) => self
+                .store
+                .set_setting(SETTING_GAME_CONFIG_DIR, &dir.to_string_lossy())?,
+            None => self.store.delete_setting(SETTING_GAME_CONFIG_DIR)?,
+        }
+        Ok(())
     }
 
     fn pristine_dir(&self, staging_folder: &str) -> PathBuf {
@@ -144,6 +173,7 @@ impl App {
             ConfigScope::Game => self.game_config_dir().ok_or_else(|| {
                 AppError::Invalid("the game's settings folder could not be found".into())
             }),
+            ConfigScope::Install => Ok(self.game()?.ok_or(AppError::NoGame)?.root),
         }
     }
 
@@ -156,6 +186,10 @@ impl App {
             ConfigScope::Game => self
                 .config_backup_dir()
                 .join(format!("{}.original", path.replace('/', "__"))),
+            ConfigScope::Install => self
+                .config_backup_dir()
+                .join("install")
+                .join(format!("{}.original", path.replace('/', "__"))),
         })
     }
 
@@ -165,16 +199,21 @@ impl App {
         let root = self.config_root(scope)?;
         let full = sbmm_deploy::backend::resolve_target(&root, Path::new(path))
             .map_err(|_| AppError::Invalid(format!("{path} is outside the folder")))?;
-        if !is_settings_file(&full, scope == ConfigScope::Game) || !full.is_file() {
+        if !is_settings_file(&full, scope.is_game()) || !full.is_file() {
             return Err(AppError::Invalid(format!("{path} is not a settings file")));
         }
         Ok(full)
     }
 
     pub fn config_files(&self, scope: ConfigScope) -> Result<Vec<ConfigFileView>> {
+        if scope == ConfigScope::Install {
+            // The whole game folder is no list to pick from; its files are
+            // opened from where they are shown.
+            return Ok(Vec::new());
+        }
         let root = self.config_root(scope)?;
         let mut views = Vec::new();
-        for path in settings_files(&root, scope == ConfigScope::Game) {
+        for path in settings_files(&root, scope.is_game()) {
             let full = root.join(&path);
             let original = self.original_of(scope, &path)?;
             let edited =
@@ -206,11 +245,14 @@ impl App {
         let full = self.config_path(scope, path)?;
         let (_, encoding) = read_text(&full)?;
 
-        if scope == ConfigScope::Game {
+        if scope.is_game() {
             // The first save keeps what was there, to reset to.
             let original = self.original_of(scope, path)?;
             if !original.exists() {
-                let dir = self.config_backup_dir();
+                let dir = original
+                    .parent()
+                    .unwrap_or(&self.config_backup_dir())
+                    .to_path_buf();
                 std::fs::create_dir_all(&dir).map_err(|e| AppError::io(&dir, e))?;
                 std::fs::copy(&full, &original).map_err(|e| AppError::io(&original, e))?;
             }

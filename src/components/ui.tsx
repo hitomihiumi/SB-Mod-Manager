@@ -133,6 +133,9 @@ export function Dialog({
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/55 p-6">
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
         className="flex max-h-full w-full flex-col overflow-hidden rounded-xl border border-line-strong bg-surface shadow-2xl"
         style={{ maxWidth: width }}
       >

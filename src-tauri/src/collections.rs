@@ -115,7 +115,7 @@ pub async fn resolve_collection(
 /// Returns how many were added. The queue does the rest: a Premium account
 /// sees them download one after another, a free account is walked through the
 /// website a mod at a time, and either way installing is automatic.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn install_collection(
     downloads: tauri::State<'_, Downloads>,
     slug: String,

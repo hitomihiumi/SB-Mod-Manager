@@ -26,7 +26,7 @@ pub async fn storage_report(app_handle: tauri::AppHandle) -> Result<StorageRepor
 }
 
 /// Returns the bytes freed.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn clean_storage(state: tauri::State<'_, AppState>, what: Cleanup) -> Result<u64, String> {
     with_app!(state, |app| app.clean(what))
 }
@@ -38,7 +38,7 @@ pub struct WatchSettings {
     auto_install: bool,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn watch_settings(state: tauri::State<'_, AppState>) -> Result<WatchSettings, String> {
     with_app!(state, |app| app.watch_dir().and_then(|dir| {
         Ok(WatchSettings {
@@ -48,19 +48,19 @@ pub fn watch_settings(state: tauri::State<'_, AppState>) -> Result<WatchSettings
     }))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_watch_dir(state: tauri::State<'_, AppState>, dir: Option<String>) -> Result<(), String> {
     let dir = dir.map(PathBuf::from);
     with_app!(state, |app| app.set_watch_dir(dir.as_deref()))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_watch_auto_install(state: tauri::State<'_, AppState>, on: bool) -> Result<(), String> {
     with_app!(state, |app| app.set_watch_auto_install(on))
 }
 
 /// Archives the user installed or turned down, not to be offered again.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn mark_seen(state: tauri::State<'_, AppState>, keys: Vec<String>) -> Result<(), String> {
     with_app!(state, |app| app.mark_seen(&keys))
 }

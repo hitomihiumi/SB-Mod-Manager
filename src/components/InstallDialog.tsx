@@ -220,16 +220,30 @@ function TypeBody({
   type: ModTypeId;
   setType: (type: ModTypeId) => void;
 }) {
-  const fileCount = staged.components.reduce((sum, c) => sum + c.files.length, 0);
+  // The choice places only what was not recognised; the rest installs as
+  // detected.
+  const unsure = staged.components.filter((c) => c.modType === "unknown" || c.confidence === "askUser");
+  const known = staged.components.filter((c) => !unsure.includes(c));
+  const fileCount = unsure.reduce((sum, c) => sum + c.files.length, 0);
   const notes = staged.components.flatMap((c) => c.notes);
   const targetDir = MOD_TYPE_META[type].hint;
 
   return (
     <>
       <p className="mb-4 text-[12px] leading-relaxed text-ink-muted">
-        This archive has no marker the detector recognises — no pak files, no{" "}
-        <code className="font-mono text-ink-soft">LogicMods</code> folder, no UE4SS script. Pick
-        the type and it will be remembered for archives shaped like this one.
+        {known.length > 0 ? (
+          <>
+            Most of this archive was recognised (
+            {[...new Set(known.map((c) => MOD_TYPE_META[c.modType].label))].join(", ")}) and
+            installs as detected. Only the files below were not — pick where they belong.
+          </>
+        ) : (
+          <>
+            This archive has no marker the detector recognises — no pak files, no{" "}
+            <code className="font-mono text-ink-soft">LogicMods</code> folder, no UE4SS script. Pick
+            the type for its files.
+          </>
+        )}
       </p>
 
       <Gallery folder={staged.stagingId} paths={staged.previews} />
@@ -280,7 +294,7 @@ function TypeBody({
           </ul>
         )}
         <ul className="max-h-32 space-y-0.5 overflow-y-auto">
-          {staged.components
+          {unsure
             .flatMap((c) => c.files)
             .slice(0, 40)
             .map((file) => (

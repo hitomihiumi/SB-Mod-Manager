@@ -12,9 +12,11 @@ pub mod insight;
 pub mod installer;
 pub mod library;
 pub mod modlist;
+pub mod reshade;
 pub mod safety;
 pub mod saves;
 pub mod storage;
+mod tweaks;
 pub mod ue4ss;
 
 use std::collections::BTreeMap;
@@ -383,6 +385,28 @@ impl App {
 
     /// Register a folder the user dropped in directly, treating it as if it
     /// had been extracted from an archive.
+    /// Pick and create the folder an archive will be unpacked into, so the
+    /// slow part — extracting — can run without holding the service: a
+    /// window waiting on it would freeze, and dozens of archives dropped at
+    /// once would hold up everything else until the last was done.
+    pub fn reserve_staging(&self, suggested_name: &str) -> Result<(String, PathBuf)> {
+        let staging_id = self.unique_staging_folder(suggested_name);
+        let dest = self.staging_path(&staging_id);
+        std::fs::create_dir_all(&dest).map_err(|e| AppError::io(&dest, e))?;
+        Ok((staging_id, dest))
+    }
+
+    /// Inspect a folder [`reserve_staging`](Self::reserve_staging) handed
+    /// out, once it has been filled.
+    pub fn inspect_reserved(
+        &self,
+        staging_id: String,
+        suggested_name: String,
+    ) -> Result<StagedInstall> {
+        let dest = self.staging_path(&staging_id);
+        self.inspect_staged(staging_id, suggested_name, dest)
+    }
+
     pub fn stage_folder(&mut self, folder: impl AsRef<Path>) -> Result<StagedInstall> {
         let folder = folder.as_ref();
         let suggested_name = folder
@@ -403,7 +427,7 @@ impl App {
         dest: PathBuf,
     ) -> Result<StagedInstall> {
         let tree = FileTree::new(sbmm_archive::walk_relative(&dest));
-        let components = detect_components(&tree);
+        let components = detect_in(&dest, &tree);
         // A FOMOD says itself what to ask; guessing at variants on top of it
         // would ask twice.
         let fomod = self.fomod_view(&staging_id, &suggested_name, None)?;
@@ -1091,12 +1115,23 @@ impl App {
         }
 
         let tree = FileTree::new(sbmm_archive::walk_relative(&dest));
-        let mut components = detect_components(&tree);
+        let mut components = detect_in(&dest, &tree);
 
         if let Some(forced) = type_override {
+            // The user's choice answers the question that was asked — where
+            // the files nobody recognised belong. Parts that were recognised
+            // keep their own destinations: forcing a whole CNS outfit to
+            // "pak" put its outfit definition among the paks, and forcing a
+            // Lua mod's archive re-nested the mod inside itself.
             components = components
                 .iter()
-                .map(|c| plan::retarget(c, forced, name))
+                .map(|c| {
+                    if c.mod_type == ModType::Unknown || c.confidence == Confidence::AskUser {
+                        plan::retarget(c, forced, name)
+                    } else {
+                        c.clone()
+                    }
+                })
                 .collect();
             // Remember the correction so an archive shaped like this one is
             // classified without asking next time.
@@ -1163,6 +1198,10 @@ impl App {
         }
         self.forget_pristine(&record.staging_folder);
         self.store.delete_mod(mod_id)?;
+        // Its settings tweaks come out of the game's settings with it.
+        if self.tweaked_mods()?.contains(&mod_id) {
+            self.sync_config_tweaks()?;
+        }
         Ok(())
     }
 
@@ -1187,15 +1226,32 @@ impl App {
         let virtual_mode = self.deployment_mode()? == DeploymentMode::Virtual;
         let file_conflicts = self.file_conflict_counts(&records)?;
         let ue4ss_loads = self.ue4ss_presence(&records)?.loads();
+        // Only looked for when an enabled mod has presets to show.
+        let mut reshade_there: Option<bool> = None;
         let mut nexus_missing = self.missing_nexus_requirements(&records)?;
         let mut misordered = self.misordered(&records)?;
+        let tweaked = self.tweaked_mods()?;
         for record in &records {
             let components = self.store.components_for(record.id)?;
             let planned = self.deploy_plan_for(record, &components)?;
             let recorded = self.store.deployed_files_for(record.id)?;
-            let deployed = !recorded.is_empty();
+            // A settings tweak is "deployed" when its keys are in the game's
+            // settings, there being no files.
+            let tweak_only = !components.is_empty()
+                && components
+                    .iter()
+                    .all(|c| c.mod_type == ModType::ConfigTweak);
+            let deployed = !recorded.is_empty() || tweaked.contains(&record.id);
 
-            if let Some(kind) = change_kind(record.enabled, deployed, &planned, &recorded) {
+            let tweak_change = tweak_only.then_some(match (record.enabled, deployed) {
+                (true, false) => Some(ChangeKind::Enable),
+                (false, true) => Some(ChangeKind::Disable),
+                _ => None,
+            });
+            if let Some(kind) = tweak_change
+                .flatten()
+                .or_else(|| change_kind(record.enabled, deployed, &planned, &recorded))
+            {
                 pending.push(PendingChange {
                     mod_id: record.id,
                     name: record.name.clone(),
@@ -1235,6 +1291,15 @@ impl App {
                         } else {
                             Vec::new()
                         };
+                    if record.enabled && App::needs_reshade(&components) {
+                        let there = match reshade_there {
+                            Some(there) => there,
+                            None => *reshade_there.insert(self.reshade_likely_installed()?),
+                        };
+                        if !there {
+                            missing.push("ReShade".to_string());
+                        }
+                    }
                     missing.extend(nexus_missing.remove(&record.id).unwrap_or_default());
                     missing
                 },
@@ -1355,6 +1420,62 @@ impl App {
         Ok(())
     }
 
+    /// Look at installed mods' files again with the current detector, and
+    /// take its answer wherever it is sure and differs from what the mod
+    /// has — repairing mods installed before the detector understood their
+    /// layout, or installed with a type that was forced on the whole archive.
+    /// Mods it is still unsure about keep what they have. Changes reach the
+    /// game at once when changes apply automatically.
+    pub fn redetect_mods(&mut self, ids: Option<&[i64]>) -> Result<RedetectReport> {
+        let mut report = RedetectReport::default();
+        for record in self.store.list_mods()? {
+            if ids.is_some_and(|ids| !ids.contains(&record.id))
+                || matches!(record.source.as_str(), "upscaler" | "framegen")
+            {
+                continue;
+            }
+            let root = self.staging_path(&record.staging_folder);
+            if !root.is_dir() {
+                continue;
+            }
+            let fresh = detect_in(&root, &FileTree::new(sbmm_archive::walk_relative(&root)));
+            if fresh.is_empty()
+                || fresh
+                    .iter()
+                    .any(|c| c.mod_type == ModType::Unknown || c.confidence == Confidence::AskUser)
+            {
+                report.unsure.push(record.name);
+                continue;
+            }
+            let targets = |components: &[DetectedComponent]| {
+                let mut all: Vec<String> = components
+                    .iter()
+                    .flat_map(|c| {
+                        c.files
+                            .iter()
+                            .map(|f| f.target.to_string_lossy().replace('\\', "/"))
+                    })
+                    .collect();
+                all.sort();
+                all
+            };
+            let current = self.store.components_for(record.id)?;
+            let types = |components: &[DetectedComponent]| {
+                components.iter().map(|c| c.mod_type).collect::<Vec<_>>()
+            };
+            if targets(&current) == targets(&fresh) && types(&current) == types(&fresh) {
+                report.unchanged += 1;
+                continue;
+            }
+            self.store.set_components(record.id, &fresh)?;
+            report.changed.push(record.name);
+        }
+        if !report.changed.is_empty() && self.game()?.is_some() && self.auto_apply()? {
+            report.applied = Some(self.apply()?);
+        }
+        Ok(report)
+    }
+
     /// The user's note on a mod; blank clears it.
     pub fn set_mod_notes(&mut self, mod_id: i64, notes: &str) -> Result<()> {
         let notes = notes.trim();
@@ -1459,11 +1580,22 @@ impl App {
             return Ok(ApplyReport::default());
         }
         self.store.set_active_profile(id)?;
-        if self.game()?.is_some() {
-            self.apply()
-        } else {
-            Ok(ApplyReport::default())
+        if self.game()?.is_none() {
+            return Ok(ApplyReport::default());
         }
+        let mut report = self.apply()?;
+        // The look this profile was set up with goes with it.
+        let preset = match self.apply_profile_reshade_preset() {
+            Ok(note) => note,
+            Err(error) => Some(error.to_string()),
+        };
+        if let Some(reason) = preset {
+            report.failed.push(ApplyFailure {
+                name: "ReShade preset".into(),
+                reason,
+            });
+        }
+        Ok(report)
     }
 
     fn valid_profile_name(&self, name: &str, renaming: Option<i64>) -> Result<String> {
@@ -1539,6 +1671,30 @@ impl App {
         // view at launch; writing the real one would defeat the point.
         if self.deployment_mode()? == DeploymentMode::Hardlink {
             self.sync_ue4ss_registrations(&ctx)?;
+        }
+        // The game reads its settings from outside its folder under either
+        // mode, so settings tweaks are merged in for real. A failure there
+        // is reported like a mod's, not allowed to undo everything else.
+        let tweaks_before = self.tweaked_mods()?;
+        match self.sync_config_tweaks() {
+            Ok(()) => {
+                let tweaks_after = self.tweaked_mods()?;
+                for record in self.store.list_mods()? {
+                    let (was, is) = (
+                        tweaks_before.contains(&record.id),
+                        tweaks_after.contains(&record.id),
+                    );
+                    if is && !was && !report.deployed.contains(&record.name) {
+                        report.deployed.push(record.name);
+                    } else if was && !is && !report.removed.contains(&record.name) {
+                        report.removed.push(record.name);
+                    }
+                }
+            }
+            Err(error) => report.failed.push(ApplyFailure {
+                name: "Settings tweaks".into(),
+                reason: error.to_string(),
+            }),
         }
         Ok(report)
     }
@@ -2286,7 +2442,7 @@ fn detection_pattern(tree: &FileTree) -> String {
     extensions.join(",")
 }
 
-fn archive_display_name(archive: &Path) -> String {
+pub fn archive_display_name(archive: &Path) -> String {
     let stem = archive
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
@@ -2356,6 +2512,19 @@ impl OriginLabels {
 /// The staging folder of the RTX 20/30 frame generation package.
 const FRAMEGEN_STAGING: &str = "framegen-dlssg-sm86";
 
+/// What an extracted folder holds: detection by its paths, then a look
+/// inside the INI files nothing claimed, which is the only way to tell a
+/// ReShade preset from any other settings file.
+fn detect_in(root: &Path, tree: &FileTree) -> Vec<DetectedComponent> {
+    sbmm_core::reshade::claim_presets(detect_components(tree), |source| {
+        let full = root.join(source);
+        if std::fs::metadata(&full).ok()?.len() > 1024 * 1024 {
+            return None;
+        }
+        config::read_text(&full).ok().map(|(text, _)| text)
+    })
+}
+
 /// A game-relative path in a form two spellings of it agree on: Windows paths
 /// ignore case, and the deployment record may hold either separator.
 fn comparable_path(path: &str) -> String {
@@ -2393,7 +2562,7 @@ fn path_string(path: impl AsRef<Path>) -> String {
     path.as_ref().to_string_lossy().into_owned()
 }
 
-fn copy_tree(from: &Path, to: &Path) -> Result<()> {
+pub fn copy_tree(from: &Path, to: &Path) -> Result<()> {
     for relative in sbmm_archive::walk_relative(from) {
         let src = from.join(&relative);
         let dst = to.join(&relative);

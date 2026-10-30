@@ -23,6 +23,7 @@ export function SettingsView() {
   const chooseGame = useApp((s) => s.chooseGame);
   const refresh = useApp((s) => s.refresh);
   const toast = useApp((s) => s.toast);
+  const redetect = useApp((s) => s.redetect);
   const [folders, setFolders] = useState<Folders | null>(null);
   const [moving, setMoving] = useState(false);
 
@@ -164,6 +165,17 @@ export function SettingsView() {
               as the game to avoid that.
             </p>
           )}
+
+          <div className="mt-3 flex items-center gap-2 border-t border-line pt-3">
+            <p className="flex-1 text-[11px] leading-relaxed text-ink-muted">
+              Mods installed by an older version, or with a type chosen for the whole archive,
+              may sit in the wrong places. Detecting them again fixes the ones the manager now
+              recognises; the rest are left as they are.
+            </p>
+            <Button variant="outline" onClick={() => void redetect(null)}>
+              Detect all mods again
+            </Button>
+          </div>
 
           <div className="mt-3 space-y-1.5 border-t border-line pt-3">
             <PathRow label="Staged mods" path={folders?.mods} />

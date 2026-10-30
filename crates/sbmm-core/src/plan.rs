@@ -51,6 +51,10 @@ pub fn build_plan(
     let mut ue4ss_registrations = Vec::new();
 
     for component in components {
+        // Merged into the game's settings, never placed as files.
+        if component.mod_type == ModType::ConfigTweak {
+            continue;
+        }
         let mut component_files = component.files.clone();
 
         // A UE4SS mod with no folder of its own is nested under the mod name.
@@ -90,6 +94,27 @@ pub fn build_plan(
 ///
 /// Detection is a guess for `Unknown` payloads; this recomputes destinations
 /// from scratch for the chosen type rather than patching the old ones.
+/// `rel` without a leading run of folders that `root` already ends with,
+/// compared without case.
+fn strip_overlap(root: &str, rel: &Path) -> PathBuf {
+    let root: Vec<String> = root
+        .split(['/', '\\'])
+        .filter(|s| !s.is_empty())
+        .map(str::to_lowercase)
+        .collect();
+    let parts: Vec<String> = rel
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+        .collect();
+    let lower: Vec<String> = parts.iter().map(|p| p.to_lowercase()).collect();
+    for k in (1..=root.len().min(lower.len().saturating_sub(1))).rev() {
+        if root[root.len() - k..] == lower[..k] {
+            return parts[k..].iter().collect();
+        }
+    }
+    rel.to_path_buf()
+}
+
 pub fn retarget(
     component: &DetectedComponent,
     new_type: ModType,
@@ -118,7 +143,16 @@ pub fn retarget(
                     .unwrap_or_else(|| f.source.clone());
                 Path::new(&target_root).join(name)
             } else {
-                Path::new(&target_root).join(&f.source)
+                // An unknown component's targets are its paths with wrapper
+                // folders already stripped; and a path that repeats the end
+                // of the destination (`ue4ss/Mods/X/...` into `.../Mods/X`)
+                // is not nested inside it again.
+                let rel = if component.mod_type == ModType::Unknown {
+                    &f.target
+                } else {
+                    &f.source
+                };
+                Path::new(&target_root).join(strip_overlap(&target_root, rel))
             };
             ComponentFile {
                 source: f.source.clone(),
@@ -184,5 +218,29 @@ pub fn sanitize_folder_name(name: &str) -> String {
         "Mod".to_string()
     } else {
         trimmed.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_path_repeating_its_destination_is_not_nested_again() {
+        assert_eq!(
+            strip_overlap(
+                "SB/Binaries/Win64/ue4ss/Mods/JiggleUpdate",
+                Path::new("ue4ss/Mods/JiggleUpdate/Scripts/main.lua")
+            ),
+            PathBuf::from("Scripts/main.lua")
+        );
+        assert_eq!(
+            strip_overlap("SB/Binaries/Win64", Path::new("SB/Binaries/Win64/x.dll")),
+            PathBuf::from("x.dll")
+        );
+        assert_eq!(
+            strip_overlap("SB/Binaries/Win64", Path::new("plugins/x.dll")),
+            PathBuf::from("plugins/x.dll")
+        );
     }
 }

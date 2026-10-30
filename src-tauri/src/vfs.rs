@@ -17,7 +17,7 @@ use crate::{fail, AppState};
 const HOOK: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/sbmm_vfs_hook.dll"));
 
 /// One directory of the virtual file tree, for the Files view.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn vfs_tree(
     state: tauri::State<'_, AppState>,
     dir: Option<String>,
@@ -26,7 +26,7 @@ pub fn vfs_tree(
 }
 
 /// Every clashing path, or only those `mod_id` takes part in.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn vfs_conflicts(
     state: tauri::State<'_, AppState>,
     mod_id: Option<i64>,
@@ -35,7 +35,7 @@ pub fn vfs_conflicts(
 }
 
 /// Move everything in overwrite into a new, enabled mod.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn create_mod_from_overwrite(
     state: tauri::State<'_, AppState>,
     name: String,
@@ -44,12 +44,12 @@ pub fn create_mod_from_overwrite(
 }
 
 /// Delete everything in overwrite; returns how many files went.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn clear_overwrite(state: tauri::State<'_, AppState>) -> Result<u32, String> {
     crate::with_app!(state, |app| app.clear_overwrite())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_deployment_mode(
     state: tauri::State<'_, AppState>,
     mode: DeploymentMode,
@@ -76,6 +76,20 @@ pub async fn launch(app_handle: &tauri::AppHandle) -> Result<String, String> {
         app.back_up_saves_before_launch();
         Ok::<_, sbmm_app::AppError>(())
     })?;
+    // The look the profile was set up with, in case ReShade or the user
+    // switched preset since.
+    let preset_note = crate::with_app!(state, |app| Ok::<_, sbmm_app::AppError>(
+        match app.apply_profile_reshade_preset() {
+            Ok(note) => note,
+            Err(error) => Some(format!(
+                "The profile's ReShade preset could not be set: {error}"
+            )),
+        }
+    ))?;
+    let started = |message: String| match &preset_note {
+        Some(note) => format!("{message} {note}"),
+        None => message,
+    };
 
     if mode == DeploymentMode::Hardlink {
         // Steam's own launch keeps the overlay, cloud saves and playtime.
@@ -94,7 +108,7 @@ pub async fn launch(app_handle: &tauri::AppHandle) -> Result<String, String> {
                 .spawn()
                 .map_err(fail)?;
         }
-        return Ok("Starting Stellar Blade.".into());
+        return Ok(started("Starting Stellar Blade.".into()));
     }
 
     if HOOK.is_empty() {
@@ -114,9 +128,9 @@ pub async fn launch(app_handle: &tauri::AppHandle) -> Result<String, String> {
                 log.display()
             )
         })?;
-    Ok(format!(
+    Ok(started(format!(
         "Started Stellar Blade under the virtual file system (process {pid})."
-    ))
+    )))
 }
 
 /// Put the embedded hook where the launcher can load it from.

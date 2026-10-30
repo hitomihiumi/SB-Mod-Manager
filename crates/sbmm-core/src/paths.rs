@@ -22,6 +22,17 @@ pub const UE4SS_MODS_TXT: &str = "SB/Binaries/Win64/ue4ss/Mods/mods.txt";
 /// Where the game executable and any injected DLL proxies live.
 pub const BINARIES_WIN64: &str = "SB/Binaries/Win64";
 
+/// Where ReShade presets the manager installs go: beside the executable,
+/// in a folder of their own so they do not crowd it.
+pub const RESHADE_PRESETS: &str = "SB/Binaries/Win64/reshade-presets";
+
+/// UE4SS's own folder, where its settings and shared scripts live.
+pub const UE4SS_DIR: &str = "SB/Binaries/Win64/ue4ss";
+
+/// Where Custom Nanosuit System (DekCNS) reads outfit definitions from.
+/// It does not look in `~mods` itself.
+pub const CNS_DEFINITIONS: &str = "SB/Content/Paks/~mods/CustomNanosuitSystem";
+
 /// Bink/mp4 movie replacements.
 pub const CONTENT_MOVIES: &str = "SB/Content/Movies";
 

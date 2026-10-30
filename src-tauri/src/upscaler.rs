@@ -172,7 +172,7 @@ pub async fn update_upscaler(
 }
 
 /// Put the game's own DLL back.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn restore_upscaler(
     state: tauri::State<'_, AppState>,
     component: Component,

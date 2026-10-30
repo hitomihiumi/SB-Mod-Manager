@@ -7,18 +7,18 @@ use tauri::Manager;
 
 use crate::{fail, with_app, AppState, USER_AGENT};
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn mod_contents(state: tauri::State<'_, AppState>, mod_id: i64) -> Result<ModContents, String> {
     with_app!(state, |app| app.mod_contents(mod_id))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn order_rules(state: tauri::State<'_, AppState>) -> Result<Vec<OrderRuleView>, String> {
     with_app!(state, |app| app.order_rules())
 }
 
 /// `before` loads before `after`; the list is sorted to obey it at once.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn add_order_rule(
     state: tauri::State<'_, AppState>,
     before: i64,
@@ -29,18 +29,18 @@ pub fn add_order_rule(
         .and_then(|_| app.sort_by_rules()))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_order_rule(state: tauri::State<'_, AppState>, id: i64) -> Result<(), String> {
     with_app!(state, |app| app.delete_order_rule(id))
 }
 
 /// Returns how many mods moved.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn sort_by_rules(state: tauri::State<'_, AppState>) -> Result<usize, String> {
     with_app!(state, |app| app.sort_by_rules())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn nexus_view(
     state: tauri::State<'_, AppState>,
     mod_id: i64,

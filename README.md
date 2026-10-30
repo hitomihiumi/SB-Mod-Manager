@@ -6,258 +6,109 @@ folder back exactly as it found it.
 
 <img src="docs/screenshot.png" alt="The mods list, with groups and pending changes" width="900">
 
-## Why this exists
+Stellar Blade mods do not all go in one place: paks go in `~mods`, Blueprint
+mods in `LogicMods`, Lua mods in their own UE4SS folder plus a line in
+`mods.txt`, ReShade next to the executable. Getting this wrong is the usual
+reason a mod "doesn't work". This manager gets it right for you.
 
-Stellar Blade mods do not all go in one place. A pak goes in `~mods`, a
-Blueprint mod goes in `LogicMods` and will not work in `~mods`, a Lua mod needs
-its own folder *and* a line in UE4SS's `mods.txt`, ReShade goes next to the
-executable, and CNS packages ship a whole `SB/` tree to overlay. Getting this
-wrong is the usual reason a mod "doesn't work".
+## Features
 
-## What it does
+**Installing**
 
-- **Detects the mod type and destination.** Nine layouts are recognised from
-  structural markers rather than guesswork, and a single archive can contain
-  several — a logic mod bundled with a cosmetic pak is routed as two
-  independent components. When nothing is conclusive it asks once and
-  remembers the answer.
-- **Handles IoStore properly.** Stellar Blade is UE 4.26 with IoStore, so pak
-  mods are `.pak`/`.utoc`/`.ucas` triplets that must share a base name and end
-  in `_P`. Missing suffixes are fixed, incomplete sets are flagged.
-- **Asks which version, when an archive holds several.** Outfit mods often
-  ship `Black/`, `White/` and `Red/` in one archive, each a complete mod that
-  replaces the same files. Installing all of them means whichever loads last
-  wins, so the manager asks which to install — as Mod Organizer 2's installers
-  do — keeps only that, and remembers the answer: the next version of the same
-  mod, from Nexus or dropped in by hand, installs the same way without asking.
-  Folders that do not clash, like a pack of separate Lua mods, still install
-  together without a question. The pictures each version carries are shown
-  next to it, so the choice is made by looking rather than by folder name.
-- **Runs FOMOD installers.** An archive with `fomod/ModuleConfig.xml` opens as
-  a step-by-step wizard, the way Mod Organizer 2 runs one: option groups with
-  their rules (choose one, any, at least one), required and unavailable
-  options locked, steps and options that depend on earlier answers or on
-  files in the game folder shown and hidden as the script says, and the
-  picture and description of the option under the pointer beside the list.
-  Conditional file installs and priorities are honoured, the answers are
-  remembered for the next version of the mod, and the chosen picture becomes
-  the mod's preview.
-- **Load order that actually applies.** `~mods` is mounted alphanumerically, so
-  priority is written into the deployed file names (`0010_Outfit_P.pak`) with
-  every file of a set renamed together. Logic mods are left alone, because
-  UE4SS resolves those itself.
-- **Enable and disable one mod, a group, or everything**, with the game folder
-  reconciled in a single pass.
-- **A virtual file system, like Mod Organizer 2's** *(experimental)*. Instead
-  of linking mods into the game folder, the manager can leave the folder
-  untouched and start the game under a hook that shows it the mods: every
-  enabled mod is a layer over the real folder in load order, the one furthest
-  down winning each file, and anything the game creates goes to an
-  *overwrite* folder rather than the game. Proxy DLLs, UE4SS itself and the
-  DLSS/frame generation swaps are still linked in, because Windows loads them
-  before any hook exists — the job Root Builder does for Mod Organizer.
-  Switching between the two modes carries every enabled mod across, and the
-  game sees byte-for-byte the same folder either way.
-- **Installs a batch in one go.** Drop or pick any number of archives; the ones
-  it recognises install themselves and the rest queue up to be asked about, so
-  nothing in the batch is lost.
-- **Downloads from Nexus Mods.** Pressing *Mod Manager Download* on a mod page
-  hands the file to the manager, which fetches it, works out what it is and
-  installs it without another click. Nexus only gives direct links to Premium
-  accounts, and that gate is respected rather than worked around: on a free
-  account the manager opens each mod page for you and picks the link up from
-  the button, which is one click per mod and nothing else. The queue survives
-  a restart, and a part-downloaded file resumes rather than starting over.
-- **Installs collections.** Paste a collection link and it lists what is in
-  there, marks what you already have, and lets you pick the optional entries.
-  Everything selected goes into the same queue, so Premium installs the lot
-  unattended and a free account is one click per mod. Entries hosted off Nexus
-  cannot be fetched for you and are listed separately rather than silently
-  skipped — a collection that quietly drops them looks installed while the
-  game is still missing mods.
-- **Says which mod is actually winning.** Two mods can both be installed, both
-  be enabled, and only one of them be doing anything, because they replace the
-  same asset and the game loads whichever mounts last. The manager reads the
-  `.pak` and `.utoc` indexes — only the indexes, so a scan costs kilobytes
-  however large the mod is — and names the asset, the mods claiming it, and the
-  one that reaches the game. Moving a mod down the load order changes the
-  answer, so the list is something to act on rather than read.
-- **Keeps the library where you want it.** Mods and backups can live on another
-  drive; only the small database stays in the app data folder. If the library
-  ends up on a different drive from the game, the app says so, because hard
-  links stop working there and every enabled mod is then stored twice.
-- **Updates DLSS and FSR.** Both ship as plain DLLs with a stable ABI within a
-  release line, so a newer one can be dropped in without waiting for a game
-  patch. Files come from the vendors' own repositories — `NVIDIA/DLSS` and the
-  FidelityFX SDK — and the offer is narrowed by what the card can actually run
-  and by which line the game is built against, so nothing is installed that the
-  game would ignore or the hardware could never load. The swap goes through the
-  same deployment record as a mod, so it undoes exactly.
-- **Frame Generation on RTX 20 and 30 cards** *(experimental)*. NVIDIA only
-  runs DLSS Frame Generation on RTX 40 and newer; the community project
-  [dlssg_for_sm86](https://github.com/sdli1995/dlssg_for_sm86) gets it running
-  on Turing and Ampere through a proxy DLL beside the game. The manager checks
-  first whether it can work at all — the card has to be an RTX 20 or 30, the
-  game has to ship DLSS Frame Generation for the proxy to take over, and the
-  proxy's file name must not already belong to another mod — and only then
-  offers to install. The release is fetched from the project's own GitHub
-  releases, every file that goes into the game is checked against the
-  archive's SHA-256 manifest, and only one proxy is ever put in place. It is
-  deployed like any mod, so removing it puts the folder back exactly. If the
-  game does not load `version.dll`, the other proxy names upstream ships can
-  be chosen instead.
-- **Says so on Discord**, if you want it to. Counts only — never the name of a
-  mod, a collection or a folder — and one switch in Settings turns it off.
-- **Updates itself** from GitHub releases, on either the stable or the nightly
-  channel, with the download checked against a signature before anything is
-  replaced.
-- **Knows when a mod needs UE4SS.** Lua, C++ and Blueprint logic mods do
-  nothing without UE4SS, and nothing on the outside says so. Every enabled
-  mod that needs it is flagged while the game will not load UE4SS, with one
-  button to install the build Stellar Blade needs — Chrisr0's fork of
-  RE-UE4SS, from its GitHub releases — and an update check after that.
-  Updating keeps your `UE4SS-settings.ini`, and UE4SS's own bundled mods
-  (BPModLoaderMod among them, which every logic mod relies on) stay switched
-  on under both deployment modes.
-- **Profiles.** Keep several setups — say, vanilla, cosmetics only and
-  everything — each with its own enabled mods and load order, and switch
-  between them from the mod list; the game folder is brought in line on the
-  spot. A new profile keeps the current order with nothing enabled; a
-  duplicate keeps the enabled set too.
-- **Mod lists.** Save a profile to a `.sbmm.json` file — its mods in
-  order, which are on, where each came from, tags and load order rules —
-  to share or keep. Opening one sets it up as a new profile: installed mods
-  are put in place, mods from Nexus that are missing are queued and take
-  their place when they arrive, and anything else is listed to get by hand.
-- **Updates everything at once.** After an update check, one button
-  queues the newest file of each outdated mod — the same kind of file as
-  the one installed (main, optional…). Each new version takes the old one's
-  place: enabled where it was, at the same spot in every profile, with its
-  group, rules, tags, notes and your settings edits, and the old version is
-  removed.
-- **Watches your downloads folder.** Point it at the folder the browser
-  saves to, and mod archives downloaded by hand from any site are offered
-  for install the moment they finish (or installed without asking, if you
-  prefer). What was in the folder before is left alone, and each archive is
-  offered once.
-- **Keeps the library lean.** Settings → Disk space shows where the
-  library's space goes and frees what nothing needs: extracted archives no
-  installed mod owns, downloaded archives not in flight, older automatic
-  save backups and logs. Mods not enabled in any profile are listed by size.
-  Game files set aside are never offered — disabling a mod puts them back.
-- **Shows what a mod changes.** The details panel lists where a mod's
-  assets land (read from its pak and utoc indexes and grouped by folder,
-  e.g. `Characters/Eve`), the files it puts in the game, and every other
-  mod changing the same things — with which of the two wins.
-- **Load order rules.** "This mod loads after that one", kept whatever else
-  moves, as LOOT and Vortex allow. Adding a rule sorts the list to obey all
-  of them while moving as little as possible; a contradicting rule is
-  refused, and mods whose rules the order breaks are flagged until sorted.
-- **Reads the mod's Nexus page.** For mods from Nexus: author, summary,
-  category, tags, endorsements, the page picture, and the mods it requires
-  — each checked against what is installed, with an enable button for one
-  installed but switched off. A required mod that is missing shows in the
-  mod list. Fetched after a Nexus install and again when a day old; no API
-  key is needed.
-- **Edits settings files.** A mod's INI, JSON, Lua and other settings
-  files open in an editor from the mod's details panel — INI files as a
-  form, a field per setting with the comments above it as help, or as text.
-  The game's own INI files (`%LOCALAPPDATA%\SB\Saved\Config`) are edited
-  from Settings, in whatever encoding Unreal wrote them. Each file can be
-  reset to the copy it was installed (or first found) as.
-- **Keeps your settings across reinstalls.** Every mod's settings files are
-  kept as installed, so when frame generation or UE4SS is reinstalled or
-  updated, the values you changed in `dlssg_sm86.ini` or
-  `UE4SS-settings.ini` are carried into the new version's file — and only
-  those: settings you never touched take the new version's defaults.
-- **Notes, tags and a picture for every mod**, in the details panel that
-  opens when one mod is selected. Tags show in the list and the search box
-  finds mods by tag and note as well as name.
-- **Notices game updates.** The installed build is remembered — Steam's
-  build id, or the executable for other installs — and when it changes the
-  mod list says so, with how many modded files the update replaced or
-  removed, until it is acknowledged.
-- **Repairs files changed behind its back.** Deployed files that were
-  deleted or replaced are put back with one click, and nothing found in
-  their place is thrown away: a settings file edited in the game folder
-  becomes the mod's own copy, and a file a game update restored becomes the
-  one disabling the mod puts back — not the stale copy from before the
-  update.
-- **Restore points.** Every time changes reach the game, the profile's
-  enabled set and load order are kept (the last 30, plus any the user names),
-  and any of them can be gone back to. Going back keeps the setup being left
-  as a point too, so it can be undone.
-- **Save backups.** The saves folder (`%LOCALAPPDATA%\SB\Saved\SaveGames`,
-  or one chosen in Settings) is zipped before each launch when something in
-  it changed, and on request. Restoring one first backs up the saves it
-  replaces.
-- **Profile shortcuts and a command line.** As with Mod Organizer 2, a
-  shortcut on the desktop or in the Start menu can start the game with a
-  chosen profile without opening the manager:
+- **Automatic type detection.** Every layout in [the table
+  below](#where-mods-are-installed) is recognised by structure; one archive
+  can hold several, each routed on its own. Readmes and source art are set aside, and
+  when nothing is conclusive it asks once and remembers.
+- **IoStore done right.** `.pak`/`.utoc`/`.ucas` sets keep one base name and
+  the `_P` suffix; incomplete sets are flagged.
+- **Variant picker and FOMOD.** Archives with several versions of an outfit
+  ask which one, with pictures. FOMOD installers run as a wizard, as in Mod
+  Organizer 2. Answers are remembered for the next version.
+- **Special cases handled.** Custom Nanosuit System outfits go where CNS
+  reads them, `Engine.ini`-style tweaks are merged key by key into the
+  game's own settings and taken back out exactly, and ReShade presets are
+  recognised by their contents.
+- **Batches, Nexus and collections.** Drop any number of archives at once.
+  *Mod Manager Download* on Nexus installs with no further clicks (free
+  accounts get one click per mod, as Nexus requires). Collections, mod lists
+  (`.sbmm.json`) and a watched downloads folder feed the same queue.
 
-  ```text
-  sbmm.exe --profile "Cosmetics only" --launch
-  ```
+**Running the game**
 
-  `--profile` (`-p`) makes the profile active, `--launch` (`-l`) starts the
-  game; either works alone. Started only to launch, the manager stays hidden
-  and closes once the game is on its way; if anything stops it, the window
-  opens and says what. A manager that is already open takes the request
-  over. The profile shortcut dialog shows the exact command for this
-  install, to paste into Steam, Playnite or any other launcher.
-- **A Files view, like Mod Organizer 2's Data tab.** Browse the game folder as
-  the enabled mods make it: every file is labelled with the mod, the game or
-  the overwrite folder that provides it, and with the mods it hides. A
-  Conflicts mode lists every clashing path at once.
-- **Conflict flags in the mod list.** Beside each mod, as in Mod Organizer 2:
-  `+N` when it replaces files of earlier mods, `−N` when later mods replace
-  its own, both together, and *Redundant* when every file it has is replaced
-  so it does nothing. Clicking a flag shows exactly which files.
-- **Overwrite as a mod.** What the game creates under the virtual file system
-  is listed under the mod list; one click turns it into a mod of its own,
-  enabled where overwrite sat, so nothing the game sees changes.
-- **One-click diagnostics.** Settings → Diagnostics writes a zip with a
-  summary of the setup and every relevant log, for attaching to a report.
-- **Leaves nothing behind.** Every file written and every original displaced is
-  recorded, so disabling everything restores the folder byte for byte —
-  including removing directories and the `mods.txt` it created, while never
-  touching a file it did not put there.
+- **Load order that applies.** Priority is written into pak file names
+  (`0010_Outfit_P.pak`), and "load after" rules are kept as you reorder.
+- **Two deployment modes.** Hard links into the game folder, or an
+  experimental **virtual file system** like Mod Organizer 2's: the folder
+  stays untouched, and whatever the game creates goes to an *overwrite*
+  folder you can turn into a mod.
+- **Profiles.** Separate enabled sets and load orders, switchable in one
+  click, plus desktop shortcuts and a command line:
+  `sbmm.exe --profile "Cosmetics only" --launch`.
+- **Dependencies checked.** Mods that need UE4SS, ReShade or another Nexus
+  mod are flagged. UE4SS (Chrisr0's Stellar Blade build) installs and
+  updates in one click.
+- **ReShade presets.** List every preset with the effect files it is
+  missing, pick the one ReShade starts with, and set one per profile.
+- **DLSS, FSR and frame generation.** Swap in newer DLSS/FSR DLLs, and
+  *(experimental)* run DLSS Frame Generation on RTX 20/30 cards via
+  [dlssg_for_sm86](https://github.com/sdli1995/dlssg_for_sm86). Both are
+  compatibility-checked and fully undoable.
 
-## Status
+**Understanding your setup**
 
-Everything the plan set out is built and covered by tests. Two things are
-worth knowing before the first real run:
+- **Conflicts.** Reads pak and utoc indexes to name the asset two mods both
+  replace and which one wins. MO2-style `+N`/`−N`/*Redundant* flags cover
+  loose files, and the Files view shows the game folder as mods make it.
+- **Mod details.** What a mod changes, its Nexus page info and requirements,
+  notes, tags, a picture, and an editor for its INI/JSON/Lua settings.
+  Your settings are kept across reinstalls and updates.
+- **A fast list.** Filters, sorting, a context menu and keyboard control
+  throughout (F1 lists the shortcuts).
 
-- **The collection lookup has not met the live API.** Nexus does not publish
-  its v2 GraphQL schema and the domain is unreachable from CI, so the query
-  was written from the documented shape and the response is read by walking
-  it for anything carrying a mod and file id rather than by a fixed path.
-  That survives a renamed wrapper, but not a renamed `collectionRevision`
-  itself. The `collection.json` inside the revision archive is the tested
-  path and is preferred whenever the response offers a link to it.
-- **The upscaler and frame generation checks need GitHub.** Listing releases
-  uses the public GitHub API, which is rate limited for anonymous callers;
-  when it refuses, the screen says it could not check rather than claiming you
-  are up to date.
-- **Frame generation on RTX 20/30 is third-party and experimental.** The
-  compatibility check reads the card and the game folder; it cannot tell
-  whether the game will actually load the proxy, which is why the other proxy
-  names are offered. Edits to `dlssg_sm86.ini` are replaced when the package
-  is reinstalled or updated.
-- **The virtual file system is new.** Its rules are tested against real
-  deployments, and the hook and launcher run end to end on every push —
-  natively on Windows in CI, and under Wine with `scripts/test-vfs-wine.sh` —
-  with a stand-in for the game, but not yet against the game itself. The
-  hook redirects the Win32 file functions through import tables; code that
-  reaches the file system some other way — directly through `ntdll`, say —
-  sees the real folder. A Steam install started this way is told its app id
-  so it does not relaunch itself through Steam; an Epic install may need the
-  Epic launcher running.
+**Safety**
+
+- **Leaves nothing behind.** Every file written and every original displaced
+  is recorded, so disabling everything restores the folder byte for byte.
+- **Recovers.** Restore points of the enabled set, save backups before each
+  launch, game update detection and one-click repair of files changed
+  outside the manager.
+- **Housekeeping.** Disk usage cleanup, a movable library, a diagnostics
+  zip, signed self-updates (stable or nightly) and optional Discord presence.
+
+## Known limitations
+
+- **The virtual file system has not been tested against the game itself.**
+  CI tests it end to end on Windows (and under Wine) with a stand-in
+  process. It hooks Win32 file functions, so code calling `ntdll` directly
+  sees the real folder. An Epic install may need the Epic launcher running.
+- **Frame generation on RTX 20/30 is third-party.** The check reads the card
+  and the game folder, but cannot prove the game will load the proxy.
+- **The Nexus collection query was written without the live API.** The
+  `collection.json` inside the revision archive is preferred when available.
+- **Release checks use the anonymous GitHub API.** When it is rate limited,
+  the app says it could not check.
+
+## Where mods are installed
+
+Paths are relative to the folder containing `SB/`.
+
+| Type | Marker | Destination |
+| --- | --- | --- |
+| Pak | `.pak` (+ `.utoc`/`.ucas`) | `SB/Content/Paks/~mods/` |
+| Logic mod | a `LogicMods` directory | `SB/Content/Paks/LogicMods/` |
+| UE4SS Lua / C++ | `scripts/main.lua` / `dlls/main.dll` | `SB/Binaries/Win64/ue4ss/Mods/<Name>/` + `mods.txt` |
+| UE4SS runtime | `UE4SS.dll` | `SB/Binaries/Win64/` |
+| Root / ReShade | `ReShade.ini`, a proxy DLL | `SB/Binaries/Win64/` |
+| ReShade preset | an INI with `Techniques=` or `[*.fx]` sections | `SB/Binaries/Win64/reshade-presets/` |
+| CNS outfit | `*.dekcns.json` | `SB/Content/Paks/~mods/CustomNanosuitSystem/` |
+| Engine tweak | `Engine.ini`, `GameUserSettings.ini`… | merged into `%LOCALAPPDATA%\SB\Saved\Config\WindowsNoEditor` |
+| Movie | `.mp4`/`.bk2`, a `Movies` directory | `SB/Content/Movies/` |
+| Splash art | `Splash.bmp`, a `Splash` directory | `SB/Content/Splash/` |
+| Game root overlay | an explicit `SB/` tree | laid onto the game folder |
 
 ## Building
 
-Requires Rust 1.82+, Node 22+ and pnpm. On Windows you also need the WebView2
-runtime, which ships with Windows 11 and recent Windows 10.
+Requires Rust 1.82+, Node 22+ and pnpm; on Windows, the WebView2 runtime.
 
 ```sh
 pnpm install
@@ -265,144 +116,64 @@ pnpm tauri dev      # run it
 pnpm tauri build    # produce an installer
 ```
 
-### Publishing a release
+**Releases.** The version lives only in `package.json`. Bump it on `master`,
+then push a matching tag (`v0.3.0` for `0.3.0`). The workflow refuses a
+mismatch, because such a release would never be offered as an update.
+Nightlies build at 03:00 UTC when `master` changed in the last 24 hours, or
+on demand from the *Release* workflow.
 
-The version lives in `package.json` and nowhere else — `tauri.conf.json` points
-at it, and the installer, the updater manifest and the in-app version all come
-from there. So a stable release is two steps, in this order:
+**Update signing.** Updates must be signed. A fork needs its own keypair:
 
-```sh
-# 1. Bump the version and land it on master.
-npm version 0.3.0 --no-git-tag-version   # edits package.json
-git commit -am "Release 0.3.0" && git push origin master
+1. Run `pnpm tauri signer generate -w .tauri/updater.key`.
+2. Put the public key in `plugins.updater.pubkey` in `src-tauri/tauri.conf.json`.
+3. Store the private key and its password as the secrets
+   `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
 
-# 2. Tag that commit and push the tag.
-git tag v0.3.0 && git push origin v0.3.0
-```
+Losing the private key means existing installs can no longer update.
 
-Pushing the tag builds the Windows installer and publishes a GitHub Release
-with notes generated from the commits since the last tag. The tag must match
-`package.json` exactly (`v0.3.0` ↔ `0.3.0`); the workflow refuses otherwise,
-because a mismatched release publishes fine and is then never offered as an
-update, which is a failure that looks like a success.
-
-**Nightlies** need no action. At 03:00 UTC the workflow looks at `master`, and
-builds a rolling `nightly` prerelease if anything landed in the last 24 hours —
-so a quiet day publishes nothing, by design. To force one, run the *Release*
-workflow from the Actions tab with `nightly` ticked.
-
-The stable channel follows the newest `v*` release (the first was `v0.2.0`);
-nightly follows the rolling `nightly` prerelease.
-
-### Discord presence (optional)
-
-Presence uses the project's own Discord application, whose id is `APP_ID` in
-`src-tauri/src/discord.rs`. A fork that wants its own name on the presence
-registers an application at <https://discord.com/developers/applications>,
-puts its id in `APP_ID`, and uploads an image named `icon` under its Rich
-Presence art assets so the large icon resolves.
-
-### Update signing
-
-The app updates itself from these releases and refuses anything without a
-valid signature. The project's public key is committed in
-`src-tauri/tauri.conf.json` (and as `.tauri/updater.key.pub`); its private half
-is the repository secret `TAURI_SIGNING_PRIVATE_KEY`. A fork that publishes its
-own releases needs its own keypair:
-
-```sh
-pnpm tauri signer generate -w .tauri/updater.key
-```
-
-Then:
-
-1. Paste the contents of `.tauri/updater.key.pub` into `plugins.updater.pubkey`
-   in `src-tauri/tauri.conf.json`.
-2. Add the contents of `.tauri/updater.key` as the repository secret
-   `TAURI_SIGNING_PRIVATE_KEY`, and its password as
-   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
-3. Keep `.tauri/updater.key` somewhere safe. Losing it means existing installs
-   can no longer be updated — they will reject builds signed with a new key.
+**Discord.** A fork can use its own application id: set `APP_ID` in
+`src-tauri/src/discord.rs` and upload an `icon` art asset.
 
 ## Architecture
 
-The manager is a Rust workspace of platform-free library crates plus a thin
-Tauri shell. Everything worth testing lives in the libraries, so the test suite
-runs on any machine — `src-tauri` is only command wrappers.
+A Rust workspace of platform-free library crates, so the tests run on any
+machine, plus a thin Tauri shell.
 
 | Crate | Responsibility |
 | --- | --- |
-| `sbmm-core` | Mod type detection over a normalised file tree, pak set grouping, load-order naming, deployment planning |
-| `sbmm-deploy` | `DeployBackend` trait, hard-link backend, the manifest that makes removal exact, UE4SS `mods.txt` syncing |
-| `sbmm-game` | Steam and Epic install discovery, including a small KeyValues parser |
+| `sbmm-core` | Type detection, pak sets, load-order naming, deployment plans, INI and ReShade parsing |
+| `sbmm-deploy` | Hard-link backend and the manifest that makes removal exact; `mods.txt` syncing |
+| `sbmm-game` | Steam and Epic install discovery |
 | `sbmm-archive` | zip/7z/rar extraction with path-traversal protection |
-| `sbmm-assets` | Reading `.pak` and `.utoc` indexes to find out what a mod replaces |
-| `sbmm-store` | SQLite persistence: mods, groups, per-profile state, deployment record |
-| `sbmm-nexus` | Nexus REST/GraphQL client, `nxm://` parsing, rate limits, the download queue |
-| `sbmm-upscaler` | Finding DLSS/FSR DLLs, reading their PE version, GPU capability rules, vendor release catalogue; the RTX 20/30 frame generation package (`framegen`): compatibility check, release verification, proxy layout |
-| `sbmm-vfs` | The virtual file system: the layered view of the game folder, Mod Organizer's redirect and overwrite rules, the mapping file, and the launcher that starts the game with the hook |
-| `sbmm-vfs-hook` | The DLL loaded into the game: rewrites import tables so file calls are answered from the mapping |
-| `sbmm-shell` | The command line (`--profile`, `--launch`) and profile shortcuts, written through the Windows shell's link object |
+| `sbmm-assets` | Reading `.pak`/`.utoc` indexes |
+| `sbmm-store` | SQLite: mods, groups, profiles, deployment record |
+| `sbmm-nexus` | Nexus REST/GraphQL client, `nxm://` links, download queue |
+| `sbmm-upscaler` | DLSS/FSR DLLs, GPU rules, the RTX 20/30 frame generation package |
+| `sbmm-vfs` / `sbmm-vfs-hook` | The virtual file system: layered view, mapping, launcher, and the hook DLL |
+| `sbmm-shell` | Command line and profile shortcuts |
 | `sbmm-app` | The application service the UI drives |
-| `src-tauri` | Tauri commands, window, bundling |
+| `src-tauri` | Tauri commands, window, bundling (a separate workspace; embeds the hook — `SBMM_SKIP_VFS_HOOK=1` skips it) |
 
-Mods are kept unpacked in the library folder and hard-linked into the game when
-enabled — or, with the virtual file system, left there and shown to the game
-by the hook. Links cost no extra disk space and are indistinguishable from real
-files to the game, and the game folder holds nothing while a mod is disabled.
-The library defaults to the app data directory and can be moved anywhere; only
-`sbmm.db` stays behind, because it has to be found before any setting can be
-read.
-
-`src-tauri` is deliberately its own Cargo workspace: it needs WebView2/WebKit
-system libraries, and keeping it separate lets `cargo test --workspace` run the
-domain crates on any platform. Its build script builds `sbmm-vfs-hook` with a
-nested cargo and embeds the DLL, so the app always ships the hook from the
-same commit; set `SBMM_SKIP_VFS_HOOK=1` to skip that during development.
-
-### Where mods are installed
-
-All paths are relative to the folder containing `SB/`.
-
-| Type | Marker | Destination |
-| --- | --- | --- |
-| Pak | `.pak` (+ `.utoc`/`.ucas`) | `SB/Content/Paks/~mods/` |
-| Logic mod | a `LogicMods` directory | `SB/Content/Paks/LogicMods/` |
-| UE4SS Lua | `scripts/main.lua` | `SB/Binaries/Win64/ue4ss/Mods/<Name>/` + `mods.txt` |
-| UE4SS C++ | `dlls/main.dll` | as above |
-| UE4SS runtime | `UE4SS.dll` | `SB/Binaries/Win64/` |
-| Root / ReShade | `ReShade.ini`, a proxy DLL | `SB/Binaries/Win64/` |
-| Movie | `.mp4`/`.bk2`, a `Movies` directory | `SB/Content/Movies/` |
-| Splash art | `Splash.bmp`, a `Splash` directory | `SB/Content/Splash/` |
-| Game root overlay | an explicit `SB/` tree | laid onto the game folder |
+Mods stay unpacked in a library folder, which can live on any drive (only
+`sbmm.db` stays in the app data folder). They are hard-linked into the game
+when enabled, or shown to it by the hook. App data is in
+`%APPDATA%/dev.sbmm.manager` (`~/.local/share/dev.sbmm.manager` on Linux).
 
 ## Development
 
 ```sh
-cargo test --workspace          # domain crates
-
-# The virtual file system end to end under Wine: real launcher, real hook, a
-# stand-in for the game (needs wine64, mingw-w64 and the windows-gnu target)
-scripts/test-vfs-wine.sh
-
-# Install the real Stellar Blade UE4SS release end to end (download it first)
-SBMM_UE4SS_ARCHIVE=/path/to/UE4SS_v3.1.0-6.zip cargo test -p sbmm-app --test lifecycle real_ue4ss
-
-# Check a real dlssg_for_sm86 release against the package rules (unpack it first)
-SBMM_SM86_PACKAGE=/path/to/unpacked cargo test -p sbmm-upscaler --test framegen_release
+cargo test --workspace
 cargo clippy --workspace --all-targets
 pnpm typecheck
 
-# Populate a fake install to exercise the UI without owning the game.
-# An optional third argument relocates the mod library first.
-cargo run -p sbmm-app --example seed -- <data-dir> <game-root> [library-root]
+scripts/test-vfs-wine.sh       # VFS end to end under Wine (wine64, mingw-w64)
+cargo run -p sbmm-app --example seed -- <data-dir> <game-root> [library-root]   # fake install for the UI
+python3 scripts/make-icons.py  # regenerate icons
 
-# Regenerate the icon set (no image dependencies needed)
-python3 scripts/make-icons.py
+# Against real releases (download or unpack them first)
+SBMM_UE4SS_ARCHIVE=/path/UE4SS_v3.1.0-6.zip cargo test -p sbmm-app --test lifecycle real_ue4ss
+SBMM_SM86_PACKAGE=/path/unpacked cargo test -p sbmm-upscaler --test framegen_release
 ```
-
-The app's data directory is `%APPDATA%/dev.sbmm.manager` on Windows and
-`~/.local/share/dev.sbmm.manager` on Linux.
 
 ## Licence
 
