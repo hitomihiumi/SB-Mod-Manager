@@ -1,0 +1,865 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body style="margin:0">
+<title>Редизайн SB Mod Manager</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&family=Barlow:wght@400;500;600&family=Chakra+Petch:wght@500;600;700&family=DM+Mono:wght@400;500&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Martian+Mono:wght@400;500&family=Michroma&display=swap">
+<style>
+/* Layout concept: a brief for the chosen direction on top, then the real Mods
+   screen drawn in that direction as a working mock window. The page itself
+   takes on the palette of whichever direction is open. Each direction is a
+   single deliberate look, so there is no light/dark pair per direction. */
+:root {
+  color-scheme: dark;
+  --s-bg: #060a0f; --s-fg: #dfe7ef; --s-mut: #7f93a8; --s-acc: #dcb46c; --s-line: #1c2a3a;
+  --s-display: "Chakra Petch", "Segoe UI", sans-serif;
+  --s-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --s-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+:root[data-v="catalog"] {
+  color-scheme: light;
+  --s-bg: #d3d7dc; --s-fg: #111316; --s-mut: #4f555e; --s-acc: #ff5418; --s-line: #111316;
+  --s-display: "Archivo", "Arial Narrow", sans-serif;
+  --s-body: "Archivo", "Segoe UI", sans-serif;
+  --s-mono: "DM Mono", ui-monospace, Consolas, monospace;
+}
+:root[data-v="deck"] {
+  --s-bg: #1d1c19; --s-fg: #dcd6c8; --s-mut: #8e887b; --s-acc: #ffb238; --s-line: #34322d;
+  --s-display: "Michroma", "Segoe UI", sans-serif;
+  --s-body: "Barlow", "Segoe UI", sans-serif;
+  --s-mono: "Martian Mono", ui-monospace, Consolas, monospace;
+}
+html, body { background: var(--s-bg); color: var(--s-fg); }
+body { font-family: var(--s-body); font-size: 14px; line-height: 1.5; transition: background .25s ease; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+.shell {
+  max-width: 1220px; margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 28px 40px;
+  display: flex; flex-direction: column; gap: 22px;
+}
+.sh-top { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 14px 24px; border-bottom: 1px solid var(--s-line); padding-bottom: 14px; }
+.sh-name { font-family: var(--s-mono); font-size: 12px; color: var(--s-mut); letter-spacing: .02em; }
+.sh-name b { color: var(--s-fg); font-weight: 500; }
+.sh-tabs { display: flex; flex-wrap: wrap; gap: 4px; }
+.sh-tab {
+  font: inherit; font-size: 13px; color: var(--s-mut); background: none; border: 1px solid transparent;
+  padding: 6px 12px; cursor: pointer; display: flex; gap: 8px; align-items: baseline;
+}
+.sh-tab .n { font-family: var(--s-mono); font-size: 11px; }
+.sh-tab:hover { color: var(--s-fg); }
+.sh-tab[aria-selected="true"] { color: var(--s-fg); border-color: var(--s-acc); }
+.sh-tab:focus-visible, .sh-reset:focus-visible { outline: 2px solid var(--s-acc); outline-offset: 2px; }
+
+.brief { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 20px 48px; }
+@media (max-width: 820px) { .brief { grid-template-columns: minmax(0, 1fr); } }
+.brief h1 {
+  font-family: var(--s-display); font-weight: 600; font-size: 34px; line-height: 1.05; margin: 0 0 12px;
+  text-wrap: balance;
+}
+:root[data-v="hud"] .brief h1 { text-transform: uppercase; letter-spacing: .06em; font-size: 30px; }
+:root[data-v="catalog"] .brief h1 { font-stretch: 62%; font-weight: 800; font-size: 46px; text-transform: uppercase; line-height: .95; }
+:root[data-v="deck"] .brief h1 { font-size: 22px; font-weight: 400; text-transform: uppercase; letter-spacing: .12em; line-height: 1.3; }
+.brief .thesis { margin: 0; max-width: 46ch; font-size: 15px; }
+.brief .fonts { margin: 14px 0 0; font-family: var(--s-mono); font-size: 11.5px; color: var(--s-mut); }
+.moves { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 9px; }
+.moves li { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 8px; font-size: 13.5px; max-width: 70ch; }
+.moves li::before { content: ""; width: 8px; height: 8px; margin-top: 7px; background: var(--s-acc); }
+:root[data-v="deck"] .moves li::before { border-radius: 50%; box-shadow: 0 0 6px var(--s-acc); }
+.risk { margin: 14px 0 0; font-size: 13px; color: var(--s-mut); max-width: 70ch; }
+.risk b { color: var(--s-fg); font-weight: 600; }
+
+.stage { overflow-x: auto; padding-block: 4px 8px; }
+.stage-note { display: flex; flex-wrap: wrap; gap: 8px 20px; justify-content: space-between; font-size: 12.5px; color: var(--s-mut); }
+.sh-reset { font: inherit; color: var(--s-fg); background: none; border: 0; border-bottom: 1px solid var(--s-acc); padding: 0; cursor: pointer; }
+.code { border-top: 1px solid var(--s-line); padding-top: 16px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 12px 48px; font-size: 13px; }
+@media (max-width: 820px) { .code { grid-template-columns: minmax(0, 1fr); } }
+.code h2 { font-family: var(--s-mono); font-size: 12px; font-weight: 500; color: var(--s-mut); margin: 0; text-transform: uppercase; letter-spacing: .08em; }
+.code p { margin: 0 0 8px; max-width: 70ch; }
+.code code { font-family: var(--s-mono); font-size: 12px; }
+
+/* ───────── The mock window: structure shared by all three directions ───────── */
+.app {
+  width: 1180px; height: 720px; margin: 0 auto; display: grid; overflow: hidden; position: relative;
+  font-size: 13px; line-height: 1.35; user-select: none; cursor: default;
+}
+.app button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+.app input { font: inherit; color: inherit; background: none; border: 0; outline: 0; min-width: 0; }
+.app .sp { flex: 1; }
+.tb { grid-area: tb; display: flex; align-items: center; min-width: 0; }
+.tb .wb { display: flex; height: 100%; margin-left: auto; }
+.tb .wb span { width: 44px; display: grid; place-items: center; opacity: .7; }
+.nav { grid-area: nav; display: flex; min-width: 0; }
+.main { grid-area: main; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.toolbar { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.search { display: flex; align-items: center; gap: 7px; }
+.search input { flex: 1; }
+.filters { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.body { flex: 1; min-height: 0; display: flex; }
+.list { flex: 1; min-width: 0; overflow-y: auto; }
+.details { flex-shrink: 0; overflow-y: auto; }
+.row, .colhead { display: flex; align-items: center; gap: 10px; }
+.row { height: 38px; }
+.grp { display: flex; align-items: center; gap: 9px; cursor: pointer; }
+.chev { display: grid; place-items: center; transition: transform .15s; }
+.grp.collapsed .chev { transform: rotate(-90deg); }
+.prio { width: 34px; flex-shrink: 0; }
+.name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.flags { display: flex; gap: 5px; align-items: center; flex-shrink: 0; }
+.type { flex-shrink: 0; white-space: nowrap; }
+.typecell { width: 104px; flex-shrink: 0; display: flex; }
+.size { width: 62px; text-align: right; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.led, .meter, .colhead { display: none; }
+.tg { flex-shrink: 0; position: relative; }
+.applybar { display: flex; align-items: center; gap: 12px; flex-shrink: 0; min-width: 0; }
+.plist { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.details h3 { margin: 0; }
+.details dl { margin: 0; display: grid; }
+.details .spec .kv { display: contents; }
+.details dd { margin: 0; overflow-wrap: anywhere; }
+.files { list-style: none; margin: 0; padding: 0; }
+.files li { overflow-wrap: anywhere; }
+.ds h4 { margin: 0; }
+.ds p { margin: 0; }
+.stub { flex: 1; display: grid; place-items: center; text-align: center; padding: 40px; }
+.stub p { margin: 0; }
+.flash { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ═════════ 1 · НАНОКОСТЮМ — tactical HUD ═════════ */
+.v1 {
+  --bg: #0a1018; --p1: #0e1721; --p2: #13202d; --line: #1d2d40; --line2: #2d4560;
+  --ink: #e4ebf2; --ink2: #9fb2c6; --ink3: #5f7791;
+  --acc: #dcb46c; --accd: rgba(220, 180, 108, .12); --cy: #86cfe0;
+  --ok: #71d39c; --warn: #e9a84a; --bad: #ef716d;
+  --fd: "Chakra Petch", "Segoe UI", sans-serif; --fb: "IBM Plex Sans", "Segoe UI", sans-serif; --fm: "IBM Plex Mono", Consolas, monospace;
+  --cut: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px);
+}
+.v1 .app { grid-template: "tb tb" 36px "nav main" 1fr / 176px 1fr; background: var(--bg); color: var(--ink); font-family: var(--fb); border: 1px solid var(--line2); }
+.v1 :focus-visible { outline: 1px solid var(--acc); outline-offset: 1px; }
+.v1 .tb { background: var(--p1); border-bottom: 1px solid var(--line); padding-left: 14px; gap: 18px; }
+.v1 .brand { display: flex; align-items: center; gap: 9px; font-family: var(--fd); font-weight: 600; font-size: 11px; letter-spacing: .2em; text-transform: uppercase; }
+.v1 .brand i { width: 11px; height: 11px; background: var(--acc); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
+.v1 .readout { font-family: var(--fm); font-size: 10.5px; color: var(--ink3); display: flex; gap: 14px; }
+.v1 .readout b { color: var(--ink2); font-weight: 400; }
+.v1 .flash { font-family: var(--fm); font-size: 10.5px; color: var(--acc); }
+.v1 .tb .wb span { color: var(--ink2); }
+
+.v1 .nav { flex-direction: column; background: var(--p1); border-right: 1px solid var(--line); padding: 14px 0 12px; gap: 1px; }
+.v1 .ni { display: flex; align-items: center; gap: 12px; height: 34px; padding: 0 16px; font-family: var(--fd); font-weight: 500; font-size: 11.5px; letter-spacing: .13em; text-transform: uppercase; color: var(--ink2); text-align: left; }
+.v1 .ni .k { font-family: var(--fm); font-size: 10px; letter-spacing: 0; color: var(--ink3); }
+.v1 .ni .k::before { content: "0"; }
+.v1 .ni:hover { color: var(--ink); }
+.v1 .ni.on { color: var(--acc); background: linear-gradient(90deg, var(--accd), transparent 85%); }
+.v1 .ni.on .k { color: var(--acc); }
+.v1 .ni .cnt { margin-left: auto; font-family: var(--fm); font-size: 10px; color: var(--acc); letter-spacing: 0; }
+.v1 .ni .cnt::before { content: "["; } .v1 .ni .cnt::after { content: "]"; }
+.v1 .play { margin: 0 14px; height: 52px; background: var(--acc); color: #1a1407; clip-path: var(--cut); display: grid; grid-template-columns: auto 1fr; align-items: center; column-gap: 10px; padding: 0 14px; text-align: left; }
+.v1 .play svg { grid-row: span 2; }
+.v1 .play span { font-family: var(--fd); font-weight: 700; font-size: 13px; letter-spacing: .2em; text-transform: uppercase; line-height: 1; }
+.v1 .play small { font-family: var(--fm); font-size: 9.5px; opacity: .75; line-height: 1.2; }
+.v1 .play:hover { filter: brightness(1.08); }
+
+.v1 .toolbar { height: 52px; padding: 0 14px; border-bottom: 1px solid var(--line); }
+.v1 .profile { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; border: 1px solid var(--line2); }
+.v1 .profile .pl { font-family: var(--fm); font-size: 9.5px; color: var(--ink3); text-transform: uppercase; }
+.v1 .profile .pv { font-family: var(--fd); font-weight: 600; font-size: 12px; letter-spacing: .06em; }
+.v1 .search { width: 230px; height: 30px; padding: 0 10px; border: 1px solid var(--line2); background: var(--bg); color: var(--ink3); }
+.v1 .search input { font-family: var(--fm); font-size: 11.5px; color: var(--ink); }
+.v1 .search input::placeholder { color: var(--ink3); }
+.v1 .search:focus-within { border-color: var(--acc); }
+.v1 .btn { height: 30px; padding: 0 11px; font-family: var(--fd); font-weight: 500; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink2); display: inline-flex; align-items: center; gap: 7px; }
+.v1 .btn:hover { color: var(--ink); background: var(--p2); }
+.v1 .btn.pri { background: var(--acc); color: #1a1407; clip-path: var(--cut); font-weight: 600; padding: 0 15px; }
+.v1 .btn.pri:hover { filter: brightness(1.08); }
+.v1 .btn kbd { font-family: var(--fm); font-size: 9.5px; letter-spacing: 0; opacity: .7; }
+
+.v1 .filters { height: 34px; padding: 0 14px; border-bottom: 1px solid var(--line); font-family: var(--fm); font-size: 10.5px; text-transform: uppercase; }
+.v1 .fi { padding: 3px 7px; color: var(--ink3); }
+.v1 .fi:hover { color: var(--ink2); }
+.v1 .fi.on { color: var(--acc); }
+.v1 .fi.on::before { content: "["; } .v1 .fi.on::after { content: "]"; }
+.v1 .fi sup { font-size: 9px; color: var(--ink3); margin-left: 2px; vertical-align: 0; }
+.v1 .fc, .v1 .sort { color: var(--ink3); }
+.v1 .sort b { color: var(--ink2); font-weight: 400; }
+
+.v1 .grp { height: 32px; padding: 0 14px; font-family: var(--fd); font-weight: 600; font-size: 11px; letter-spacing: .2em; text-transform: uppercase; color: var(--ink2); }
+.v1 .grp .gcount { font-family: var(--fm); font-size: 10px; letter-spacing: 0; color: var(--ink3); }
+.v1 .grp .grule { flex: 1; height: 1px; background: linear-gradient(90deg, var(--line2), var(--line) 60%, transparent); }
+.v1 .grp .chev { color: var(--ink3); }
+.v1 .row { padding: 0 14px 0 35px; border-bottom: 1px solid rgba(29, 45, 64, .55); }
+.v1 .row:hover { background: rgba(19, 32, 45, .7); }
+.v1 .row.sel { background: var(--accd); box-shadow: inset 0 0 0 1px rgba(220, 180, 108, .35); }
+.v1 .prio { font-family: var(--fm); font-size: 10.5px; color: var(--ink3); }
+.v1 .tg { width: 14px; height: 14px; border: 1px solid var(--line2); }
+.v1 .tg:hover { border-color: var(--ink2); }
+.v1 .tg.on, .v1 .tg.mixed { background: var(--acc); border-color: var(--acc); }
+.v1 .tg.on::after { content: ""; position: absolute; left: 4px; top: 1px; width: 3px; height: 7px; border: solid #1a1407; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.v1 .tg.mixed::after { content: ""; position: absolute; left: 2px; right: 2px; top: 5px; height: 2px; background: #1a1407; }
+.v1 .name { font-size: 13px; }
+.v1 .off .name { color: var(--ink3); }
+.v1 .type { font-family: var(--fm); font-size: 10px; text-transform: uppercase; color: var(--cy); }
+.v1 .type::before { content: "[ "; color: var(--ink3); } .v1 .type::after { content: " ]"; color: var(--ink3); }
+.v1 .size { font-family: var(--fm); font-size: 10.5px; color: var(--ink2); }
+.v1 .flag { font-family: var(--fm); font-size: 9.5px; text-transform: uppercase; height: 16px; padding: 0 5px; display: inline-flex; align-items: center; border: 1px solid; }
+.v1 .flag.bad { color: var(--bad); border-color: rgba(239, 113, 109, .45); }
+.v1 .flag.warn { color: var(--warn); border-color: rgba(233, 168, 74, .45); }
+.v1 .flag.pend { color: var(--acc); border-color: rgba(220, 180, 108, .5); border-style: dashed; }
+.v1 .tag { font-family: var(--fm); font-size: 10px; color: var(--ink3); }
+.v1 .tag::before { content: "#"; }
+
+.v1 .details { width: 300px; background: var(--p1); border-left: 1px solid var(--line); padding: 16px 16px 20px; display: flex; flex-direction: column; gap: 16px; }
+.v1 .shot { position: relative; height: 146px; margin: 5px; background:
+  repeating-linear-gradient(0deg, rgba(134, 207, 224, .05) 0 1px, transparent 1px 3px),
+  radial-gradient(120% 90% at 30% 20%, #1b3346, #0b141e 70%); }
+.v1 .shot::before { content: ""; position: absolute; inset: -5px; pointer-events: none; background:
+  linear-gradient(var(--acc), var(--acc)) top left / 12px 1px no-repeat, linear-gradient(var(--acc), var(--acc)) top left / 1px 12px no-repeat,
+  linear-gradient(var(--acc), var(--acc)) top right / 12px 1px no-repeat, linear-gradient(var(--acc), var(--acc)) top right / 1px 12px no-repeat,
+  linear-gradient(var(--acc), var(--acc)) bottom left / 12px 1px no-repeat, linear-gradient(var(--acc), var(--acc)) bottom left / 1px 12px no-repeat,
+  linear-gradient(var(--acc), var(--acc)) bottom right / 12px 1px no-repeat, linear-gradient(var(--acc), var(--acc)) bottom right / 1px 12px no-repeat; }
+.v1 .pvcap { position: absolute; left: 8px; bottom: 6px; font-family: var(--fm); font-size: 9.5px; color: var(--ink3); }
+.v1 .details h3 { font-family: var(--fd); font-weight: 600; font-size: 16px; letter-spacing: .05em; text-transform: uppercase; line-height: 1.2; }
+.v1 .dsub { margin: 4px 0 0; font-family: var(--fm); font-size: 10.5px; color: var(--ink3); }
+.v1 .spec { grid-template-columns: 84px 1fr; gap: 7px 10px; font-size: 12px; }
+.v1 .spec dt { font-family: var(--fm); font-size: 9.5px; text-transform: uppercase; color: var(--ink3); padding-top: 2px; }
+.v1 .spec dd.m { font-family: var(--fm); font-size: 11px; color: var(--ink2); }
+.v1 .ds { display: flex; flex-direction: column; gap: 6px; }
+.v1 .ds h4 { font-family: var(--fd); font-weight: 600; font-size: 10.5px; letter-spacing: .2em; text-transform: uppercase; color: var(--acc); display: flex; gap: 8px; align-items: center; }
+.v1 .ds h4::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.v1 .files li { font-family: var(--fm); font-size: 10.5px; color: var(--ink2); line-height: 1.6; }
+.v1 .cf { font-size: 12px; color: var(--ink2); }
+.v1 .cf b { font-family: var(--fm); font-weight: 500; }
+.v1 .cf.win b { color: var(--ok); } .v1 .cf.lose b { color: var(--bad); }
+.v1 .note { font-size: 12px; color: var(--ink2); }
+.v1 .hint { color: var(--ink3); font-size: 12px; }
+
+.v1 .applybar { height: 48px; padding: 0 14px; background: var(--p2); border-top: 1px solid var(--acc); }
+.v1 .pc { font-family: var(--fm); font-size: 11px; text-transform: uppercase; color: var(--acc); display: flex; gap: 6px; }
+.v1 .plist { font-size: 12px; color: var(--ink2); }
+.v1 .stub .st { font-family: var(--fd); font-size: 18px; letter-spacing: .14em; text-transform: uppercase; color: var(--acc); margin-bottom: 8px; }
+.v1 .stub p { color: var(--ink2); max-width: 42ch; }
+.v1 .stub .btn { margin-top: 16px; border: 1px solid var(--line2); }
+
+/* ═════════ 2 · КАТАЛОГ — light, labelled-drawer industrial ═════════ */
+.v2 {
+  --sheet: #f6f7f8; --paper: #e7e9ec; --ink: #121417; --ink2: #4a4f57; --ink3: #858b94; --rule: #cdd1d6;
+  --sig: #ff5418; --sigd: #ffe4d9; --ok: #1d7f48; --warn: #9a610f; --bad: #c42b2b;
+  --fw: "Archivo", "Arial Narrow", "Segoe UI", sans-serif; --fm: "DM Mono", Consolas, monospace;
+}
+.v2 .app { grid-template: "tb" 32px "nav" 54px "main" 1fr / 1fr; background: var(--sheet); color: var(--ink); font-family: var(--fw); border: 2px solid var(--ink); }
+.v2 :focus-visible { outline: 2px solid var(--sig); outline-offset: 1px; }
+.v2 .tb { background: var(--ink); color: var(--sheet); padding-left: 14px; gap: 18px; }
+.v2 .brand { font-stretch: 75%; font-weight: 800; font-size: 13px; text-transform: uppercase; letter-spacing: .03em; display: flex; gap: 8px; align-items: center; }
+.v2 .brand i { width: 10px; height: 10px; background: var(--sig); }
+.v2 .readout { font-family: var(--fm); font-size: 10.5px; color: #9ba1a9; display: flex; gap: 16px; }
+.v2 .readout b { color: #dfe2e6; font-weight: 400; }
+.v2 .flash { font-family: var(--fm); font-size: 10.5px; color: var(--sig); }
+.v2 .tb .wb span { color: #c9cdd2; }
+
+.v2 .nav { flex-direction: row; align-items: stretch; padding: 0 8px 0 4px; border-bottom: 2px solid var(--ink); }
+.v2 .ni { position: relative; display: flex; align-items: center; gap: 0; padding: 0 11px; font-stretch: 62%; font-weight: 800; font-size: 23px; text-transform: uppercase; color: var(--ink3); white-space: nowrap; }
+.v2 .ni .k { order: 2; align-self: flex-start; margin: 11px 0 0 3px; font-family: var(--fm); font-size: 9.5px; font-weight: 400; font-stretch: normal; color: var(--ink3); }
+.v2 .ni:hover { color: var(--ink2); }
+.v2 .ni.on { color: var(--ink); }
+.v2 .ni.on::after { content: ""; position: absolute; left: 11px; right: 11px; bottom: -2px; height: 6px; background: var(--ink); }
+.v2 .ni .cnt { order: 3; align-self: center; margin-left: 6px; background: var(--ink); color: var(--sheet); font-family: var(--fm); font-size: 10px; font-stretch: normal; font-weight: 500; padding: 1px 5px; }
+.v2 .play { align-self: center; margin-left: auto; height: 36px; padding: 0 18px 0 14px; background: var(--ink); color: var(--sheet); display: flex; gap: 9px; align-items: center; }
+.v2 .play span { font-stretch: 75%; font-weight: 800; font-size: 17px; text-transform: uppercase; letter-spacing: .02em; }
+.v2 .play small { font-family: var(--fm); font-size: 10px; color: #9ba1a9; }
+.v2 .play:hover { background: #2a2e34; }
+.v2 .nav .sp { display: none; }
+
+.v2 .toolbar { height: 56px; padding: 0 16px; gap: 10px; border-bottom: 1px solid var(--rule); }
+.v2 .profile { display: grid; text-align: left; gap: 0; padding-right: 14px; margin-right: 4px; border-right: 1px solid var(--rule); }
+.v2 .profile .pl { font-family: var(--fm); font-size: 9.5px; color: var(--ink3); text-transform: uppercase; }
+.v2 .profile .pv { font-weight: 700; font-size: 14px; font-stretch: 85%; }
+.v2 .profile .pv::after { content: " ▾"; font-size: 10px; color: var(--ink3); }
+.v2 .search { width: 240px; height: 30px; border-bottom: 2px solid var(--ink); color: var(--ink2); }
+.v2 .search input { font-family: var(--fm); font-size: 12px; }
+.v2 .search input::placeholder { color: var(--ink3); }
+.v2 .btn { height: 30px; padding: 0 12px; border: 2px solid var(--ink); font-weight: 700; font-stretch: 85%; font-size: 12.5px; text-transform: uppercase; letter-spacing: .02em; display: inline-flex; align-items: center; gap: 8px; }
+.v2 .btn:hover { background: var(--ink); color: var(--sheet); }
+.v2 .btn.pri { background: var(--ink); color: var(--sheet); }
+.v2 .btn.pri:hover { background: #2a2e34; }
+.v2 .btn kbd { font-family: var(--fm); font-size: 10px; font-weight: 400; opacity: .7; }
+
+.v2 .filters { height: 38px; padding: 0 16px; gap: 2px; font-size: 12.5px; }
+.v2 .fi { padding: 4px 8px; font-weight: 600; font-stretch: 85%; text-transform: uppercase; color: var(--ink3); }
+.v2 .fi:hover { color: var(--ink); }
+.v2 .fi.on { color: var(--ink); text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 5px; }
+.v2 .fi sup { font-family: var(--fm); font-weight: 400; font-size: 9.5px; margin-left: 2px; }
+.v2 .fc, .v2 .sort { font-family: var(--fm); font-size: 11px; color: var(--ink3); margin-left: 10px; }
+.v2 .sort b { color: var(--ink); font-weight: 500; }
+
+.v2 .colhead { display: flex; height: 26px; padding: 0 16px; border-top: 2px solid var(--ink); border-bottom: 1px solid var(--ink); font-family: var(--fm); font-size: 9.5px; text-transform: uppercase; color: var(--ink2); background: var(--sheet); position: sticky; top: 0; z-index: 2; }
+.v2 .colhead .tgc { width: 16px; }
+.v2 .grp { height: 30px; padding: 0 16px; margin-top: 10px; background: var(--ink); color: var(--sheet); font-stretch: 75%; font-weight: 800; font-size: 14px; text-transform: uppercase; letter-spacing: .03em; }
+.v2 .colhead + .grp { margin-top: 0; }
+.v2 .grp .gcount { font-family: var(--fm); font-stretch: normal; font-weight: 400; font-size: 10.5px; color: #9ba1a9; letter-spacing: 0; }
+.v2 .grp .grule { flex: 1; }
+.v2 .grp .chev { color: #9ba1a9; order: 9; }
+.v2 .grp .tg { border-color: var(--sheet); }
+.v2 .grp .tg.on, .v2 .grp .tg.mixed { background: var(--sheet); }
+.v2 .grp .tg.on::after { border-color: var(--ink); }
+.v2 .grp .tg.mixed::after { background: var(--ink); }
+.v2 .row { height: 38px; padding: 0 16px; border-bottom: 1px solid var(--rule); }
+.v2 .row:hover { background: #eceef0; }
+.v2 .row.sel { background: #dde1e6; box-shadow: inset 4px 0 0 var(--ink); }
+.v2 .prio { font-family: var(--fm); font-size: 11px; color: var(--ink3); }
+.v2 .pend .prio { color: var(--sig); font-weight: 500; }
+.v2 .tg { width: 16px; height: 16px; border: 2px solid var(--ink); }
+.v2 .tg.on, .v2 .tg.mixed { background: var(--ink); }
+.v2 .tg.on::after { content: ""; position: absolute; left: 3.5px; top: 0; width: 3px; height: 7px; border: solid var(--sheet); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.v2 .tg.mixed::after { content: ""; position: absolute; left: 2px; right: 2px; top: 4px; height: 2px; background: var(--sheet); }
+.v2 .name { font-size: 14px; font-weight: 500; }
+.v2 .off .name { color: var(--ink3); font-weight: 400; }
+.v2 .typecell { width: 112px; }
+.v2 .type { font-stretch: 85%; font-weight: 700; font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: #f4f4f2; background: #17191c; padding: 3px 7px 2px; border-radius: 2px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.18), inset 0 -1px 0 rgba(0,0,0,.45); text-shadow: 0 -1px 0 rgba(0,0,0,.55); }
+.v2 .type.t-logic { background: #1f4c9e; } .v2 .type.t-lua { background: #2b6e3f; } .v2 .type.t-movie { background: #7d2f86; }
+.v2 .type.t-reshade { background: #b23a24; } .v2 .type.t-tweak { background: #e3b324; color: #1a1606; text-shadow: 0 1px 0 rgba(255,255,255,.35); }
+.v2 .size { font-family: var(--fm); font-size: 11.5px; color: var(--ink2); width: 70px; }
+.v2 .flag { font-family: var(--fm); font-size: 10px; text-transform: uppercase; padding: 0 5px; height: 17px; display: inline-flex; align-items: center; border: 1.5px solid; }
+.v2 .flag.bad { color: var(--bad); } .v2 .flag.warn { color: var(--warn); }
+.v2 .flag.pend { color: var(--sig); background: var(--sigd); border-color: var(--sig); }
+.v2 .tag { font-family: var(--fm); font-size: 10.5px; color: var(--ink2); }
+.v2 .tag::before { content: "#"; color: var(--ink3); }
+
+.v2 .details { width: 324px; background: var(--paper); border-left: 2px solid var(--ink); padding: 18px 18px 22px; display: flex; flex-direction: column; gap: 16px; }
+.v2 .shot { position: relative; height: 150px; border: 2px solid var(--ink); background: repeating-linear-gradient(45deg, #d5d9de 0 2px, transparent 2px 9px), var(--sheet); }
+.v2 .pvcap { position: absolute; left: 0; bottom: -20px; font-family: var(--fm); font-size: 10px; color: var(--ink2); }
+.v2 .dhead { display: flex; flex-direction: column; gap: 26px; }
+.v2 .details h3 { font-stretch: 62%; font-weight: 800; font-size: 28px; line-height: .95; text-transform: uppercase; text-wrap: balance; }
+.v2 .dsub { margin: 6px 0 0; font-family: var(--fm); font-size: 11px; color: var(--ink2); }
+.v2 .spec { grid-template-columns: 1fr; border-top: 2px solid var(--ink); }
+.v2 .details .spec .kv { display: grid; grid-template-columns: 86px 1fr; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--rule); }
+.v2 .spec dt { font-family: var(--fm); font-size: 10px; text-transform: uppercase; color: var(--ink3); padding-top: 2px; }
+.v2 .spec dd { font-weight: 600; font-size: 12.5px; }
+.v2 .spec dd.m { font-family: var(--fm); font-weight: 400; font-size: 11px; }
+.v2 .ds { display: flex; flex-direction: column; gap: 6px; }
+.v2 .ds h4 { font-stretch: 75%; font-weight: 800; font-size: 13px; text-transform: uppercase; border-top: 2px solid var(--ink); padding-top: 6px; }
+.v2 .files li { font-family: var(--fm); font-size: 11px; color: var(--ink2); line-height: 1.65; }
+.v2 .cf { font-size: 12.5px; }
+.v2 .cf b { font-family: var(--fm); font-weight: 500; }
+.v2 .cf.win b { color: var(--ok); } .v2 .cf.lose b { color: var(--bad); }
+.v2 .note { font-size: 12.5px; color: var(--ink2); }
+.v2 .hint { color: var(--ink2); font-size: 13px; }
+
+.v2 .applybar { height: 50px; padding: 0 16px; background: var(--sig); color: var(--ink); border-top: 2px solid var(--ink); }
+.v2 .pc { font-stretch: 75%; font-weight: 800; font-size: 16px; text-transform: uppercase; display: flex; gap: 6px; white-space: nowrap; }
+.v2 .plist { font-family: var(--fm); font-size: 11px; }
+.v2 .applybar .btn.pri { border-color: var(--ink); }
+.v2 .stub .st { font-stretch: 62%; font-weight: 800; font-size: 44px; text-transform: uppercase; line-height: 1; margin-bottom: 10px; }
+.v2 .stub p { color: var(--ink2); max-width: 44ch; }
+.v2 .stub .btn { margin-top: 18px; }
+
+/* ═════════ 3 · ПУЛЬТ — hardware console ═════════ */
+.v3 {
+  --ch: #2a2925; --p: #33322e; --ph: #3e3c37; --in: #1a1917;
+  --lg: #ddd7c9; --lg2: #a39d90; --lg3: #716c62;
+  --amb: #ffb238; --ambd: rgba(255, 178, 56, .1); --grn: #8be06f; --red: #ff5b4b;
+  --fd: "Michroma", "Segoe UI", sans-serif; --fb: "Barlow", "Segoe UI", sans-serif; --fm: "Martian Mono", Consolas, monospace;
+}
+.v3 .app { grid-template: "tb tb" 36px "nav main" 1fr / 158px 1fr; background: var(--ch); color: var(--lg); font-family: var(--fb); border-radius: 8px; box-shadow: 0 0 0 1px #000, 0 18px 50px rgba(0,0,0,.45); }
+.v3 :focus-visible { outline: 1px solid var(--amb); outline-offset: 2px; }
+.v3 .tb { background: linear-gradient(#383732, #2d2c28); border-bottom: 1px solid #000; box-shadow: inset 0 1px 0 rgba(255,255,255,.06); padding-left: 14px; gap: 18px; }
+.v3 .brand { display: flex; align-items: center; gap: 9px; font-family: var(--fd); font-size: 9px; letter-spacing: .22em; text-transform: uppercase; color: var(--lg2); }
+.v3 .brand i { width: 7px; height: 7px; border-radius: 50%; background: var(--amb); box-shadow: 0 0 6px var(--amb), 0 0 1px #fff inset; }
+.v3 .readout { font-family: var(--fm); font-size: 9.5px; color: var(--lg3); display: flex; gap: 14px; }
+.v3 .readout b { color: var(--lg2); font-weight: 400; }
+.v3 .flash { font-family: var(--fm); font-size: 9.5px; color: var(--amb); }
+.v3 .tb .wb span { color: var(--lg2); }
+
+.v3 .nav { flex-direction: column; gap: 7px; padding: 14px 12px; background: var(--ch); border-right: 1px solid #000; box-shadow: inset -1px 0 0 rgba(255,255,255,.04); }
+.v3 .ni { height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 9px; border-radius: 4px;
+  background: linear-gradient(#47453f, #3a3833); box-shadow: 0 2px 0 #121110, 0 3px 4px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.09);
+  font-family: var(--fd); font-size: 8.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--lg2); text-align: left; }
+.v3 .ni .k { order: 3; margin-left: auto; font-family: var(--fm); font-size: 9px; letter-spacing: 0; color: var(--lg3); }
+.v3 .ni::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: #23221f; box-shadow: inset 0 1px 1px #000; flex-shrink: 0; }
+.v3 .ni:hover { color: var(--lg); }
+.v3 .ni.on { transform: translateY(2px); box-shadow: 0 0 0 #121110, inset 0 1px 2px rgba(0,0,0,.45); background: linear-gradient(#3c3a35, #36342f); color: var(--lg); }
+.v3 .ni.on::before { background: var(--amb); box-shadow: 0 0 6px var(--amb); }
+.v3 .ni .cnt { order: 2; font-family: var(--fm); font-size: 9px; color: var(--amb); letter-spacing: 0; }
+.v3 .play { margin-top: 6px; height: 58px; border-radius: 6px; display: grid; place-items: center; align-content: center; gap: 3px;
+  background: radial-gradient(120% 140% at 50% 0%, #ffd27a, #ffb238 45%, #d98a12); color: #2b1a02;
+  box-shadow: 0 3px 0 #7a4c0a, 0 0 22px rgba(255, 178, 56, .32), inset 0 1px 0 rgba(255,255,255,.5); }
+.v3 .play svg { display: none; }
+.v3 .play span { font-family: var(--fd); font-size: 11px; letter-spacing: .26em; text-transform: uppercase; }
+.v3 .play small { font-family: var(--fm); font-size: 8.5px; opacity: .7; }
+.v3 .play:active { transform: translateY(2px); box-shadow: 0 1px 0 #7a4c0a, 0 0 14px rgba(255, 178, 56, .3); }
+
+.v3 .toolbar { height: 54px; padding: 0 14px; gap: 9px; background: var(--p); border-bottom: 1px solid #000; box-shadow: inset 0 1px 0 rgba(255,255,255,.05); }
+.v3 .profile, .v3 .search { height: 30px; border-radius: 4px; background: var(--in); box-shadow: inset 0 1px 3px #000, 0 1px 0 rgba(255,255,255,.06); padding: 0 10px; display: flex; align-items: center; gap: 8px; }
+.v3 .profile .pl { font-family: var(--fd); font-size: 7px; letter-spacing: .14em; color: var(--lg3); text-transform: uppercase; }
+.v3 .profile .pv { font-family: var(--fm); font-size: 11px; color: var(--amb); text-shadow: 0 0 6px rgba(255,178,56,.45); text-transform: uppercase; }
+.v3 .search { width: 220px; color: var(--lg3); }
+.v3 .search input { font-family: var(--fm); font-size: 11px; color: var(--lg); }
+.v3 .search input::placeholder { color: var(--lg3); }
+.v3 .btn { height: 28px; padding: 0 11px; border-radius: 4px; display: inline-flex; align-items: center; gap: 7px;
+  background: linear-gradient(#47453f, #3a3833); box-shadow: 0 2px 0 #121110, inset 0 1px 0 rgba(255,255,255,.09);
+  font-family: var(--fd); font-size: 7.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--lg2); }
+.v3 .btn:hover { color: var(--lg); }
+.v3 .btn:active { transform: translateY(2px); box-shadow: inset 0 1px 2px rgba(0,0,0,.45); }
+.v3 .btn.pri { color: var(--amb); }
+.v3 .btn kbd { font-family: var(--fm); font-size: 8.5px; letter-spacing: 0; color: var(--lg3); }
+
+.v3 .filters { height: 36px; padding: 0 14px; gap: 14px; font-family: var(--fd); font-size: 8px; letter-spacing: .14em; text-transform: uppercase; }
+.v3 .fi { display: flex; align-items: center; gap: 6px; color: var(--lg3); }
+.v3 .fi::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: #45433d; }
+.v3 .fi:hover { color: var(--lg2); }
+.v3 .fi.on { color: var(--lg); }
+.v3 .fi.on::before { background: var(--amb); box-shadow: 0 0 5px var(--amb); }
+.v3 .fi sup { font-family: var(--fm); font-size: 8.5px; letter-spacing: 0; vertical-align: 0; color: var(--lg3); }
+.v3 .fc, .v3 .sort { font-family: var(--fm); font-size: 9px; letter-spacing: 0; text-transform: none; color: var(--lg3); }
+.v3 .sort b { color: var(--lg2); font-weight: 400; }
+
+.v3 .list { padding: 0 10px 10px; }
+.v3 .grp { position: relative; height: 28px; margin: 10px 0 2px; padding: 0 22px; border-radius: 3px;
+  background: linear-gradient(#3d3b36, #34322e); box-shadow: inset 0 1px 0 rgba(255,255,255,.07), 0 1px 0 rgba(0,0,0,.5);
+  font-family: var(--fd); font-size: 7.5px; letter-spacing: .22em; text-transform: uppercase; color: var(--lg2); }
+.v3 .grp::before, .v3 .grp::after { content: ""; position: absolute; top: 50%; width: 7px; height: 7px; margin-top: -3.5px; border-radius: 50%;
+  background: linear-gradient(135deg, transparent 44%, #2a2925 44% 56%, transparent 56%), radial-gradient(circle at 35% 30%, #8e897e, #4a4740); box-shadow: 0 1px 0 rgba(255,255,255,.08); }
+.v3 .grp::before { left: 8px; } .v3 .grp::after { right: 8px; }
+.v3 .grp .gcount { font-family: var(--fm); font-size: 9px; letter-spacing: 0; color: var(--lg3); }
+.v3 .grp .grule { flex: 1; }
+.v3 .grp .chev { color: var(--lg3); order: 9; }
+.v3 .row { height: 40px; padding: 0 10px 0 22px; border-bottom: 1px solid rgba(0,0,0,.4); box-shadow: 0 1px 0 rgba(255,255,255,.03); }
+.v3 .row:hover { background: rgba(255,255,255,.025); }
+.v3 .row.sel { background: var(--ambd); box-shadow: inset 0 0 0 1px rgba(255,178,56,.28); border-radius: 3px; }
+.v3 .led { display: block; width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: #23221f; box-shadow: inset 0 1px 1px #000; }
+.v3 .led.grn { background: var(--grn); box-shadow: 0 0 6px rgba(139,224,111,.7); }
+.v3 .led.amb { background: var(--amb); box-shadow: 0 0 6px rgba(255,178,56,.8); }
+.v3 .led.red { background: var(--red); box-shadow: 0 0 6px rgba(255,91,75,.8); }
+.v3 .row .led { order: -1; }
+.v3 .prio { font-family: var(--fm); font-size: 9.5px; color: var(--lg3); width: 36px; }
+.v3 .tg { width: 30px; height: 16px; border-radius: 8px; background: var(--in); box-shadow: inset 0 1px 3px #000, 0 1px 0 rgba(255,255,255,.06); }
+.v3 .tg::after { content: ""; position: absolute; top: 1px; left: 1px; width: 14px; height: 14px; border-radius: 50%; background: linear-gradient(#a7a297, #6d685e); box-shadow: 0 1px 2px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.35); transition: left .15s; }
+.v3 .tg.on { background: #5a3f10; box-shadow: inset 0 1px 3px #000, inset 0 0 8px rgba(255,178,56,.45); }
+.v3 .tg.on::after { left: 15px; background: linear-gradient(#e7e1d3, #a8a295); }
+.v3 .tg.mixed::after { left: 8px; }
+.v3 .name { font-size: 14px; font-weight: 500; }
+.v3 .off .name { color: var(--lg3); }
+.v3 .typecell { width: 116px; }
+.v3 .type { font-family: var(--fd); font-size: 7px; letter-spacing: .14em; text-transform: uppercase; color: var(--lg2); background: var(--in); padding: 4px 7px; border-radius: 2px; box-shadow: inset 0 1px 2px #000, 0 1px 0 rgba(255,255,255,.05); }
+.v3 .meter { display: block; width: 58px; height: 6px; flex-shrink: 0; border-radius: 1px; background: var(--in); box-shadow: inset 0 1px 1px #000; position: relative; overflow: hidden; }
+.v3 .meter i { position: absolute; inset: 0 auto 0 0; background: repeating-linear-gradient(90deg, var(--lg2) 0 3px, transparent 3px 5px); opacity: .75; }
+.v3 .off .meter i { opacity: .3; }
+.v3 .size { font-family: var(--fm); font-size: 9.5px; color: var(--lg2); width: 58px; }
+.v3 .flag { font-family: var(--fd); font-size: 6.5px; letter-spacing: .12em; text-transform: uppercase; display: inline-flex; align-items: center; gap: 5px; }
+.v3 .flag::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; box-shadow: 0 0 5px currentColor; }
+.v3 .flag.bad { color: var(--red); } .v3 .flag.warn { color: var(--amb); } .v3 .flag.pend { display: none; }
+.v3 .tag { font-family: var(--fm); font-size: 9px; color: var(--lg3); border: 1px solid #45433d; border-radius: 2px; padding: 1px 5px; }
+
+.v3 .details { width: 300px; background: var(--p); border-left: 1px solid #000; box-shadow: inset 1px 0 0 rgba(255,255,255,.04); padding: 14px; display: flex; flex-direction: column; gap: 14px; }
+.v3 .dhead { background: var(--in); border-radius: 6px; padding: 10px; box-shadow: inset 0 2px 6px #000, 0 1px 0 rgba(255,255,255,.06); display: flex; flex-direction: column; gap: 10px; }
+.v3 .shot { position: relative; height: 132px; border-radius: 3px; background:
+  repeating-linear-gradient(0deg, rgba(255,178,56,.05) 0 1px, transparent 1px 3px),
+  radial-gradient(110% 90% at 60% 30%, #4a3a20, #1a1712 75%); }
+.v3 .pvcap { position: absolute; right: 7px; bottom: 5px; font-family: var(--fm); font-size: 8.5px; color: rgba(255,178,56,.6); }
+.v3 .details h3 { font-size: 18px; font-weight: 600; line-height: 1.15; color: var(--lg); }
+.v3 .dsub { margin: 3px 0 0; font-family: var(--fm); font-size: 9.5px; color: var(--amb); opacity: .85; }
+.v3 .spec { grid-template-columns: 82px 1fr; gap: 8px 10px; }
+.v3 .spec dt { font-family: var(--fd); font-size: 6.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--lg3); padding-top: 3px; }
+.v3 .spec dd { font-size: 13px; }
+.v3 .spec dd.m { font-family: var(--fm); font-size: 9.5px; color: var(--lg2); }
+.v3 .ds { display: flex; flex-direction: column; gap: 7px; padding-top: 10px; border-top: 1px solid rgba(0,0,0,.45); box-shadow: 0 -1px 0 rgba(255,255,255,.04) inset; }
+.v3 .ds h4 { font-family: var(--fd); font-weight: 400; font-size: 7px; letter-spacing: .2em; text-transform: uppercase; color: var(--lg3); }
+.v3 .files li { font-family: var(--fm); font-size: 9.5px; color: var(--lg2); line-height: 1.75; }
+.v3 .cf { font-size: 13px; color: var(--lg2); display: flex; gap: 7px; align-items: baseline; }
+.v3 .cf b { font-family: var(--fm); font-weight: 500; font-size: 11px; }
+.v3 .cf.win b { color: var(--grn); } .v3 .cf.lose b { color: var(--red); }
+.v3 .note { font-size: 13px; color: var(--lg2); }
+.v3 .hint { color: var(--lg3); font-size: 13px; }
+
+.v3 .applybar { height: 58px; padding: 0 14px; background: linear-gradient(#383732, #2d2c28); border-top: 1px solid #000; box-shadow: inset 0 1px 0 rgba(255,255,255,.06); }
+.v3 .pc { display: flex; align-items: center; gap: 10px; }
+.v3 .pc b { font-family: var(--fm); font-weight: 500; font-size: 22px; line-height: 1; color: var(--amb); text-shadow: 0 0 10px rgba(255,178,56,.6); background: var(--in); padding: 6px 9px; border-radius: 4px; box-shadow: inset 0 1px 4px #000; letter-spacing: .06em; }
+.v3 .pc span { font-family: var(--fd); font-size: 7.5px; letter-spacing: .2em; text-transform: uppercase; color: var(--lg2); }
+.v3 .plist { font-size: 13px; color: var(--lg2); }
+.v3 .applybar .btn.pri { height: 32px; padding: 0 16px; color: #2b1a02; background: radial-gradient(120% 140% at 50% 0%, #ffd27a, #ffb238 50%, #d98a12); box-shadow: 0 2px 0 #7a4c0a, 0 0 14px rgba(255,178,56,.25), inset 0 1px 0 rgba(255,255,255,.5); }
+.v3 .applybar .btn.pri kbd { color: #5a3a06; }
+.v3 .stub .st { font-family: var(--fd); font-size: 13px; letter-spacing: .24em; text-transform: uppercase; color: var(--amb); margin-bottom: 10px; }
+.v3 .stub p { color: var(--lg2); max-width: 42ch; font-size: 14px; }
+.v3 .stub .btn { margin-top: 18px; }
+</style>
+
+<div class="shell">
+  <header class="sh-top">
+    <p class="sh-name"><b>SB Mod Manager</b> · три направления редизайна · экран «Mods»</p>
+    <div class="sh-tabs" role="tablist" aria-label="Направление">
+      <button class="sh-tab" role="tab" id="tab-hud" data-go="hud"><span class="n">1</span>Нанокостюм</button>
+      <button class="sh-tab" role="tab" id="tab-catalog" data-go="catalog"><span class="n">2</span>Каталог</button>
+      <button class="sh-tab" role="tab" id="tab-deck" data-go="deck"><span class="n">3</span>Пульт</button>
+    </div>
+  </header>
+
+  <section class="brief" id="brief" aria-live="polite"></section>
+
+  <div class="stage"><div id="app"></div></div>
+
+  <div class="stage-note">
+    <span>Макет живой: строки выделяются, тумблеры включают моды, группы сворачиваются, поиск и фильтры работают, Apply применяет изменения. Данные примерные.</span>
+    <button class="sh-reset" id="reset">Сбросить макет</button>
+  </div>
+
+  <section class="code">
+    <h2>Что меняется в коде</h2>
+    <div id="code"></div>
+  </section>
+</div>
+
+<script>
+const KB = 1024, MB = 1024 * 1024;
+const TYPES = {
+  pak: { l: "Pak", dest: "SB/Content/Paks/~mods" },
+  logic: { l: "Logic", dest: "SB/Content/Paks/LogicMods" },
+  lua: { l: "Lua", dest: "UE4SS Lua mod" },
+  movie: { l: "Movie", dest: "SB/Content/Movies" },
+  tweak: { l: "Engine tweak", dest: "Merged into Engine.ini in %LOCALAPPDATA%\\SB\\Saved\\Config" },
+  reshade: { l: "ReShade preset", dest: "SB/Binaries/Win64/reshade-presets" },
+};
+const GROUPS = [
+  { id: "outfits", name: "Outfits" },
+  { id: "gameplay", name: "Gameplay" },
+  { id: "visuals", name: "Visuals" },
+];
+const SEED = [
+  { id: 1, prio: 10, name: "Aurora Suit Recolour", group: "outfits", type: "pak", size: 7.0 * MB, ver: "1.2", on: true, tags: ["EVE"], date: "12 Oct 2026", nexus: 1287, slug: "AuroraSuit", loses: [[4, "Holiday Outfit Pack"]] },
+  { id: 2, prio: 20, name: "Holiday Outfit Pack", group: "outfits", type: "pak", size: 27 * MB, ver: "2.0", on: true, tags: ["EVE", "Seasonal"], date: "14 Oct 2026", nexus: 1342, slug: "HolidayOutfits", wins: [[4, "Aurora Suit Recolour"]], notes: "Pick the red variant on reinstall." },
+  { id: 3, prio: 30, name: "Planet Diving Suit — Black", group: "outfits", type: "pak", size: 12.4 * MB, ver: "1.0", on: true, tags: ["CNS"], date: "20 Oct 2026", nexus: 1410, slug: "PlanetDivingBlack", loses: [[2, "Eidos 7 Hair Physics"]] },
+  { id: 4, prio: 40, name: "Free Camera", group: "gameplay", type: "logic", size: 625 * KB, ver: "0.9.3", on: true, tags: [], date: "2 Sep 2026", nexus: 211, slug: "FreeCamera" },
+  { id: 5, prio: 50, name: "Cutscene Skip", group: "gameplay", type: "lua", size: 8.2 * KB, ver: "1.4", on: true, tags: [], date: "2 Sep 2026", nexus: 189, slug: "CutsceneSkip", needs: "UE4SS" },
+  { id: 6, prio: 60, name: "Combat Tweaks", group: "gameplay", type: "pak", size: 869 * KB, ver: "3.1", on: true, tags: ["Balance"], date: "9 Sep 2026", nexus: 402, slug: "CombatTweaks", order: "load after Free Camera" },
+  { id: 7, prio: 70, name: "Neon Blade VFX", group: "visuals", type: "pak", size: 2.0 * MB, ver: "1.1", on: true, base: false, tags: [], date: "28 Oct 2026", nexus: 1502, slug: "NeonBladeVFX" },
+  { id: 8, prio: 80, name: "ReShade Cinematic", group: "visuals", type: "reshade", size: 2.3 * MB, ver: "2.2", on: false, tags: ["Photo"], date: "1 Oct 2026", nexus: 977, slug: "Cinematic" },
+  { id: 9, prio: 90, name: "No Vignette & Film Grain", group: "visuals", type: "tweak", size: 1.1 * KB, ver: "1.0", on: true, tags: [], date: "1 Oct 2026", nexus: 655, slug: "NoVignette" },
+  { id: 10, prio: 100, name: "Intro Movie Replacer", group: null, type: "movie", size: 30 * MB, ver: "1.0", on: false, base: true, tags: [], date: "17 Aug 2026", nexus: 77, slug: "IntroMovie" },
+  { id: 11, prio: 110, name: "Eidos 7 Hair Physics", group: null, type: "pak", size: 4.6 * MB, ver: "0.6", on: true, tags: ["EVE"], date: "22 Oct 2026", nexus: 1455, slug: "HairPhysics", wins: [[2, "Planet Diving Suit — Black"]], notes: "Keep below the outfits." },
+];
+const NAV = [["mods", "Mods"], ["order", "Load order"], ["conflicts", "Conflicts"], ["files", "Files"], ["downloads", "Downloads", 2], ["collections", "Collections"], ["reshade", "ReShade"], ["settings", "Settings"]];
+const FILTERS = [["all", "All"], ["enabled", "Enabled"], ["disabled", "Disabled"], ["problems", "Problems"], ["pending", "Not applied"]];
+
+const VARIANTS = {
+  hud: {
+    cls: "v1", tab: "Нанокостюм",
+    title: "Нанокостюм",
+    thesis: "Интерфейс как продолжение игры: тактический экран костюма, а не очередная панель SaaS. Тёмный, но не чёрный, с одним тёплым акцентом.",
+    fonts: "Chakra Petch · IBM Plex Sans · IBM Plex Mono",
+    moves: [
+      "Латунь на чернильно-синем вместо розово-фиолетового градиента. Один акцент, без свечения и без размытых теней.",
+      "Срезанные углы вместо скруглений. Уголки-скобки только у превью в панели деталей, чтобы декор не расползался.",
+      "Навигация текстом с номерами 01–08 вместо столбца иконок. Номера совпадают с Ctrl+1…8.",
+      "Приоритет 0010, 0020 в каждой строке: это те же префиксы, которые менеджер пишет в имена pak-файлов.",
+    ],
+    risk: "<b>Риск:</b> легко скатиться в киберпанк-косплей. Держим анимацию на нуле, бирюзу оставляем только для типа мода, остальное нейтральное.",
+    play: "Launch", applyLabel: (n) => `${String(n).padStart(2, "0")} pending`,
+    code: [
+      "Токены в <code>src/index.css</code> заменяются целиком; Inter уходит, три шрифта кладутся в бандл через @fontsource, без сети.",
+      "<code>ui.tsx</code>: Button получает clip-path со срезом, Checkbox становится квадратным, Badge превращается в моноширинную метку в скобках.",
+      "<code>App.tsx</code>: рейл 56 px → колонка 176 px с подписями. Иконки lucide из навигации убираются.",
+      "<code>ModsView.tsx</code>: в строку добавляется колонка приоритета (поле уже есть в данных порядка загрузки).",
+    ],
+  },
+  catalog: {
+    cls: "v2", tab: "Каталог",
+    title: "Каталог",
+    thesis: "Светлый рабочий инструмент, похожий на стеллаж с подписанными ящиками: плотная таблица, толстые линейки и ни одной тени.",
+    fonts: "Archivo (ширина 62–125) · DM Mono",
+    moves: [
+      "Холодная светлая бумага и чёрные линейки толщиной 2 px вместо полупрозрачных разделителей на тёмном.",
+      "Тип мода напечатан на ленте этикет-принтера. У каждого типа свой цвет ленты, поэтому Lua и Logic различаются, не вчитываясь.",
+      "Вкладки сверху узким Archivo, крупно, с номером клавиши. Группы — чёрные плашки, как подписи на ящиках.",
+      "Оранжевый означает ровно одно: «ещё не применено в папке игры». Им помечены приоритет в строке, метка и полоса Apply.",
+    ],
+    risk: "<b>Риск:</b> светлая тема рядом с игрой вечером слепит. Понадобится тёмная пара: графит, белые линейки и те же цветные ленты.",
+    play: "Play", applyLabel: (n) => `${n} ${n === 1 ? "change" : "changes"} not in the game folder yet`,
+    code: [
+      "<code>index.css</code>: новая светлая палитра плюс тёмная пара через <code>prefers-color-scheme</code>; сейчас тема одна, и это прописано в комментарии.",
+      "<code>App.tsx</code>: навигация переезжает из левого рейла в горизонтальную полосу под заголовком, Play встаёт в её правый край.",
+      "<code>ModsView.tsx</code>: появляется строка заголовков колонок; Badge для типа заменяется компонентом-лентой с цветом по <code>ModTypeId</code>.",
+      "Вариант даёт больше всего ширины под список: рейл исчезает, панель деталей остаётся справа.",
+    ],
+  },
+  deck: {
+    cls: "v3", tab: "Пульт",
+    title: "Пульт",
+    thesis: "Менеджер как аппаратная консоль: тумблеры, светодиоды и гравированные надписи. Состояние мода видно сразу, без чтения меток.",
+    fonts: "Michroma · Barlow · Martian Mono",
+    moves: [
+      "Тёплый графит средней тёмности вместо чёрного. Объём дают фаски и вдавленные поля, а не размытые тени.",
+      "Мод включается тумблером. Светодиод строки: зелёный — работает, янтарный — ждёт Apply, красный — проблема, тёмный — выключен.",
+      "Навигация — блок клавиш с номерами, у активной горит диод. Play — подсвеченная кнопка внизу блока.",
+      "Число ожидающих изменений показывает индикатор, как на приборе. Размер мода — шкала рядом с цифрой.",
+    ],
+    risk: "<b>Риск:</b> скевоморфизм требует аккуратной отрисовки, много мелких градиентов, их сложнее поддерживать. Лучше всего ложится на списки (моды, загрузки), хуже на длинные формы настроек.",
+    play: "Play", applyLabel: () => "Pending",
+    code: [
+      "<code>ui.tsx</code>: новый компонент Switch заменяет Checkbox в строках; Button получает вид клавиши с нажатием.",
+      "<code>ModsView.tsx</code>: светодиод вычисляется из уже имеющихся полей: <code>enabled</code>, наличие в <code>pending</code>, <code>missingRequirements</code>, <code>misordered</code>, overridden.",
+      "<code>App.tsx</code>: рейл становится колонкой клавиш 158 px; ApplyBar получает индикатор-счётчик.",
+      "Больше всего CSS из трёх вариантов: фаски и вдавленные поля стоит оформить утилитами в <code>@layer utilities</code>.",
+    ],
+  },
+};
+
+let S;
+function reset() {
+  S = {
+    mods: SEED.map((m) => ({ ...m, base: m.base ?? m.on })),
+    sel: 2, collapsed: {}, q: "", view: "mods", filter: "all", flash: "",
+  };
+}
+reset();
+let cur = "hud";
+
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+function fmt(b) {
+  if (b >= MB) return (b / MB >= 10 ? Math.round(b / MB) : (b / MB).toFixed(1)) + " MB";
+  if (b >= KB) return (b / KB >= 100 ? Math.round(b / KB) : (b / KB).toFixed(1)) + " KB";
+  return b + " B";
+}
+const prio4 = (p) => String(p).padStart(4, "0");
+const pending = () => S.mods.filter((m) => m.on !== m.base);
+const problem = (m) => m.on && (m.needs || m.order || (m.loses && m.loses.length));
+function led(m) {
+  if (m.on !== m.base) return "amb";
+  if (!m.on) return "";
+  return problem(m) ? "red" : "grn";
+}
+function shown() {
+  const q = S.q.trim().toLowerCase();
+  return S.mods.filter((m) => {
+    if (q && !(m.name.toLowerCase().includes(q) || m.tags.some((t) => t.toLowerCase().includes(q)))) return false;
+    if (S.filter === "enabled") return m.on;
+    if (S.filter === "disabled") return !m.on;
+    if (S.filter === "problems") return problem(m);
+    if (S.filter === "pending") return m.on !== m.base;
+    return true;
+  });
+}
+function files(m) {
+  const p = `${prio4(m.prio)}_${m.slug}_P`;
+  switch (m.type) {
+    case "pak": return [`~mods/${p}.pak`, `~mods/${p}.utoc`, `~mods/${p}.ucas`];
+    case "logic": return [`LogicMods/${m.slug}.pak`];
+    case "lua": return [`ue4ss/Mods/${m.slug}/scripts/main.lua`, `ue4ss/Mods/mods.txt  +1 line`];
+    case "movie": return ["Movies/StartupMovie.bk2"];
+    case "tweak": return ["Engine.ini  [SystemSettings]  3 keys"];
+    case "reshade": return [`reshade-presets/${m.slug}.ini`];
+  }
+  return [];
+}
+
+const I = {
+  search: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
+  play: '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l13-7.5z"/></svg>',
+  chev: '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>',
+  min: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M5 12h14"/></svg>',
+  max: '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="5" y="5" width="14" height="14"/></svg>',
+  close: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>',
+};
+
+function titlebar() {
+  const on = S.mods.filter((m) => m.on).length;
+  return `<header class="tb">
+    <span class="brand"><i></i>SB Mod Manager</span>
+    <span class="readout"><span>profile <b>Default</b></span><span>deploy <b>hard links</b></span><span>enabled <b>${on}/${S.mods.length}</b></span></span>
+    <span class="flash" role="status">${esc(S.flash)}</span>
+    <span class="wb" aria-hidden="true"><span>${I.min}</span><span>${I.max}</span><span>${I.close}</span></span>
+  </header>`;
+}
+function nav(v) {
+  return `<nav class="nav" aria-label="Screens">
+    ${NAV.map(([id, label, count], i) => `<button class="ni ${S.view === id ? "on" : ""}" data-act="nav" data-view="${id}" aria-current="${S.view === id}"><span class="k">${i + 1}</span><span class="nl">${label}</span>${count ? `<span class="cnt">${count}</span>` : ""}</button>`).join("")}
+    <span class="sp"></span>
+    <button class="play" data-act="play">${I.play}<span>${v.play}</span><small>hard links</small></button>
+  </nav>`;
+}
+function toolbar() {
+  return `<div class="toolbar">
+    <button class="profile" data-act="flash" data-msg="Profiles: Default · Cosmetics only · Photo mode"><span class="pl">Profile</span><span class="pv">Default</span></button>
+    <label class="search">${I.search}<input id="q" type="text" placeholder="Search mods" aria-label="Search mods" value="${esc(S.q)}"></label>
+    <button class="btn" data-act="all" data-on="1">Enable all</button>
+    <button class="btn" data-act="all" data-on="0">Disable all</button>
+    <span class="sp"></span>
+    <button class="btn" data-act="flash" data-msg="All 11 mods are up to date on Nexus">Check updates</button>
+    <button class="btn pri" data-act="flash" data-msg="Drop .zip, .7z or .rar anywhere in the window">+ Add mods</button>
+  </div>`;
+}
+function filters(list) {
+  const count = (id) => S.mods.filter((m) => id === "all" || (id === "enabled" ? m.on : id === "disabled" ? !m.on : id === "problems" ? problem(m) : m.on !== m.base)).length;
+  return `<div class="filters">
+    ${FILTERS.map(([id, label]) => `<button class="fi ${S.filter === id ? "on" : ""}" data-act="filter" data-f="${id}">${label}<sup>${count(id)}</sup></button>`).join("")}
+    <span class="sp"></span>
+    <span class="fc">${list.length === S.mods.length ? `${S.mods.length} mods` : `${list.length} of ${S.mods.length}`}</span>
+    <span class="sort">Sort <b>Load order ▾</b></span>
+  </div>`;
+}
+function tg(state, act, data, label) {
+  return `<button class="tg ${state}" data-act="${act}" ${data} role="checkbox" aria-checked="${state === "on" ? "true" : state === "mixed" ? "mixed" : "false"}" aria-label="${esc(label)}"></button>`;
+}
+function row(m) {
+  const flags = [];
+  m.tags.slice(0, 2).forEach((t) => flags.push(`<span class="tag">${esc(t)}</span>`));
+  if (m.on && m.needs) flags.push(`<span class="flag bad">Needs ${m.needs}</span>`);
+  if (m.on && m.order) flags.push(`<span class="flag warn" title="Breaks: ${esc(m.order)}">Order</span>`);
+  if (m.on && m.loses) flags.push(`<span class="flag bad">${m.loses[0][0]} overridden</span>`);
+  if (m.on !== m.base) flags.push(`<span class="flag pend">${m.on ? "Will enable" : "Will disable"}</span>`);
+  const pct = Math.max(6, Math.min(100, (Math.log10(m.size) - 3) / (Math.log10(64 * MB) - 3) * 100));
+  return `<div class="row ${S.sel === m.id ? "sel" : ""} ${m.on ? "" : "off"} ${m.on !== m.base ? "pend" : ""}" data-act="sel" data-id="${m.id}">
+    <span class="prio">${prio4(m.prio)}</span>
+    ${tg(m.on ? "on" : "", "tog", `data-id="${m.id}"`, `Toggle ${m.name}`)}
+    <span class="led ${led(m)}" aria-hidden="true"></span>
+    <span class="name" title="${esc(m.name)}">${esc(m.name)}</span>
+    <span class="flags">${flags.join("")}</span>
+    <span class="typecell"><span class="type t-${m.type}">${TYPES[m.type].l}</span></span>
+    <span class="meter" aria-hidden="true"><i style="width:${pct.toFixed(0)}%"></i></span>
+    <span class="size">${fmt(m.size)}</span>
+  </div>`;
+}
+function list(mods) {
+  const out = [`<div class="colhead" aria-hidden="true"><span class="prio">#</span><span class="tgc"></span><span class="name">Name</span><span class="typecell">Type</span><span class="size">Size</span></div>`];
+  const narrowed = S.q.trim() !== "" || S.filter !== "all";
+  const sections = [...GROUPS, { id: null, name: "Ungrouped" }];
+  for (const g of sections) {
+    const all = S.mods.filter((m) => m.group === g.id);
+    const inG = mods.filter((m) => m.group === g.id);
+    if (inG.length === 0 && (narrowed || all.length === 0)) continue;
+    const onN = all.filter((m) => m.on).length;
+    const state = onN === all.length ? "on" : onN === 0 ? "" : "mixed";
+    const key = g.id ?? "_";
+    const col = !!S.collapsed[key];
+    out.push(`<div class="grp ${col ? "collapsed" : ""}" data-act="col" data-g="${key}" role="button" aria-expanded="${!col}">
+      <span class="chev">${I.chev}</span>
+      ${tg(state, "gtog", `data-g="${key}"`, `Toggle group ${g.name}`)}
+      <span class="gname">${g.name}</span><span class="gcount">${onN}/${all.length}</span><span class="grule"></span>
+    </div>`);
+    if (!col) out.push(...inG.map(row));
+  }
+  if (mods.length === 0) out.push(`<div class="stub"><div><p class="hint">Nothing matches. Try a different search, or clear the filters.</p></div></div>`);
+  return `<div class="list">${out.join("")}</div>`;
+}
+function details() {
+  const m = S.mods.find((x) => x.id === S.sel);
+  if (!m) return `<aside class="details"><p class="hint">Select a mod to see its files, conflicts and notes.</p></aside>`;
+  const conf = [
+    ...(m.wins || []).map(([n, o]) => `<p class="cf win"><b>▲ ${n}</b> assets win over ${esc(o)}</p>`),
+    ...(m.loses || []).map(([n, o]) => `<p class="cf lose"><b>▼ ${n}</b> assets replaced by ${esc(o)}</p>`),
+  ];
+  return `<aside class="details" aria-label="Mod details">
+    <div class="dhead">
+      <div class="shot"><span class="pvcap">preview.jpg · 1 of 3</span></div>
+      <div><h3>${esc(m.name)}</h3><p class="dsub">v${m.ver} · ${fmt(m.size)} · installed ${m.date}</p></div>
+    </div>
+    <dl class="spec">
+      <div class="kv"><dt>Type</dt><dd>${TYPES[m.type].l}</dd></div>
+      <div class="kv"><dt>Installs to</dt><dd class="m">${esc(TYPES[m.type].dest)}</dd></div>
+      <div class="kv"><dt>Priority</dt><dd class="m">${prio4(m.prio)}</dd></div>
+      <div class="kv"><dt>Source</dt><dd>Nexus · mod ${m.nexus}</dd></div>
+      ${m.needs ? `<div class="kv"><dt>Needs</dt><dd>${m.needs} — install it from Settings</dd></div>` : ""}
+      ${m.order ? `<div class="kv"><dt>Rule</dt><dd>${esc(m.order)}</dd></div>` : ""}
+    </dl>
+    ${conf.length ? `<section class="ds"><h4>Conflicts</h4>${conf.join("")}</section>` : ""}
+    <section class="ds"><h4>Files</h4><ul class="files">${files(m).map((f) => `<li>${esc(f)}</li>`).join("")}</ul></section>
+    <section class="ds"><h4>Notes</h4><p class="note">${m.notes ? esc(m.notes) : "No notes yet."}</p></section>
+  </aside>`;
+}
+function applybar(v) {
+  const p = pending();
+  if (p.length === 0) return "";
+  const names = p.map((m) => `${m.on ? "enable" : "disable"} ${m.name}`);
+  return `<div class="applybar">
+    <span class="pc"><b>${v === VARIANTS.deck ? String(p.length).padStart(2, "0") : ""}</b><span>${v.applyLabel(p.length)}</span></span>
+    <span class="plist">${esc(names.slice(0, 3).join(", "))}${names.length > 3 ? "…" : ""}</span>
+    <span class="sp"></span>
+    <button class="btn pri" data-act="apply">Apply <kbd>Ctrl+S</kbd></button>
+  </div>`;
+}
+function stub() {
+  const label = NAV.find(([id]) => id === S.view)[1];
+  return `<div class="stub"><div><p class="st">${label}</p><p>This mockup draws only the Mods screen. ${label} would use the same type, rules and controls.</p><button class="btn" data-act="nav" data-view="mods">Back to Mods</button></div></div>`;
+}
+function render() {
+  const v = VARIANTS[cur];
+  const root = document.getElementById("app");
+  const focused = document.activeElement && document.activeElement.id === "q";
+  const caret = focused ? document.activeElement.selectionStart : 0;
+  const scroller = root.querySelector(".list");
+  const top = scroller ? scroller.scrollTop : 0;
+  const mods = shown();
+  root.className = v.cls;
+  root.innerHTML = `<div class="app">${titlebar()}${nav(v)}<main class="main">${
+    S.view === "mods"
+      ? `${toolbar()}${filters(mods)}<div class="body">${list(mods)}${details()}</div>`
+      : stub()
+  }${applybar(v)}</main></div>`;
+  const nl = root.querySelector(".list");
+  if (nl) nl.scrollTop = top;
+  if (focused) { const q = document.getElementById("q"); q.focus(); q.setSelectionRange(caret, caret); }
+}
+function renderShell() {
+  const v = VARIANTS[cur];
+  document.documentElement.dataset.v = cur;
+  document.querySelectorAll(".sh-tab").forEach((t) => t.setAttribute("aria-selected", String(t.dataset.go === cur)));
+  document.getElementById("brief").innerHTML = `
+    <div><h1>${v.title}</h1><p class="thesis">${v.thesis}</p><p class="fonts">${v.fonts}</p></div>
+    <div><ul class="moves">${v.moves.map((m) => `<li>${m}</li>`).join("")}</ul><p class="risk">${v.risk}</p></div>`;
+  document.getElementById("code").innerHTML = v.code.map((c) => `<p>${c}</p>`).join("");
+  render();
+}
+let flashTimer;
+function flash(msg) {
+  S.flash = msg; render();
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => { S.flash = ""; render(); }, 2600);
+}
+
+document.getElementById("app").addEventListener("click", (e) => {
+  const el = e.target.closest("[data-act]");
+  if (!el) return;
+  const act = el.dataset.act;
+  const id = Number(el.dataset.id);
+  if (act === "sel") S.sel = id;
+  else if (act === "tog") { const m = S.mods.find((x) => x.id === id); m.on = !m.on; }
+  else if (act === "gtog") {
+    const g = el.dataset.g === "_" ? null : el.dataset.g;
+    const all = S.mods.filter((m) => m.group === g);
+    const next = !all.every((m) => m.on);
+    all.forEach((m) => (m.on = next));
+  }
+  else if (act === "col") S.collapsed[el.dataset.g] = !S.collapsed[el.dataset.g];
+  else if (act === "nav") S.view = el.dataset.view;
+  else if (act === "filter") S.filter = el.dataset.f;
+  else if (act === "all") shown().forEach((m) => (m.on = el.dataset.on === "1"));
+  else if (act === "apply") { const n = pending().length; S.mods.forEach((m) => (m.base = m.on)); return flash(`Applied ${n} ${n === 1 ? "change" : "changes"} to the game folder`); }
+  else if (act === "play") return flash("Starting Stellar Blade with 9 mods…");
+  else if (act === "flash") return flash(el.dataset.msg);
+  render();
+});
+document.getElementById("app").addEventListener("input", (e) => {
+  if (e.target.id === "q") { S.q = e.target.value; render(); }
+});
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s" && pending().length) {
+    e.preventDefault();
+    document.querySelector('[data-act="apply"]')?.click();
+  }
+});
+document.querySelectorAll(".sh-tab").forEach((t) => t.addEventListener("click", () => {
+  if (location.hash !== "#" + t.dataset.go) location.hash = t.dataset.go; else go(t.dataset.go);
+}));
+document.getElementById("reset").addEventListener("click", () => { reset(); render(); });
+function go(name) { cur = VARIANTS[name] ? name : "hud"; renderShell(); }
+window.addEventListener("hashchange", () => go(location.hash.slice(1)));
+go(location.hash.slice(1));
+</script>
+
+</body>
+</html>
