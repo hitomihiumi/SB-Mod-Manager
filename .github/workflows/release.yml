@@ -48,10 +48,15 @@ jobs:
             exit 0
           fi
 
-          # Scheduled: only worth it if something landed in the last day.
-          recent=$(git log --since="24 hours ago" --oneline | wc -l)
-          echo "commits in the last 24h: $recent"
-          if [ "$recent" -gt 0 ]; then
+          # Scheduled: only worth it if the default branch moved since the
+          # last nightly. Compared with the commit the nightly tag points at
+          # rather than "the last 24 hours", because scheduled runs start
+          # hours late and irregularly, and a commit landing between two of
+          # them was never built.
+          head=$(git rev-parse HEAD)
+          built=$(git rev-parse -q --verify "refs/tags/nightly^{commit}" || true)
+          echo "default branch: $head, last nightly: ${built:-none}"
+          if [ "$head" != "$built" ]; then
             echo "build=true" >> "$GITHUB_OUTPUT"
           else
             echo "build=false" >> "$GITHUB_OUTPUT"
@@ -100,12 +105,39 @@ jobs:
           fi
           echo "tag $tag matches package.json $version"
 
-      # Moving the tag keeps one rolling prerelease instead of accumulating a
-      # release per night.
-      - name: Point the nightly tag at this commit
+      # A nightly built from the same package.json as the last stable release
+      # carried the same version, so the in-app updater — which only offers
+      # a newer version — never offered it. A nightly is the next patch
+      # version as a prerelease, stamped with the build time: newer than the
+      # stable release it grew from, older than the next one, and each newer
+      # than the last.
+      - name: Give the nightly a version of its own
         if: needs.decide.outputs.nightly == 'true'
+        id: nightly
         shell: bash
         run: |
+          version=$(node -e '
+            const pkg = require("./package.json");
+            const [major, minor, patch] = pkg.version.split("-")[0].split(".").map(Number);
+            const stamp = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 12);
+            pkg.version = `${major}.${minor}.${patch + 1}-nightly.${stamp}`;
+            require("fs").writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
+            console.log(pkg.version);
+          ')
+          echo "nightly version: $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "commit=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      # One rolling prerelease, replaced rather than added to: reusing the old
+      # release kept its first publication date, so it sorted as months old,
+      # and kept every installer it ever had beside the new one.
+      - name: Replace the previous nightly
+        if: needs.decide.outputs.nightly == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete nightly --yes --repo "${{ github.repository }}" || echo "no previous nightly release"
           git tag -f nightly
           git push -f origin nightly
 
@@ -119,7 +151,7 @@ jobs:
         with:
           tagName: ${{ needs.decide.outputs.nightly == 'true' && 'nightly' || github.ref_name }}
           releaseName: ${{ needs.decide.outputs.nightly == 'true' && 'Nightly build' || github.ref_name }}
-          releaseBody: ${{ needs.decide.outputs.nightly == 'true' && 'Built automatically from the latest commit on the default branch. Expect rough edges.' || '' }}
+          releaseBody: ${{ needs.decide.outputs.nightly == 'true' && format('Version {0}, built automatically from {1} on the default branch. Expect rough edges.', steps.nightly.outputs.version, steps.nightly.outputs.commit) || '' }}
           releaseDraft: false
           prerelease: ${{ needs.decide.outputs.nightly == 'true' }}
           # Tagged releases get notes generated from the commits since the last

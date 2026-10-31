@@ -15,14 +15,22 @@ use std::ffi::c_void;
 use std::sync::Mutex;
 
 use windows_sys::Win32::Foundation::HMODULE;
+use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
 use windows_sys::Win32::System::Memory::{VirtualProtect, PAGE_PROTECTION_FLAGS, PAGE_READWRITE};
-use windows_sys::Win32::System::ProcessStatus::K32EnumProcessModules;
+use windows_sys::Win32::System::ProcessStatus::{K32EnumProcessModules, K32GetModuleBaseNameW};
 use windows_sys::Win32::System::Threading::GetCurrentProcess;
 
 /// One function to redirect: its export name and the hook's address.
 pub struct Patch {
     pub name: &'static [u8],
     pub hook: usize,
+}
+
+/// One module a pass rewrote, for the log.
+pub struct Patched {
+    pub base: usize,
+    pub name: String,
+    pub slots: usize,
 }
 
 /// Modules already rewritten, by base address, so a module is never patched
@@ -67,13 +75,15 @@ pub fn modules() -> Vec<HMODULE> {
     }
 }
 
-/// Patch every loaded module except those in `skip`, once each.
-pub fn patch_all(patches: &[Patch], skip: &[HMODULE]) -> usize {
+/// Patch every loaded module except those in `skip`, once each. Returns
+/// the modules looked at for the first time, with how many slots each had.
+pub fn patch_all(patches: &[Patch], skip: &[HMODULE]) -> Vec<Patched> {
     let Ok(mut guard) = PATCHED.lock() else {
-        return 0;
+        return Vec::new();
     };
     let patched = guard.get_or_insert_with(HashSet::new);
-    let mut count = 0;
+    let reals = real_addresses(patches);
+    let mut out = Vec::new();
     for module in modules() {
         let base = module as usize;
         if skip.contains(&module) || !patched.insert(base) {
@@ -81,16 +91,64 @@ pub fn patch_all(patches: &[Patch], skip: &[HMODULE]) -> usize {
         }
         // SAFETY: `module` is the base of an image the loader mapped and keeps
         // mapped while it is listed; it was listed a moment ago.
-        count += unsafe { patch_module(base, patches) };
+        let slots = unsafe { patch_module(base, patches, &reals) };
+        out.push(Patched {
+            base,
+            name: module_name(module),
+            slots,
+        });
     }
-    count
+    out
+}
+
+/// Where each patched function really is, as `(patch index, address)`:
+/// `kernel32`'s export and `kernelbase`'s, since an import slot holds
+/// whichever the loader resolved it to.
+fn real_addresses(patches: &[Patch]) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    for dll in ["kernel32.dll", "kernelbase.dll"] {
+        let wide: Vec<u16> = dll.encode_utf16().chain(Some(0)).collect();
+        // SAFETY: plain lookups of modules every process has loaded.
+        let module = unsafe { GetModuleHandleW(wide.as_ptr()) };
+        if module.is_null() {
+            continue;
+        }
+        for (index, patch) in patches.iter().enumerate() {
+            let mut name = patch.name.to_vec();
+            name.push(0);
+            if let Some(address) = unsafe { GetProcAddress(module, name.as_ptr()) } {
+                out.push((index, address as usize));
+            }
+        }
+    }
+    out
+}
+
+fn module_name(module: HMODULE) -> String {
+    let mut buffer = [0u16; 260];
+    // SAFETY: the buffer's length is passed with it.
+    let len = unsafe {
+        K32GetModuleBaseNameW(
+            windows_sys::Win32::System::Threading::GetCurrentProcess(),
+            module,
+            buffer.as_mut_ptr(),
+            buffer.len() as u32,
+        )
+    } as usize;
+    String::from_utf16_lossy(&buffer[..len.min(buffer.len())])
 }
 
 /// Rewrite one module's imports. Returns how many slots were changed.
 ///
+/// Slots are matched by the imported name where the module still carries
+/// its name table, and otherwise by the address the loader put in them: an
+/// image whose name table was stripped, or that imports a function by
+/// ordinal or through a contract set not listed here, calls the very same
+/// address, and that address is what gives it away.
+///
 /// # Safety
 /// `base` must be the base address of a mapped PE32+ image.
-unsafe fn patch_module(base: usize, patches: &[Patch]) -> usize {
+unsafe fn patch_module(base: usize, patches: &[Patch], reals: &[(usize, usize)]) -> usize {
     let read_u16 = |at: usize| unsafe { std::ptr::read_unaligned(at as *const u16) };
     let read_u32 = |at: usize| unsafe { std::ptr::read_unaligned(at as *const u32) };
 
@@ -122,32 +180,45 @@ unsafe fn patch_module(base: usize, patches: &[Patch]) -> usize {
             break;
         }
         descriptor += 20;
-
-        let dll = c_string(base + name_rva);
-        if !is_file_api_module(&dll) || original_first_thunk == 0 {
+        if first_thunk == 0 {
             continue;
         }
+        let names_known =
+            original_first_thunk != 0 && is_file_api_module(&c_string(base + name_rva));
 
         // The names come from the original thunks; the addresses the module
         // actually calls through are in the first thunks, at the same index.
         let mut index = 0;
         loop {
-            let lookup =
-                std::ptr::read_unaligned((base + original_first_thunk + index * 8) as *const u64);
+            let slot = (base + first_thunk + index * 8) as *mut usize;
+            let current = std::ptr::read_volatile(slot);
+            let lookup = if original_first_thunk != 0 {
+                std::ptr::read_unaligned((base + original_first_thunk + index * 8) as *const u64)
+            } else {
+                current as u64
+            };
             if lookup == 0 {
                 break;
             }
-            let slot = (base + first_thunk + index * 8) as *mut usize;
             index += 1;
-            if lookup & (1 << 63) != 0 {
-                continue; // imported by ordinal; none of ours are
-            }
-            let name_at = base + (lookup as usize & 0x7FFF_FFFF) + 2; // skip the hint
-            let name = c_bytes(name_at);
-            let Some(patch) = patches.iter().find(|p| p.name == name) else {
+
+            let by_name = (names_known && lookup & (1 << 63) == 0)
+                .then(|| {
+                    let name_at = base + (lookup as usize & 0x7FFF_FFFF) + 2; // skip the hint
+                    let name = c_bytes(name_at);
+                    patches.iter().find(|p| p.name == name)
+                })
+                .flatten();
+            let patch = by_name.or_else(|| {
+                reals
+                    .iter()
+                    .find(|(_, address)| *address == current)
+                    .map(|(at, _)| &patches[*at])
+            });
+            let Some(patch) = patch else {
                 continue;
             };
-            if write_slot(slot, patch.hook) {
+            if current != patch.hook && write_slot(slot, patch.hook) {
                 changed += 1;
             }
         }
