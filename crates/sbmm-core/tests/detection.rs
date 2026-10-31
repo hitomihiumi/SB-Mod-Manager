@@ -473,46 +473,57 @@ fn engine_ini_is_a_settings_tweak() {
 }
 
 /// A CNS outfit as it ships: paks and its definition, sometimes under
-/// `~mods/CustomNanosuitSystem`, sometimes loose.
+/// `~mods/CustomNanosuitSystem`, sometimes loose. Either way the whole
+/// outfit goes into CNS's folder, keeping its names and its layout.
 #[test]
-fn a_cns_outfit_definition_goes_where_cns_reads_it() {
+fn a_cns_outfit_goes_into_cns_folder_whole() {
     let nested = detect(&[
         "(CNS) EVE - Herald of Goddess/~mods/CustomNanosuitSystem/Herald_of_Goddess_P.pak",
         "(CNS) EVE - Herald of Goddess/~mods/CustomNanosuitSystem/Herald_of_Goddess_P.utoc",
         "(CNS) EVE - Herald of Goddess/~mods/CustomNanosuitSystem/Herald_of_Goddess_P.ucas",
         "(CNS) EVE - Herald of Goddess/~mods/CustomNanosuitSystem/Herald_of_Goddess.dekcns.json",
     ]);
-    assert!(
-        nested.iter().all(|c| c.confidence == Confidence::High),
-        "{nested:?}"
-    );
-    let definition = nested
-        .iter()
-        .find(|c| c.mod_type == ModType::GameRootOverlay)
-        .unwrap();
+    assert_eq!(nested.len(), 1, "{nested:?}");
+    assert_eq!(nested[0].mod_type, ModType::GameRootOverlay);
+    assert_eq!(nested[0].confidence, Confidence::High);
     assert_eq!(
-        targets(definition),
-        ["SB/Content/Paks/~mods/CustomNanosuitSystem/Herald_of_Goddess.dekcns.json"]
-    );
-
-    let loose = detect(&[
-        "EroticEve/joven2_EroticEve-R3-CNS_P.pak",
-        "EroticEve/joven2_EroticEve-R3-CNS_P.utoc",
-        "EroticEve/joven2_EroticEve-R3-CNS_P.ucas",
-        "EroticEve/joven2_EroticEve-R3.dekcns.json",
-        "EroticEve/Cosmetics/Extra.dekani.json",
-    ]);
-    let definition = loose
-        .iter()
-        .find(|c| c.mod_type == ModType::GameRootOverlay)
-        .unwrap();
-    assert_eq!(
-        targets(definition),
+        targets(&nested[0]),
         [
-            "SB/Content/Paks/~mods/CustomNanosuitSystem/Extra.dekani.json",
-            "SB/Content/Paks/~mods/CustomNanosuitSystem/joven2_EroticEve-R3.dekcns.json",
+            "SB/Content/Paks/~mods/CustomNanosuitSystem/Herald_of_Goddess.dekcns.json",
+            "SB/Content/Paks/~mods/CustomNanosuitSystem/Herald_of_Goddess_P.pak",
+            "SB/Content/Paks/~mods/CustomNanosuitSystem/Herald_of_Goddess_P.ucas",
+            "SB/Content/Paks/~mods/CustomNanosuitSystem/Herald_of_Goddess_P.utoc",
         ]
     );
+
+    // No `_P`, and a name that is the definition's: kept exactly as it is.
+    let loose = detect(&[
+        "Aerith cns/ff7_cns_657.dekcns.pak",
+        "Aerith cns/ff7_cns_657.dekcns.utoc",
+        "Aerith cns/ff7_cns_657.dekcns.ucas",
+        "Aerith cns/ff7_cns_657.dekcns.json",
+        "Aerith cns/Cosmetics/Extra.dekani.json",
+    ]);
+    assert_eq!(loose.len(), 1, "{loose:?}");
+    assert!(loose[0].warnings.is_empty());
+    assert_eq!(
+        targets(&loose[0]),
+        [
+            "SB/Content/Paks/~mods/CustomNanosuitSystem/Cosmetics/Extra.dekani.json",
+            "SB/Content/Paks/~mods/CustomNanosuitSystem/ff7_cns_657.dekcns.json",
+            "SB/Content/Paks/~mods/CustomNanosuitSystem/ff7_cns_657.dekcns.pak",
+            "SB/Content/Paks/~mods/CustomNanosuitSystem/ff7_cns_657.dekcns.ucas",
+            "SB/Content/Paks/~mods/CustomNanosuitSystem/ff7_cns_657.dekcns.utoc",
+        ]
+    );
+
+    // A pak mod without a definition is still an ordinary pak mod.
+    let plain = detect(&[
+        "Outfit/Outfit_P.pak",
+        "Outfit/Outfit_P.utoc",
+        "Outfit/Outfit_P.ucas",
+    ]);
+    assert_eq!(plain[0].mod_type, ModType::GenericPak);
 }
 
 /// A Lua mod shipped with a UE4SS settings file beside it: both recognised,
