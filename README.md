@@ -100,7 +100,7 @@ Paths are relative to the folder containing `SB/`.
 | UE4SS runtime | `UE4SS.dll` | `SB/Binaries/Win64/` |
 | Root / ReShade | `ReShade.ini`, a proxy DLL | `SB/Binaries/Win64/` |
 | ReShade preset | an INI with `Techniques=` or `[*.fx]` sections | `SB/Binaries/Win64/reshade-presets/` |
-| CNS outfit | `*.dekcns.json` | `SB/Content/Paks/~mods/CustomNanosuitSystem/` |
+| CNS outfit | `*.dekcns.json`, with its paks | `SB/Content/Paks/~mods/CustomNanosuitSystem/` |
 | Engine tweak | `Engine.ini`, `GameUserSettings.ini`… | merged into `%LOCALAPPDATA%\SB\Saved\Config\WindowsNoEditor` |
 | Movie | `.mp4`/`.bk2`, a `Movies` directory | `SB/Content/Movies/` |
 | Splash art | `Splash.bmp`, a `Splash` directory | `SB/Content/Splash/` |

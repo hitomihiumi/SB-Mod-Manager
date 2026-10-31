@@ -280,26 +280,38 @@ fn claim_cns_definitions(
     claimed: &mut HashSet<String>,
     out: &mut Vec<DetectedComponent>,
 ) {
+    let definitions = tree
+        .entries()
+        .iter()
+        .any(|e| !claimed.contains(&e.norm) && is_cns_definition(e));
+    if !definitions {
+        return;
+    }
+    // An outfit for CNS goes into CNS's folder whole, as its page says:
+    // definitions and paks together, under the names the author gave them.
+    // Its paks are not ordinary pak mods to rename into the load order.
     let entries: Vec<TreeEntry> = tree
         .entries()
         .iter()
-        .filter(|e| !claimed.contains(&e.norm) && is_cns_definition(e))
+        .filter(|e| !claimed.contains(&e.norm))
+        .filter(|e| {
+            is_cns_definition(e)
+                || e.extension()
+                    .is_some_and(|ext| matches!(ext, "pak" | "utoc" | "ucas" | "sig"))
+        })
         .cloned()
         .collect();
-    if entries.is_empty() {
-        return;
-    }
     let files = entries
         .iter()
         .map(|e| {
+            // Below `CustomNanosuitSystem` when the archive spells it out,
+            // otherwise as laid out in the archive: its root is that folder.
             let segments: Vec<&str> = e.norm.split('/').collect();
-            let inside = segments
-                .iter()
-                .position(|s| *s == "customnanosuitsystem")
-                .map(|at| at + 1)
-                .unwrap_or(segments.len() - 1);
-            let rel = strip_leading(&e.rel, inside)
-                .unwrap_or_else(|| PathBuf::from(e.rel.file_name().unwrap_or_default()));
+            let rel = match segments.iter().position(|s| *s == "customnanosuitsystem") {
+                Some(at) => strip_leading(&e.rel, at + 1)
+                    .unwrap_or_else(|| PathBuf::from(e.rel.file_name().unwrap_or_default())),
+                None => e.rel.clone(),
+            };
             ComponentFile {
                 source: e.path.clone(),
                 target: Path::new(paths::CNS_DEFINITIONS).join(rel),
@@ -316,8 +328,8 @@ fn claim_cns_definitions(
         pak_sets: Vec::new(),
         warnings: Vec::new(),
         notes: vec![
-            "Outfit definitions for Custom Nanosuit System, which has to be installed for them \
-             to do anything."
+            "An outfit for Custom Nanosuit System, installed into its folder whole. CNS itself \
+             has to be installed for it to do anything."
                 .into(),
         ],
     });
