@@ -101,6 +101,7 @@ impl App {
             by_mod.entry(file.mod_id).or_default().push(file);
         }
         let records = self.store.list_mods()?;
+        let mut plans = self.deploy_plans(&records)?;
 
         for (mod_id, files) in by_mod {
             if !files.iter().any(|f| drifted.contains(&f.target)) {
@@ -109,8 +110,7 @@ impl App {
             let Some(record) = records.iter().find(|r| r.id == mod_id) else {
                 continue;
             };
-            let components = self.store.components_for(mod_id)?;
-            let plan = self.deploy_plan_for(record, &components)?;
+            let plan = plans.remove(&mod_id).unwrap_or_default();
 
             let mut rows = Vec::with_capacity(files.len());
             let mut created = Vec::new();

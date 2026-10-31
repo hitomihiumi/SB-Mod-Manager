@@ -3306,3 +3306,47 @@ fn a_steam_copy_chosen_by_hand_gets_its_app_id_under_the_virtual_file_system() {
         .iter()
         .any(|(name, value)| name == "SteamAppId" && value == "3489700"));
 }
+
+/// Two mods replacing the same file: the one further down the order is the
+/// one in the game, whichever was deployed last — and the game's own file
+/// survives both, to come back when they are switched off.
+#[test]
+fn the_mod_further_down_wins_a_shared_file_whatever_was_deployed_last() {
+    let mut fx = Fixture::new();
+    fs::create_dir_all(fx.game.join("SB/Content/Movies")).unwrap();
+    fs::write(fx.game.join("SB/Content/Movies/Intro.bk2"), "vanilla").unwrap();
+    let before = fx.game_snapshot();
+
+    let lower = fx.install_folder("Lower", &[("Movies/Intro.bk2", "lower")]);
+    let higher = fx.install_folder("Higher", &[("Movies/Intro.bk2", "higher")]);
+    fx.app.set_enabled(&[lower, higher], true).unwrap();
+    fx.app.apply().unwrap();
+    let intro = fx.game.join("SB/Content/Movies/Intro.bk2");
+    assert_eq!(fs::read_to_string(&intro).unwrap(), "higher");
+    assert!(fx.app.snapshot().unwrap().pending.is_empty());
+
+    // The lower mod goes out and comes back: deployed last, still not the
+    // winner.
+    fx.app.set_enabled(&[lower], false).unwrap();
+    fx.app.apply().unwrap();
+    fx.app.set_enabled(&[lower], true).unwrap();
+    fx.app.apply().unwrap();
+    assert_eq!(fs::read_to_string(&intro).unwrap(), "higher");
+
+    // Turning the winner off hands the file to the other mod.
+    fx.app.set_enabled(&[higher], false).unwrap();
+    fx.app.apply().unwrap();
+    assert_eq!(fs::read_to_string(&intro).unwrap(), "lower");
+    fx.app.set_enabled(&[higher], true).unwrap();
+    fx.app.apply().unwrap();
+    assert_eq!(fs::read_to_string(&intro).unwrap(), "higher");
+
+    // And reordering hands it over too.
+    fx.app.set_order(&[higher, lower]).unwrap();
+    fx.app.apply().unwrap();
+    assert_eq!(fs::read_to_string(&intro).unwrap(), "lower");
+
+    fx.app.set_enabled(&[lower, higher], false).unwrap();
+    fx.app.apply().unwrap();
+    assert_eq!(fx.game_snapshot(), before, "the game's own file is back");
+}

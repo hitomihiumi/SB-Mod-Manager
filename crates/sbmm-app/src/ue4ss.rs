@@ -240,13 +240,12 @@ impl App {
             } else {
                 // Changes the user staged on purpose stay staged: only UE4SS
                 // goes in, with `mods.txt` brought in line with it.
-                let ctx = self.deploy_context()?;
-                let record = self.record(id)?;
-                let components = self.store.components_for(id)?;
-                let plan = self.deploy_plan_for(&record, &components)?;
-                self.deploy_mod(&ctx, id, &plan)?;
-                if self.deployment_mode()? == crate::dto::DeploymentMode::Hardlink {
-                    self.sync_ue4ss_registrations(&ctx)?;
+                let report = self.deploy_now(id)?;
+                if let Some(failure) = report.failed.first() {
+                    return Err(AppError::Invalid(format!(
+                        "{}: {}",
+                        failure.name, failure.reason
+                    )));
                 }
             }
         }

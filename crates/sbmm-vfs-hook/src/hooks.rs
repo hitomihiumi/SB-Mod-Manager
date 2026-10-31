@@ -387,9 +387,16 @@ fn take(budget: &AtomicUsize) -> bool {
     }
 }
 
-/// The first files opened through the hook, whatever they are: proof that
-/// the game's calls reach it at all.
-static OPENS_LEFT: AtomicUsize = AtomicUsize::new(25);
+/// The first files opened through the hook: proof that the game's calls
+/// reach it at all, and of what it looks for before the paks.
+static OPENS_LEFT: AtomicUsize = AtomicUsize::new(40);
+
+/// Windows' own bookkeeping — certificate caches, crypto keys under the
+/// user's profile — says nothing about the game and would fill the budget.
+fn worth_seeing(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    !lower.starts_with("\\\\?\\") && !lower.contains("\\appdata\\")
+}
 
 /// Whether a path is about the game's pak folders, the ones traced.
 fn about_paks(text: &str) -> bool {
@@ -423,8 +430,8 @@ unsafe extern "system" fn hook_create_file(
     let call = |path: *const u16| unsafe {
         (real().create_file)(path, access, share, security, disposition, flags, template)
     };
-    if take(&OPENS_LEFT) {
-        if let Some(text) = read_wide(name) {
+    if let Some(text) = read_wide(name).filter(|text| worth_seeing(text)) {
+        if take(&OPENS_LEFT) {
             log(&format!("seen: {text}"));
         }
     }

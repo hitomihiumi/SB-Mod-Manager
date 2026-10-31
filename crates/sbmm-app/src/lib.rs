@@ -19,7 +19,7 @@ pub mod storage;
 mod tweaks;
 pub mod ue4ss;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use sbmm_core::model::{Confidence, DetectedComponent, ModType};
@@ -923,11 +923,13 @@ impl App {
         // DLSS" and "DLSS is updated" would quietly disagree. Only this mod is
         // deployed; anything else the user has staged stays staged.
         self.set_enabled(&[id], true)?;
-        let ctx = self.deploy_context()?;
-        let record = self.record(id)?;
-        let components = self.store.components_for(id)?;
-        let plan = self.deploy_plan_for(&record, &components)?;
-        self.deploy_mod(&ctx, id, &plan)?;
+        let report = self.deploy_now(id)?;
+        if let Some(failure) = report.failed.first() {
+            return Err(AppError::Invalid(format!(
+                "{}: {}",
+                failure.name, failure.reason
+            )));
+        }
 
         Ok(id)
     }
@@ -1082,11 +1084,13 @@ impl App {
         // Same reasoning as the upscalers: a staged frame generator does
         // nothing, so it goes in now and only this mod is deployed.
         self.set_enabled(&[id], true)?;
-        let ctx = self.deploy_context()?;
-        let record = self.record(id)?;
-        let components = self.store.components_for(id)?;
-        let plan = self.deploy_plan_for(&record, &components)?;
-        self.deploy_mod(&ctx, id, &plan)?;
+        let report = self.deploy_now(id)?;
+        if let Some(failure) = report.failed.first() {
+            return Err(AppError::Invalid(format!(
+                "{}: {}",
+                failure.name, failure.reason
+            )));
+        }
 
         Ok(id)
     }
@@ -1231,9 +1235,10 @@ impl App {
         let mut nexus_missing = self.missing_nexus_requirements(&records)?;
         let mut misordered = self.misordered(&records)?;
         let tweaked = self.tweaked_mods()?;
+        let mut plans = self.deploy_plans(&records)?;
         for record in &records {
             let components = self.store.components_for(record.id)?;
-            let planned = self.deploy_plan_for(record, &components)?;
+            let planned = plans.remove(&record.id).unwrap_or_default();
             let recorded = self.store.deployed_files_for(record.id)?;
             // A settings tweak is "deployed" when its keys are in the game's
             // settings, there being no files.
@@ -1633,38 +1638,76 @@ impl App {
     /// Each mod is handled independently so one bad mod cannot stop the rest,
     /// and any mod that fails is reported rather than silently skipped.
     fn reconcile(&mut self) -> Result<ApplyReport> {
+        self.reconcile_only(None)
+    }
+
+    /// Reconcile all mods, or only those in `only`.
+    ///
+    /// Everything that comes out goes out before anything goes in. Two
+    /// enabled mods never deploy the same path — the plans give each path to
+    /// the mod furthest down the order — so whatever a deployment finds in
+    /// its way is the game's own file, and the backup it makes is the
+    /// original that disabling the mod puts back.
+    fn reconcile_only(&mut self, only: Option<&HashSet<i64>>) -> Result<ApplyReport> {
         let ctx = self.deploy_context()?;
         let mut report = ApplyReport::default();
 
-        for record in self.store.list_mods()? {
-            let components = self.store.components_for(record.id)?;
-            let planned = self.deploy_plan_for(&record, &components)?;
-            let recorded = self.store.deployed_files_for(record.id)?;
-            let deployed = !recorded.is_empty();
-
-            let Some(kind) = change_kind(record.enabled, deployed, &planned, &recorded) else {
+        let records = self.store.list_mods()?;
+        let mut plans = self.deploy_plans(&records)?;
+        let mut changes = Vec::new();
+        for record in &records {
+            if only.is_some_and(|only| !only.contains(&record.id)) {
                 continue;
-            };
+            }
+            let planned = plans.get(&record.id).cloned().unwrap_or_default();
+            let recorded = self.store.deployed_files_for(record.id)?;
+            if let Some(kind) =
+                change_kind(record.enabled, !recorded.is_empty(), &planned, &recorded)
+            {
+                changes.push((record, kind));
+            }
+        }
 
-            let outcome = match kind {
-                ChangeKind::Disable => self.undeploy_mod(record.id).map(|_| Outcome::Removed),
-                ChangeKind::Enable => self
-                    .deploy_mod(&ctx, record.id, &planned)
-                    .map(|_| Outcome::Deployed),
-                ChangeKind::Reorder => self
-                    .undeploy_mod(record.id)
-                    .and_then(|_| self.deploy_mod(&ctx, record.id, &planned))
-                    .map(|_| Outcome::Deployed),
-            };
-
-            match outcome {
-                Ok(Outcome::Deployed) => report.deployed.push(record.name.clone()),
-                Ok(Outcome::Removed) => report.removed.push(record.name.clone()),
+        let mut failed = HashSet::new();
+        for (record, kind) in &changes {
+            if !matches!(kind, ChangeKind::Disable | ChangeKind::Reorder) {
+                continue;
+            }
+            match self.undeploy_mod(record.id) {
+                Ok(()) if *kind == ChangeKind::Disable => report.removed.push(record.name.clone()),
+                Ok(()) => {}
+                Err(err) => {
+                    failed.insert(record.id);
+                    report.failed.push(ApplyFailure {
+                        name: record.name.clone(),
+                        reason: err.to_string(),
+                    });
+                }
+            }
+        }
+        for (record, kind) in &changes {
+            if !matches!(kind, ChangeKind::Enable | ChangeKind::Reorder)
+                || failed.contains(&record.id)
+            {
+                continue;
+            }
+            let plan = plans.remove(&record.id).unwrap_or_default();
+            match self.deploy_mod(&ctx, record.id, &plan) {
+                Ok(()) => report.deployed.push(record.name.clone()),
                 Err(err) => report.failed.push(ApplyFailure {
                     name: record.name.clone(),
                     reason: err.to_string(),
                 }),
             }
+        }
+
+        if only.is_some() {
+            // Only the mods asked for: the user's other staged changes, and
+            // the settings tweaks among them, stay staged.
+            if self.deployment_mode()? == DeploymentMode::Hardlink {
+                self.sync_ue4ss_registrations(&ctx)?;
+            }
+            return Ok(report);
         }
 
         // Under the virtual file system `mods.txt` is generated into the
@@ -1705,17 +1748,97 @@ impl App {
     /// the Windows loader reaches before the hook exists: proxy DLLs and the
     /// rest of the binaries folder, UE4SS itself, and the DLL swaps the
     /// manager makes — the same files Mod Organizer 2 needs Root Builder for.
-    fn deploy_plan_for(
+    fn physical_plan_for(
         &self,
         record: &ModRecord,
         components: &[DetectedComponent],
-    ) -> Result<DeployPlan> {
+        virtual_mode: bool,
+    ) -> DeployPlan {
         let mut plan = self.plan_for(record, components);
-        if self.deployment_mode()? == DeploymentMode::Virtual {
+        if virtual_mode {
             plan.files
                 .retain(|file| must_be_physical(&record.source, &file.target));
         }
-        Ok(plan)
+        plan
+    }
+
+    /// Every mod's plan as it reaches the game folder. Where enabled mods
+    /// provide the same path, only the one furthest down the load order
+    /// deploys it — the same winner the conflict flags and the virtual file
+    /// system pick — whatever order the mods happen to be deployed in.
+    fn deploy_plans(&self, records: &[ModRecord]) -> Result<HashMap<i64, DeployPlan>> {
+        let virtual_mode = self.deployment_mode()? == DeploymentMode::Virtual;
+        let mut ordered: Vec<&ModRecord> = records.iter().collect();
+        ordered.sort_by_key(|m| (m.priority, m.id));
+
+        let mut plans = HashMap::new();
+        let mut winners: HashMap<String, i64> = HashMap::new();
+        for record in ordered {
+            let components = self.store.components_for(record.id)?;
+            let plan = self.physical_plan_for(record, &components, virtual_mode);
+            if record.enabled {
+                for file in &plan.files {
+                    winners.insert(comparable_path(&file.target.to_string_lossy()), record.id);
+                }
+            }
+            plans.insert(record.id, plan);
+        }
+        for (id, plan) in plans.iter_mut() {
+            plan.files.retain(|file| {
+                winners
+                    .get(&comparable_path(&file.target.to_string_lossy()))
+                    .is_none_or(|winner| winner == id)
+            });
+        }
+        Ok(plans)
+    }
+
+    /// One mod's plan as it reaches the game folder; see [`Self::deploy_plans`].
+    fn deploy_plan(&self, mod_id: i64) -> Result<DeployPlan> {
+        let records = self.store.list_mods()?;
+        Ok(self
+            .deploy_plans(&records)?
+            .remove(&mod_id)
+            .unwrap_or_default())
+    }
+
+    /// Put one newly enabled mod into the game now, leaving the user's other
+    /// staged changes staged — except the mods whose files it takes over or
+    /// gives back, which have to move with it.
+    fn deploy_now(&mut self, mod_id: i64) -> Result<ApplyReport> {
+        let records = self.store.list_mods()?;
+        let plans = self.deploy_plans(&records)?;
+        let record = self.record(mod_id)?;
+        let components = self.store.components_for(mod_id)?;
+        let virtual_mode = self.deployment_mode()? == DeploymentMode::Virtual;
+        let claimed: HashSet<String> = self
+            .physical_plan_for(&record, &components, virtual_mode)
+            .files
+            .iter()
+            .map(|f| comparable_path(&f.target.to_string_lossy()))
+            .collect();
+
+        let mut only = HashSet::from([mod_id]);
+        for other in &records {
+            let recorded = self.store.deployed_files_for(other.id)?;
+            let planned = plans
+                .get(&other.id)
+                .map(|p| &p.files[..])
+                .unwrap_or_default();
+            let touches = recorded
+                .iter()
+                .map(|(target, _, _)| comparable_path(target))
+                .chain(
+                    planned
+                        .iter()
+                        .map(|f| comparable_path(&f.target.to_string_lossy())),
+                )
+                .any(|target| claimed.contains(&target));
+            if touches {
+                only.insert(other.id);
+            }
+        }
+        self.reconcile_only(Some(&only))
     }
 
     fn plan_for(&self, record: &ModRecord, components: &[DetectedComponent]) -> DeployPlan {
@@ -2387,11 +2510,6 @@ impl App {
             .find(|m| m.id == mod_id)
             .ok_or(AppError::Store(sbmm_store::StoreError::UnknownMod(mod_id)))
     }
-}
-
-enum Outcome {
-    Deployed,
-    Removed,
 }
 
 /// An installed mod that can be looked up on Nexus.
