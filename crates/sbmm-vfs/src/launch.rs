@@ -156,9 +156,10 @@ mod windows {
         VirtualAllocEx, VirtualFreeEx, MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READWRITE,
     };
     use windows_sys::Win32::System::Threading::{
-        CreateProcessW, CreateRemoteThread, GetExitCodeThread, ResumeThread, TerminateProcess,
-        WaitForSingleObject, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, LPTHREAD_START_ROUTINE,
-        PROCESS_INFORMATION, STARTUPINFOW,
+        CreateProcessW, CreateRemoteThread, GetExitCodeProcess, GetExitCodeThread, OpenProcess,
+        ResumeThread, TerminateProcess, WaitForSingleObject, CREATE_SUSPENDED,
+        CREATE_UNICODE_ENVIRONMENT, LPTHREAD_START_ROUTINE, PROCESS_INFORMATION,
+        PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, STARTUPINFOW,
     };
 
     use super::*;
@@ -240,6 +241,7 @@ mod windows {
         match launch_inner(options, &mut diag) {
             Ok(pid) => {
                 diag.log(format!("started, process {pid}"));
+                watch_exit(pid, options.diagnostics.clone());
                 Ok(pid)
             }
             Err(error) => {
@@ -247,6 +249,42 @@ mod windows {
                 Err(error)
             }
         }
+    }
+
+    /// How long after the start an exit is worth writing down.
+    const EARLY_EXIT_MS: u32 = 120_000;
+
+    /// Note in the launch log when the game ends soon after starting. A game
+    /// that quits within seconds has usually handed itself to a launcher —
+    /// Steam, say — that starts a fresh copy without the hook, which looks
+    /// from the outside like mods that do not load.
+    fn watch_exit(pid: u32, diagnostics: Option<std::path::PathBuf>) {
+        let _ = std::thread::Builder::new()
+            .name("sbmm-game-watch".into())
+            .spawn(move || {
+                // SAFETY: a handle to wait on, closed by `Owned`.
+                let process = Owned(unsafe {
+                    OpenProcess(
+                        PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
+                        0,
+                        pid,
+                    )
+                });
+                if process.0.is_null() {
+                    return;
+                }
+                let started = std::time::Instant::now();
+                if unsafe { WaitForSingleObject(process.0, EARLY_EXIT_MS) } != WAIT_OBJECT_0 {
+                    return;
+                }
+                let mut code = 0u32;
+                unsafe { GetExitCodeProcess(process.0, &mut code) };
+                Diag::open(&diagnostics).log(format!(
+                    "the game exited {:.1} s after starting (exit code {code}); if it came back on \
+                     its own, a launcher restarted it without the virtual file system",
+                    started.elapsed().as_secs_f32()
+                ));
+            });
     }
 
     fn launch_inner(options: &LaunchOptions, diag: &mut Diag) -> Result<u32, LaunchError> {

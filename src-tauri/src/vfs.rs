@@ -7,7 +7,6 @@
 use std::path::{Path, PathBuf};
 
 use sbmm_app::dto::{ApplyReport, DeploymentMode, VfsEntry, VfsListing};
-use sbmm_game::InstallSource;
 use tauri::Manager;
 use tauri_plugin_opener::OpenerExt;
 
@@ -93,7 +92,7 @@ pub async fn launch(app_handle: &tauri::AppHandle) -> Result<String, String> {
 
     if mode == DeploymentMode::Hardlink {
         // Steam's own launch keeps the overlay, cloud saves and playtime.
-        if game.source == InstallSource::Steam {
+        if game.is_steam() {
             let url = format!("steam://rungameid/{}", sbmm_game::STEAM_APP_ID);
             app_handle
                 .opener()
