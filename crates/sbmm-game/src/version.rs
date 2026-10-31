@@ -59,6 +59,11 @@ fn app_manifest(root: &Path) -> Option<PathBuf> {
     Some(steamapps.join(format!("appmanifest_{STEAM_APP_ID}.acf")))
 }
 
+/// Whether Steam keeps a manifest for this install.
+pub(crate) fn steam_manifest_exists(root: &Path) -> bool {
+    app_manifest(root).is_some_and(|manifest| manifest.is_file())
+}
+
 fn steam_build_id(root: &Path) -> Option<String> {
     let text = std::fs::read_to_string(app_manifest(root)?).ok()?;
     vdf::parse(&text)
@@ -81,6 +86,21 @@ mod tests {
             source: InstallSource::Steam,
             executable: Some("SB-Win64-Shipping.exe".into()),
         }
+    }
+
+    #[test]
+    fn a_steam_copy_chosen_by_hand_is_still_steams() {
+        let dir = tempfile::tempdir().unwrap();
+        let steamapps = dir.path().join("steamapps");
+        let mut game = install(&steamapps.join("common/StellarBlade"));
+        game.source = InstallSource::Manual;
+        assert!(!game.is_steam());
+        fs::write(
+            steamapps.join(format!("appmanifest_{STEAM_APP_ID}.acf")),
+            "\"AppState\"\n{\n}\n",
+        )
+        .unwrap();
+        assert!(game.is_steam());
     }
 
     #[test]

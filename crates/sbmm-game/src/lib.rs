@@ -60,6 +60,13 @@ impl GameInstall {
             .as_ref()
             .map(|exe| self.binaries_dir().join(exe))
     }
+
+    /// Whether Steam installed this copy, however the folder was found. A
+    /// Steam copy chosen by hand is still one: started outside Steam it
+    /// restarts itself through Steam, so it has to be treated as one.
+    pub fn is_steam(&self) -> bool {
+        self.source == InstallSource::Steam || version::steam_manifest_exists(&self.root)
+    }
 }
 
 /// Paths mirrored from `sbmm-core` so this crate stays dependency-light.

@@ -3269,3 +3269,40 @@ fn detecting_again_repairs_a_mod_installed_the_old_way() {
     assert!(again.changed.is_empty());
     assert_eq!(again.unchanged, 1);
 }
+
+/// A Steam copy picked by hand is still a Steam copy: started outside Steam
+/// it would hand itself to Steam and lose the virtual file system, so the
+/// view carries `steam_appid.txt` and the launch the app id — while the
+/// real folder gets neither.
+#[test]
+fn a_steam_copy_chosen_by_hand_gets_its_app_id_under_the_virtual_file_system() {
+    let dir = tempfile::tempdir().unwrap();
+    let steamapps = dir.path().join("steamapps");
+    let game = steamapps.join("common/StellarBlade");
+    fs::create_dir_all(game.join("SB/Content/Paks")).unwrap();
+    fs::create_dir_all(game.join("SB/Binaries/Win64")).unwrap();
+    fs::write(game.join("SB/Binaries/Win64/SB-Win64-Shipping.exe"), "").unwrap();
+    fs::write(
+        steamapps.join("appmanifest_3489700.acf"),
+        "\"AppState\"\n{\n}\n",
+    )
+    .unwrap();
+
+    let mut app = App::new(dir.path().join("data")).unwrap();
+    let install = app.set_game_root(&game).unwrap();
+    assert!(install.is_steam());
+
+    let view = virtual_view(&game, app.vfs_mapping().unwrap());
+    assert_eq!(
+        view.get("SB/Binaries/Win64/steam_appid.txt")
+            .map(Vec::as_slice),
+        Some(&b"3489700"[..])
+    );
+    assert!(!game.join("SB/Binaries/Win64/steam_appid.txt").exists());
+
+    let options = app.launch_options(dir.path().join("hook.dll")).unwrap();
+    assert!(options
+        .environment
+        .iter()
+        .any(|(name, value)| name == "SteamAppId" && value == "3489700"));
+}
