@@ -3584,3 +3584,108 @@ fn cns_addons_are_their_own_type_and_need_cns() {
     let view = snapshot.mods.iter().find(|m| m.id == outfit).unwrap();
     assert!(view.missing_requirements.is_empty());
 }
+
+#[test]
+fn explorer_copies_deletes_with_undo_brings_files_in_and_previews() {
+    let mut fx = Fixture::new();
+    let id = fx.install_folder(
+        "Looks",
+        &[
+            ("SB/Content/a.txt", "alpha"),
+            ("SB/Content/pic.png", "\u{89}PNG"),
+        ],
+    );
+    let a = find_in_library(&fx.app, "", "a.txt").unwrap();
+    let content = a.rsplit_once('/').unwrap().0.to_string();
+    let top = content.split('/').next().unwrap().to_string();
+    let file = |rel: &str| fx.app.mods_dir().join(rel);
+
+    // Copying into the same folder duplicates, under a new name each time.
+    let change = fx
+        .app
+        .library_copy(std::slice::from_ref(&a), &content)
+        .unwrap();
+    assert_eq!((change.moved, change.mod_ids.clone()), (1, vec![id]));
+    fx.app
+        .library_copy(std::slice::from_ref(&a), &content)
+        .unwrap();
+    assert_eq!(
+        fs::read_to_string(file(&format!("{content}/a - copy.txt"))).unwrap(),
+        "alpha"
+    );
+    assert!(file(&format!("{content}/a - copy 2.txt")).is_file());
+    // A folder copies whole; a mod's own folder does not copy.
+    fx.app.library_mkdir(&content, "Sub").unwrap();
+    fx.app
+        .library_copy(std::slice::from_ref(&a), &format!("{content}/Sub"))
+        .unwrap();
+    fx.app
+        .library_copy(&[format!("{content}/Sub")], &content)
+        .unwrap();
+    assert!(file(&format!("{content}/Sub - copy/a.txt")).is_file());
+    assert_eq!(
+        fx.app
+            .library_copy(std::slice::from_ref(&top), &content)
+            .unwrap()
+            .moved,
+        0
+    );
+
+    // Deleting goes to the trash, and comes back with undo.
+    let gone = fx
+        .app
+        .library_delete(&[a.clone(), format!("{content}/Sub")])
+        .unwrap();
+    assert_eq!((gone.moved, gone.mod_ids.clone()), (2, vec![id]));
+    assert!(!file(&a).exists() && !file(&format!("{content}/Sub")).exists());
+    assert_eq!(
+        fx.app
+            .library_delete(std::slice::from_ref(&top))
+            .unwrap()
+            .moved,
+        0
+    );
+    let back = fx
+        .app
+        .library_restore(gone.undo.as_deref().unwrap())
+        .unwrap();
+    assert_eq!(back.moved, 2);
+    assert_eq!(fs::read_to_string(file(&a)).unwrap(), "alpha");
+    assert!(file(&format!("{content}/Sub/a.txt")).is_file());
+    assert!(fx.app.library_restore("../x").is_err());
+
+    // Files from elsewhere on the computer are copied in, the originals kept.
+    let outside = fx.source.join("loose");
+    fs::create_dir_all(outside.join("Folder")).unwrap();
+    fs::write(outside.join("extra.ini"), "[A]\nB=1\n").unwrap();
+    fs::write(outside.join("Folder/inner.txt"), "in").unwrap();
+    let sources = [
+        outside.join("extra.ini").to_string_lossy().into_owned(),
+        outside.join("Folder").to_string_lossy().into_owned(),
+    ];
+    let change = fx.app.library_import(&sources, &content).unwrap();
+    assert_eq!((change.moved, change.mod_ids.clone()), (2, vec![id]));
+    assert!(file(&format!("{content}/Folder/inner.txt")).is_file());
+    assert!(outside.join("extra.ini").is_file());
+    assert!(
+        fx.app.library_import(&sources, "").is_err(),
+        "not at the top level"
+    );
+
+    // The preview shows text and pictures, and nothing for the rest.
+    let text = fx
+        .app
+        .library_preview(&format!("{content}/extra.ini"))
+        .unwrap();
+    assert_eq!(
+        (text.kind.as_str(), text.text.as_deref()),
+        ("text", Some("[A]\nB=1\n"))
+    );
+    let picture = fx
+        .app
+        .library_preview(&format!("{content}/pic.png"))
+        .unwrap();
+    assert_eq!(picture.kind, "image");
+    assert!(picture.image.unwrap().starts_with("data:image/png;base64,"));
+    assert_eq!(fx.app.library_preview(&content).unwrap().kind, "none");
+}

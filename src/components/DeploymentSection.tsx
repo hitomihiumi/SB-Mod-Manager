@@ -1,11 +1,10 @@
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import clsx from "clsx";
 import { FolderOpen, HardDrive, Layers } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { ipc, type DeploymentMode, type Folders } from "../lib/ipc";
 import { useApp } from "../store/useApp";
-import { Badge, Button, Section } from "./ui";
+import { Badge, Button, ChoiceCard, Section } from "./ui";
 
 const MODES: {
   id: DeploymentMode;
@@ -80,33 +79,21 @@ export function DeploymentSection() {
       title="Deployment"
       hint="How enabled mods reach the game. Switching moves every enabled mod across; nothing is lost."
     >
-      <div className="space-y-2">
+      <div role="radiogroup" aria-label="Deployment" className="space-y-2">
         {MODES.map((option) => {
           const Icon = option.icon;
           const selected = option.id === mode;
           return (
-            <button
+            <ChoiceCard
               key={option.id}
-              type="button"
               disabled={switching}
-              onClick={() => void choose(option.id)}
-              aria-pressed={selected}
-              className={clsx(
-                "no-drag flex w-full gap-2.5 rounded-md border px-3 py-2.5 text-left transition-colors disabled:opacity-60",
-                selected ? "border-ink-muted bg-hover" : "border-transparent bg-base hover:bg-raised",
-              )}
-            >
-              <Icon size={16} className={clsx("mt-0.5 shrink-0", selected ? "text-ink-soft" : "text-ink-muted")} />
-              <span className="min-w-0">
-                <span className="flex items-center gap-2 text-[13px] font-medium">
-                  {option.title}
-                  {option.id === "virtual" && <Badge tone="warn">Experimental</Badge>}
-                </span>
-                <span className="mt-0.5 block text-[11px] leading-relaxed text-ink-muted">
-                  {option.detail}
-                </span>
-              </span>
-            </button>
+              selected={selected}
+              onSelect={() => void choose(option.id)}
+              icon={<Icon size={16} />}
+              title={option.title}
+              badge={option.id === "virtual" ? <Badge tone="warn">Experimental</Badge> : undefined}
+              detail={option.detail}
+            />
           );
         })}
       </div>

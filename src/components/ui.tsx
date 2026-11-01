@@ -9,7 +9,7 @@
  * Everything that moves does so on the same curve (`ease-quiet`).
  */
 import clsx from "clsx";
-import { X } from "lucide-react";
+import { Check, X } from "lucide-react";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { useEffect } from "react";
 
@@ -165,6 +165,132 @@ export function Dialog({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * An on/off setting. A switch rather than a dot, so a setting never reads as
+ * one of a group of choices: the knob sits right and the track brightens
+ * when it is on.
+ */
+export function Switch({
+  checked,
+  onChange,
+  label,
+  disabled = false,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  label: string;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={(event) => {
+        event.stopPropagation();
+        onChange(!checked);
+      }}
+      className={clsx(
+        "relative h-[18px] w-8 shrink-0 rounded-full transition-colors duration-200 ease-quiet disabled:opacity-40",
+        checked ? "bg-ink-soft" : "bg-hover hover:bg-line-strong",
+      )}
+    >
+      <span
+        className={clsx(
+          "absolute top-[3px] size-3 rounded-full transition-[left,background-color] duration-200 ease-quiet",
+          checked ? "left-[17px] bg-base" : "left-[3px] bg-ink-muted",
+        )}
+      />
+    </button>
+  );
+}
+
+/** A setting on a line of its own: what it is on the left, its switch on the right. */
+export function SwitchRow({
+  label,
+  detail,
+  checked,
+  onChange,
+  disabled,
+}: {
+  label: string;
+  detail?: ReactNode;
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <label className="flex cursor-pointer items-center gap-4">
+      <span className="min-w-0 flex-1">
+        <span className="block text-[13px]">{label}</span>
+        {detail && (
+          <span className="mt-0.5 block text-[11px] leading-relaxed text-ink-muted">{detail}</span>
+        )}
+      </span>
+      <Switch checked={checked} onChange={onChange} label={label} disabled={disabled} />
+    </label>
+  );
+}
+
+/**
+ * One of a few exclusive choices, as a card: every card has the same frame,
+ * and the chosen one is brighter and ticked.
+ */
+export function ChoiceCard({
+  selected,
+  onSelect,
+  title,
+  detail,
+  icon,
+  badge,
+  disabled,
+}: {
+  selected: boolean;
+  onSelect: () => void;
+  title: ReactNode;
+  detail?: ReactNode;
+  icon?: ReactNode;
+  badge?: ReactNode;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={selected}
+      disabled={disabled}
+      onClick={onSelect}
+      className={clsx(
+        "no-drag flex w-full items-start gap-2.5 rounded-sm border px-3 py-2.5 text-left transition-colors duration-150 ease-quiet disabled:opacity-60",
+        selected
+          ? "border-ink-muted bg-raised"
+          : "border-line bg-transparent hover:border-line-strong hover:bg-raised/50",
+      )}
+    >
+      {icon && (
+        <span className={clsx("mt-0.5 shrink-0", selected ? "text-ink-soft" : "text-ink-muted")}>{icon}</span>
+      )}
+      <span className="min-w-0 flex-1">
+        <span className={clsx("flex items-center gap-2 text-[13px]", selected ? "text-ink" : "text-ink-soft")}>
+          {title}
+          {badge}
+        </span>
+        {detail && <span className="mt-0.5 block text-[11px] leading-relaxed text-ink-muted">{detail}</span>}
+      </span>
+      <span
+        className={clsx(
+          "mt-0.5 grid size-4 shrink-0 place-items-center rounded-full border transition-colors duration-150 ease-quiet",
+          selected ? "border-ink bg-ink text-base" : "border-line-strong",
+        )}
+      >
+        {selected && <Check size={10} strokeWidth={3} />}
+      </span>
+    </button>
   );
 }
 

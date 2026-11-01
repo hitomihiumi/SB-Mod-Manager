@@ -7,7 +7,7 @@ import { formatBytes } from "../lib/format";
 import { ipc, type ConfigFile, type ConfigScope } from "../lib/ipc";
 import { useApp } from "../store/useApp";
 import { askConfirm, isAsking } from "./Ask";
-import { Badge, Button, Dialog, Section } from "./ui";
+import { Badge, Button, Dialog, Section, Switch } from "./ui";
 
 /**
  * Edit one settings file. INI files open as a form — a field per setting,
@@ -214,12 +214,7 @@ function SettingInput({ value, onChange }: { value: string; onChange: (value: st
     };
     return (
       <span className="flex h-8 items-center">
-        <input
-          type="checkbox"
-          checked={on}
-          onChange={(event) => onChange(word(event.target.checked))}
-          className="size-4 accent-[var(--color-accent)]"
-        />
+        <Switch checked={on} onChange={(next) => onChange(word(next))} label={value} />
       </span>
     );
   }

@@ -8,7 +8,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { formatBytes } from "../lib/format";
 import { ipc, type Folders, type UpdateChannel, type UpdateInfo } from "../lib/ipc";
 import { useApp, type SettingsTab } from "../store/useApp";
-import { Button, Checkbox, Section } from "./ui";
+import { Button, ChoiceCard, Section, SwitchRow } from "./ui";
 import { DeploymentSection } from "./DeploymentSection";
 import { DiagnosticsSection } from "./DiagnosticsSection";
 import { GameConfigSection } from "./ConfigEditor";
@@ -109,18 +109,14 @@ export function SettingsView() {
             title="Applying changes"
             hint="With this off, toggles are staged and only touch the game folder when you press Apply."
           >
-            <label className="flex cursor-pointer items-center gap-2.5">
-              <input
-                type="checkbox"
-                checked={snapshot?.autoApply ?? true}
-                onChange={async (event) => {
-                  await ipc.setAutoApply(event.target.checked);
-                  await refresh();
-                }}
-                className="size-4 accent-[var(--color-accent)]"
-              />
-              <span className="text-[13px]">Apply automatically after every change</span>
-            </label>
+            <SwitchRow
+              label="Apply automatically after every change"
+              checked={snapshot?.autoApply ?? true}
+              onChange={async (next) => {
+                await ipc.setAutoApply(next);
+                await refresh();
+              }}
+            />
           </Section>
           <DeploymentSection />
           <Ue4ssSection />
@@ -257,7 +253,7 @@ export function SettingsView() {
         aria-label="Settings"
         aria-orientation="vertical"
         onKeyDown={onKeyDown}
-        className="flex w-56 shrink-0 flex-col gap-1 px-5 pt-6"
+        className="flex w-60 shrink-0 flex-col gap-1 border-r border-line px-5 pt-6"
       >
         {groups.map((group) => {
           const selected = group.id === current.id;
@@ -270,7 +266,11 @@ export function SettingsView() {
               aria-controls="settings-panel"
               tabIndex={selected ? 0 : -1}
               onClick={() => setTab(group.id)}
-              className="group/tab flex flex-col py-1.5 text-left"
+              className={clsx(
+                "group/tab relative flex flex-col py-1.5 pl-3 text-left",
+                "before:absolute before:top-2 before:bottom-2 before:left-0 before:w-px before:transition-colors before:duration-150",
+                selected ? "before:bg-ink" : "before:bg-transparent group-hover/tab:before:bg-line-strong",
+              )}
             >
               <span
                 className={clsx(
@@ -300,8 +300,12 @@ export function SettingsView() {
         className="min-h-0 flex-1 overflow-y-auto"
       >
         {/* Keyed by group, so each one eases in rather than swapping abruptly. */}
-        <div key={current.id} className="max-w-2xl animate-rise space-y-6 px-6 py-6">
-          {current.content}
+        <div key={current.id} className="w-full max-w-4xl animate-rise px-10 pt-6 pb-10">
+          <header className="mb-5">
+            <h2 className="text-[20px] font-light">{current.label}</h2>
+            <p className="mt-1 text-[12px] text-ink-muted">{current.hint}</p>
+          </header>
+          <div className="space-y-4">{current.content}</div>
         </div>
       </div>
     </div>
@@ -415,19 +419,16 @@ function DiscordSection() {
       title="Discord"
       hint="Shows on your Discord profile that the manager is open. Only counts are sent — never the name of a mod, a collection or a folder."
     >
-      <label className="flex cursor-pointer items-center gap-2.5">
-        <Checkbox
-          checked={enabled}
-          onChange={(next) => void toggle(next)}
-          label="Show activity on Discord"
-        />
-        <span className="text-[13px]">Show activity on Discord</span>
-      </label>
-      <p className="mt-2 text-[11px] leading-relaxed text-ink-muted">
-        {enabled
-          ? "Your profile shows \u201CManaging mods\u201D and how many of your installed mods are switched on."
-          : "Nothing is sent to Discord."}
-      </p>
+      <SwitchRow
+        label="Show activity on Discord"
+        detail={
+          enabled
+            ? "Your profile shows \u201CManaging mods\u201D and how many of your installed mods are switched on."
+            : "Nothing is sent to Discord."
+        }
+        checked={enabled}
+        onChange={(next) => void toggle(next)}
+      />
     </Section>
   );
 }
@@ -495,26 +496,20 @@ function UpdateSection() {
         </Button>
       </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-1.5">
+      <div role="radiogroup" aria-label="Update channel" className="mt-3 grid grid-cols-2 gap-2">
         {(
           [
             ["stable", "Stable", "Tagged releases only"],
             ["nightly", "Nightly", "Latest commit, rough edges"],
           ] as const
         ).map(([id, label, detail]) => (
-          <button
+          <ChoiceCard
             key={id}
-            onClick={() => void switchChannel(id)}
-            className={
-              "rounded-md border px-2.5 py-2 text-left transition-colors " +
-              (channel === id
-                ? "border-ink-muted bg-hover"
-                : "border-transparent bg-surface hover:bg-raised")
-            }
-          >
-            <div className="text-[12px] font-medium">{label}</div>
-            <div className="text-[10px] text-ink-muted">{detail}</div>
-          </button>
+            selected={channel === id}
+            onSelect={() => void switchChannel(id)}
+            title={label}
+            detail={detail}
+          />
         ))}
       </div>
 

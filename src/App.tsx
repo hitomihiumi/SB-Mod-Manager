@@ -21,6 +21,7 @@ import { TitleBar } from "./components/TitleBar";
 import { Button, Dialog } from "./components/ui";
 import { ipc, type FoundArchive, type QueueItem, type StagedInstall } from "./lib/ipc";
 import { useApp, type View } from "./store/useApp";
+import { useExplorer } from "./store/useExplorer";
 
 // Words only: the screens are named plainly, and Ctrl+1…8 reach them in this order.
 const NAV: { id: View; label: string }[] = [
@@ -44,7 +45,7 @@ export default function App() {
   const busy = useApp((s) => s.busy);
   const downloads = useApp((s) => s.downloads);
 
-  const [dropping, setDropping] = useState(false);
+  const [dropping, setDropping] = useState<false | "install" | "library">(false);
   const [shortcuts, setShortcuts] = useState(false);
 
   // Anything still in flight, so the rail can say how many.
@@ -62,11 +63,20 @@ export default function App() {
       // The window reports every drag, including a row being dragged inside it.
       // Only a drag that carries files is an install, so only that shows the
       // overlay; "over" fires continuously and says nothing about the content.
-      if (event.payload.type === "enter") setDropping(event.payload.paths.length > 0);
-      else if (event.payload.type === "leave") setDropping(false);
+      if (event.payload.type === "enter") {
+        setDropping(event.payload.paths.length > 0 ? (libraryDropTarget() ? "library" : "install") : false);
+      } else if (event.payload.type === "leave") setDropping(false);
       else if (event.payload.type === "drop") {
         setDropping(false);
-        void stagePaths(event.payload.paths);
+        // Over a mod's folder in the explorer, files are copied in there;
+        // anywhere else, dropped archives install.
+        const position = event.payload.position;
+        const target = libraryDropTarget(
+          position.x / window.devicePixelRatio,
+          position.y / window.devicePixelRatio,
+        );
+        if (target !== null) void importIntoLibrary(event.payload.paths, target);
+        else void stagePaths(event.payload.paths);
       }
     });
     return () => {
@@ -231,8 +241,19 @@ export default function App() {
       {dropping && (
         <div className="pointer-events-none fixed inset-0 z-40 grid animate-fade place-items-center bg-base/85">
           <div className="border border-dashed border-ink-muted px-8 py-6 text-center">
-            <p className="text-[15px] font-light">Drop to install</p>
-            <p className="mt-1 text-[12px] text-ink-muted">.zip, .7z, .rar or a mod folder</p>
+            {dropping === "library" ? (
+              <>
+                <p className="text-[15px] font-light">Drop to copy into the mod</p>
+                <p className="mt-1 text-[12px] text-ink-muted">
+                  Into the folder under the pointer, or the one open. The originals stay where they are.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-[15px] font-light">Drop to install</p>
+                <p className="mt-1 text-[12px] text-ink-muted">.zip, .7z, .rar or a mod folder</p>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -260,6 +281,39 @@ export default function App() {
 }
 
 /** The staged-changes bar. Hidden entirely when auto-apply is on and nothing is queued. */
+/**
+ * The library folder files dropped from outside the window go into: the
+ * folder under the pointer in the explorer's library view, or the one it
+ * shows. `null` anywhere else, where dropped files install as mods.
+ */
+function libraryDropTarget(x?: number, y?: number): string | null {
+  if (useApp.getState().view !== "files") return null;
+  const explorer = useExplorer.getState();
+  const tab = explorer.tabs.find((t) => t.id === explorer.activeId);
+  if (!tab || tab.kind !== "library" || tab.dir === "") return null;
+  if (x !== undefined && y !== undefined) {
+    const under = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-drop-dir]")?.dataset.dropDir;
+    if (under) return under;
+  }
+  return tab.dir;
+}
+
+/** Copy files from the system's file manager into a library folder. */
+async function importIntoLibrary(paths: string[], dir: string) {
+  const { toast, redetect } = useApp.getState();
+  try {
+    const change = await ipc.libraryImport(paths, dir);
+    if (change.skipped.length > 0) toast("error", `${change.skipped.slice(0, 3).join("; ")}.`);
+    if (change.moved > 0) {
+      toast("success", `Copied ${change.moved === 1 ? "1 item" : `${change.moved} items`} into ${dir.split("/").pop()}.`);
+    }
+    useExplorer.getState().bump();
+    if (change.moved > 0 && change.modIds.length > 0) await redetect(change.modIds);
+  } catch (error) {
+    toast("error", String(error));
+  }
+}
+
 function ApplyBar() {
   const snapshot = useApp((s) => s.snapshot);
   const applyChanges = useApp((s) => s.applyChanges);
@@ -408,6 +462,20 @@ const SHORTCUTS: { group: string; keys: [string, string][] }[] = [
       ["Delete", "Uninstall the selection"],
       ["Esc", "Clear the selection (or the search)"],
       ["Right click", "Everything else for a mod"],
+    ],
+  },
+  {
+    group: "Files (library)",
+    keys: [
+      ["Ctrl+T, Ctrl+W", "Open a tab, close a tab"],
+      ["Alt+← / Alt+→, Backspace", "Back, forward, up one folder"],
+      ["↑ ↓, Home, End", "Move the selection (Shift extends it)"],
+      ["Ctrl+X, Ctrl+C, Ctrl+V", "Cut, copy, paste"],
+      ["Ctrl+D", "Duplicate"],
+      ["F2", "Rename in place"],
+      ["Delete, Ctrl+Z", "Delete to the trash, undo the last delete"],
+      ["Ctrl+F", "Filter the folder"],
+      ["Ctrl+drag", "Copy instead of moving"],
     ],
   },
   {
