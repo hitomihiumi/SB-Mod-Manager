@@ -160,6 +160,38 @@ export interface VfsEntry {
   source: string | null;
 }
 
+/** One entry of the mod library on disk. Mirrors `LibraryEntry` in `dto.rs`. */
+export interface LibraryEntry {
+  name: string;
+  /** A mod's name, where this is that mod's own folder. */
+  label: string | null;
+  isDir: boolean;
+  /** Relative to the mods folder, `/`-separated; what the other calls take. */
+  path: string;
+  /** Where it really is, for opening it in another program. */
+  absolute: string;
+  size: number;
+  /** Seconds since the Unix epoch. */
+  modified: number | null;
+  modId: number | null;
+}
+
+export interface LibraryListing {
+  dir: string;
+  modId: number | null;
+  modName: string | null;
+  entries: LibraryEntry[];
+}
+
+/** What a move, rename or new folder did. */
+export interface LibraryChange {
+  moved: number;
+  /** One line per thing left alone, and why. */
+  skipped: string[];
+  /** The mods whose files changed place, which need detecting again. */
+  modIds: number[];
+}
+
 export interface VfsListing {
   dir: string;
   entries: VfsEntry[];
@@ -576,6 +608,16 @@ export const ipc = {
   launchGame: () => invoke<string>("launch_game"),
   vfsTree: (dir: string) => invoke<VfsListing>("vfs_tree", { dir }),
   vfsConflicts: (modId: number | null) => invoke<VfsEntry[]>("vfs_conflicts", { modId }),
+  /** One folder of the mod library as it is on disk; empty is the top, which lists the mods. */
+  libraryList: (dir: string) => invoke<LibraryListing>("library_list", { dir }),
+  libraryMove: (paths: string[], toDir: string) =>
+    invoke<LibraryChange>("library_move", { paths, toDir }),
+  libraryRename: (path: string, newName: string) =>
+    invoke<LibraryChange>("library_rename", { path, newName }),
+  libraryMkdir: (dir: string, name: string) => invoke<void>("library_mkdir", { dir, name }),
+  /** Open with the program the system has for it, or with the program at `program`. */
+  openPath: (path: string, program?: string) =>
+    invoke<void>("open_path", { path, with: program ?? null }),
   createModFromOverwrite: (name: string) => invoke<number>("create_mod_from_overwrite", { name }),
   clearOverwrite: () => invoke<number>("clear_overwrite"),
   /** Null when GitHub could not be asked. */

@@ -8,6 +8,7 @@ pub mod config;
 pub mod credentials;
 pub mod diagnostics;
 pub mod dto;
+pub mod explorer;
 pub mod insight;
 pub mod installer;
 pub mod library;

@@ -8,6 +8,7 @@ mod collections;
 mod config;
 mod discord;
 mod downloads;
+mod explorer;
 mod framegen;
 mod insight;
 mod modlist;
@@ -864,6 +865,11 @@ pub fn run() {
             vfs::launch_game,
             vfs::vfs_tree,
             vfs::vfs_conflicts,
+            explorer::library_list,
+            explorer::library_move,
+            explorer::library_rename,
+            explorer::library_mkdir,
+            explorer::open_path,
             vfs::create_mod_from_overwrite,
             vfs::clear_overwrite,
             ue4ss::ue4ss_latest,

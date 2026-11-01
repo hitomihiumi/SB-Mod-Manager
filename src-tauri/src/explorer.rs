@@ -1,0 +1,63 @@
+//! Commands for the explorer: the mod library as real folders, and opening
+//! a file in another program.
+//!
+//! The work, and the checks that keep it inside the library, live in
+//! `sbmm-app`; this module only carries the calls across.
+
+use sbmm_app::dto::{LibraryChange, LibraryListing};
+use tauri_plugin_opener::OpenerExt;
+
+use crate::{fail, AppState};
+
+/// One folder of the mod library; empty is the top, which lists the mods.
+#[tauri::command(async)]
+pub fn library_list(
+    state: tauri::State<'_, AppState>,
+    dir: Option<String>,
+) -> Result<LibraryListing, String> {
+    crate::with_app!(state, |app| app.library_list(dir.as_deref().unwrap_or("")))
+}
+
+/// Move files and folders of the library into another folder of it.
+#[tauri::command(async)]
+pub fn library_move(
+    state: tauri::State<'_, AppState>,
+    paths: Vec<String>,
+    to_dir: String,
+) -> Result<LibraryChange, String> {
+    crate::with_app!(state, |app| app.library_move(&paths, &to_dir))
+}
+
+/// Give a file or folder of the library another name.
+#[tauri::command(async)]
+pub fn library_rename(
+    state: tauri::State<'_, AppState>,
+    path: String,
+    new_name: String,
+) -> Result<LibraryChange, String> {
+    crate::with_app!(state, |app| app.library_rename(&path, &new_name))
+}
+
+/// A new folder inside a mod's folder.
+#[tauri::command(async)]
+pub fn library_mkdir(
+    state: tauri::State<'_, AppState>,
+    dir: String,
+    name: String,
+) -> Result<(), String> {
+    crate::with_app!(state, |app| app.library_mkdir(&dir, &name))
+}
+
+/// Open a file or folder with the program Windows has for it, or with the
+/// program at `with`. Only things that exist are handed on.
+#[tauri::command(async)]
+pub fn open_path(
+    app_handle: tauri::AppHandle,
+    path: String,
+    with: Option<String>,
+) -> Result<(), String> {
+    if !std::path::Path::new(&path).exists() {
+        return Err(format!("{path} is not there any more"));
+    }
+    app_handle.opener().open_path(path, with).map_err(fail)
+}

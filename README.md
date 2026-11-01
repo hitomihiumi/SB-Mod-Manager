@@ -58,7 +58,13 @@ reason a mod "doesn't work". This manager gets it right for you.
 
 - **Conflicts.** Reads pak and utoc indexes to name the asset two mods both
   replace and which one wins. MO2-style `+N`/`−N`/*Redundant* flags cover
-  loose files, and the Files view shows the game folder as mods make it.
+  loose files.
+- **Explorer.** The Files screen has tabs, each showing the game folder as
+  mods make it, the mod library as it lies on disk, or the clashing paths.
+  In the library, files move between folders by dragging (also onto another
+  tab) or Cut and Paste, and can be renamed; the mods touched are detected
+  again so their files land where they should. Any file opens in the system's
+  program, or in one you pick.
 - **Mod details.** What a mod changes, its Nexus page info and requirements,
   notes, tags, a picture, and an editor for its INI/JSON/Lua settings.
   Your settings are kept across reinstalls and updates.
