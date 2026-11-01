@@ -1,0 +1,682 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body style="margin:0">
+<title>Минимальный SB Mod Manager</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400..700&family=JetBrains+Mono:wght@400;500;600&family=Onest:wght@300..600&display=swap">
+<style>
+/* Layout concept: a short brief for the chosen direction, then the real Mods
+   screen drawn in it as a working mock window. The page takes on the palette
+   of the open direction. Each direction is one committed look, so none has a
+   light/dark pair. Bare :root holds the first direction. */
+:root {
+  color-scheme: light;
+  --s-bg: #f2f3f4; --s-fg: #17181a; --s-mut: #6f7379; --s-acc: #17181a; --s-line: #cfd2d6;
+  --s-body: "JetBrains Mono", ui-monospace, Consolas, monospace;
+  --s-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+:root[data-v="quiet"] {
+  color-scheme: dark;
+  --s-bg: #0f1011; --s-fg: #d6d8da; --s-mut: #7b8085; --s-acc: #d6d8da; --s-line: #26282b;
+  --s-body: "Onest", "Segoe UI", system-ui, sans-serif;
+}
+:root[data-v="sheet"] {
+  color-scheme: light;
+  --s-bg: #ffffff; --s-fg: #0a0a0a; --s-mut: #767676; --s-acc: #2340ff; --s-line: #dedede;
+  --s-body: "Golos Text", "Segoe UI", system-ui, sans-serif;
+}
+html, body { background: var(--s-bg); color: var(--s-fg); }
+body { font-family: var(--s-body); font-size: 14px; line-height: 1.55; transition: background .25s ease; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+.shell {
+  max-width: 1220px; margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 28px 40px;
+  display: flex; flex-direction: column; gap: 22px;
+}
+.sh-top { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 14px 24px; border-bottom: 1px solid var(--s-line); padding-bottom: 14px; }
+.sh-name { margin: 0; font-family: var(--s-mono); font-size: 12px; color: var(--s-mut); }
+.sh-name b { color: var(--s-fg); font-weight: 500; }
+.sh-tabs { display: flex; flex-wrap: wrap; gap: 4px; }
+.sh-tab { font: inherit; font-size: 13px; color: var(--s-mut); background: none; border: 1px solid transparent; padding: 6px 12px; cursor: pointer; display: flex; gap: 8px; align-items: baseline; }
+.sh-tab .n { font-family: var(--s-mono); font-size: 11px; }
+.sh-tab:hover { color: var(--s-fg); }
+.sh-tab[aria-selected="true"] { color: var(--s-fg); border-color: var(--s-fg); }
+.sh-tab:focus-visible, .sh-reset:focus-visible { outline: 2px solid var(--s-acc); outline-offset: 2px; }
+
+.brief { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 20px 48px; }
+@media (max-width: 820px) { .brief, .code { grid-template-columns: minmax(0, 1fr); } }
+.brief h1 { font-weight: 500; font-size: 34px; line-height: 1.05; margin: 0 0 12px; text-wrap: balance; }
+:root[data-v="text"] .brief h1 { font-size: 28px; font-weight: 600; }
+:root[data-v="quiet"] .brief h1 { font-size: 46px; font-weight: 300; letter-spacing: -.01em; }
+:root[data-v="sheet"] .brief h1 { font-size: 60px; font-weight: 500; letter-spacing: -.045em; line-height: .95; }
+.brief .thesis { margin: 0; max-width: 46ch; font-size: 15px; }
+.brief .fonts { margin: 14px 0 0; font-family: var(--s-mono); font-size: 11.5px; color: var(--s-mut); }
+.moves { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 9px; }
+.moves li { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 8px; font-size: 13.5px; max-width: 70ch; }
+.moves li::before { content: ""; width: 6px; height: 6px; margin-top: 8px; background: var(--s-acc); }
+.risk { margin: 14px 0 0; font-size: 13px; color: var(--s-mut); max-width: 70ch; }
+.risk b { color: var(--s-fg); font-weight: 600; }
+
+.stage { overflow-x: auto; padding-block: 4px 8px; }
+.stage-note { display: flex; flex-wrap: wrap; gap: 8px 20px; justify-content: space-between; font-size: 12.5px; color: var(--s-mut); }
+.sh-reset { font: inherit; color: var(--s-fg); background: none; border: 0; border-bottom: 1px solid var(--s-acc); padding: 0; cursor: pointer; }
+.code { border-top: 1px solid var(--s-line); padding-top: 16px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 12px 48px; font-size: 13px; }
+.code h2 { font-family: var(--s-mono); font-size: 12px; font-weight: 500; color: var(--s-mut); margin: 0; text-transform: uppercase; letter-spacing: .08em; }
+.code p { margin: 0 0 8px; max-width: 70ch; }
+.code code { font-family: var(--s-mono); font-size: 12px; }
+
+/* ───────── mock window: shared base ───────── */
+.app { width: 1180px; height: 720px; margin: 0 auto; position: relative; overflow: hidden; display: flex; flex-direction: column; font-size: 13px; line-height: 1.35; user-select: none; cursor: default; }
+.app button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
+.app input { font: inherit; color: inherit; background: none; border: 0; outline: 0; min-width: 0; }
+.app p, .app h1, .app h3, .app h4, .app dl, .app dd, .app ul { margin: 0; padding: 0; }
+.app ul { list-style: none; }
+.app .sp { flex: 1; }
+.app .wb { display: flex; }
+.app .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.app .fl { display: flex; white-space: nowrap; }
+.app .list { overflow-y: auto; min-height: 0; flex: 1; }
+.app .flash { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.app .stub { flex: 1; }
+
+/* ═════════ 1 · ТЕКСТ — a plain text file ═════════ */
+.vt .app { background: #f2f3f4; color: #17181a; font-family: "JetBrains Mono", ui-monospace, Consolas, monospace; font-size: 12.5px; border: 1px solid #17181a; }
+.vt :focus-visible { outline: 1px dashed #17181a; outline-offset: 2px; }
+.vt .tb { height: 30px; padding: 0 16px 0 40px; display: flex; align-items: center; gap: 18px; color: #6f7379; flex-shrink: 0; }
+.vt .tb b { color: #17181a; font-weight: 600; }
+.vt .tb .flash { color: #17181a; }
+.vt .wb { gap: 18px; }
+.vt .head { padding: 14px 40px 0; flex-shrink: 0; }
+.vt .navline { display: flex; align-items: baseline; gap: 22px; }
+.vt .ni, .vt .fi, .vt .lk { color: #6f7379; }
+.vt .ni:hover, .vt .fi:hover, .vt .lk:hover { color: #17181a; }
+.vt .ni.on, .vt .fi.on { color: #17181a; font-weight: 600; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 6px; }
+.vt .ni sup { font-size: 10px; margin-left: 2px; }
+.vt .play { font-weight: 600; }
+.vt .ctl { display: flex; align-items: baseline; gap: 20px; margin-top: 20px; padding-bottom: 10px; border-bottom: 1px solid #17181a; }
+.vt .q { display: flex; gap: 8px; align-items: baseline; width: 220px; }
+.vt .q input::placeholder { color: #6f7379; }
+.vt .g { display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 40px; margin-top: 6px; color: #6f7379; cursor: pointer; }
+.vt .g .gn { color: #17181a; font-weight: 600; }
+.vt .g .rule { flex: 1; height: 1px; background: #cfd2d6; }
+.vt .r { display: grid; grid-template-columns: 34px 44px minmax(0, 1fr) auto 112px 74px; gap: 12px; align-items: center; height: 28px; padding: 0 40px; }
+.vt .r:hover { background: #e7e8ea; }
+.vt .r.sel { background: #17181a; color: #f2f3f4; }
+.vt .pr, .vt .ty, .vt .fl { color: #6f7379; }
+.vt .ty { white-space: nowrap; }
+.vt .sz { text-align: right; color: #6f7379; font-variant-numeric: tabular-nums; }
+.vt .r.off .nm { color: #8a8d92; }
+.vt .r.sel .pr, .vt .r.sel .ty, .vt .r.sel .sz, .vt .r.sel .fl, .vt .r.sel.off .nm { color: #b9bcc1; }
+.vt .st { font-style: normal; margin-left: 4px; font-weight: 600; }
+.vt .fl { gap: 16px; text-transform: lowercase; }
+.vt .fl .tg::before { content: "#"; }
+.vt .fl .bad { color: #b4301c; font-weight: 600; }
+.vt .fl .bad::before { content: "! "; }
+.vt .fl .pd { display: none; }
+.vt .r.sel .fl .bad { color: #ff9d8a; }
+.vt .xp { display: grid; grid-template-columns: 1fr 1fr; gap: 0 40px; padding: 6px 40px 14px 142px; border-bottom: 1px dashed #cfd2d6; }
+.vt .xp p { display: flex; gap: 12px; line-height: 1.75; }
+.vt .xp i { font-style: normal; width: 84px; flex-shrink: 0; color: #6f7379; }
+.vt .xp .xf { overflow-wrap: anywhere; }
+.vt .sb { height: 34px; flex-shrink: 0; display: flex; align-items: center; gap: 24px; padding: 0 40px; color: #6f7379; border-top: 1px solid #cfd2d6; }
+.vt .sb.inv { background: #17181a; color: #f2f3f4; border-color: #17181a; }
+.vt .sb .pl { color: #b9bcc1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.vt .sb button { font-weight: 600; }
+.vt .stub { padding: 60px 40px; line-height: 1.8; }
+.vt .stub .lk { text-decoration: underline; text-underline-offset: 4px; }
+
+/* ═════════ 2 · ТИШИНА — dark, only the names speak ═════════ */
+.vq .app { background: #0f1011; color: #d6d8da; font-family: "Onest", "Segoe UI", system-ui, sans-serif; }
+.vq :focus-visible { outline: 1px solid #70757a; outline-offset: 2px; }
+.vq .tb { height: 34px; display: flex; align-items: center; padding: 0 16px 0 28px; flex-shrink: 0; color: #70757a; font-size: 12px; gap: 16px; }
+.vq .tb .flash { color: #d6d8da; }
+.vq .wb { gap: 18px; }
+.vq .cols { flex: 1; min-height: 0; display: flex; }
+.vq .nav { width: 176px; flex-shrink: 0; display: flex; flex-direction: column; padding: 34px 0 24px 28px; gap: 2px; }
+.vq .ni { height: 32px; display: flex; align-items: baseline; gap: 6px; color: #70757a; font-size: 14px; padding-top: 5px; }
+.vq .ni:hover { color: #a9adb2; }
+.vq .ni.on { color: #f1f2f3; }
+.vq .ni small { font-size: 11px; }
+.vq .prof { color: #70757a; font-size: 12px; margin-bottom: 18px; }
+.vq .prof b { display: block; color: #a9adb2; font-weight: 400; font-size: 13px; }
+.vq .play { display: flex; align-items: center; gap: 10px; font-size: 14px; color: #f1f2f3; }
+.vq .play i { width: 26px; height: 26px; border: 1px solid #70757a; border-radius: 50%; display: grid; place-items: center; }
+.vq .play:hover i { border-color: #f1f2f3; }
+.vq .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.vq .hd { padding: 28px 32px 0; flex-shrink: 0; }
+.vq .hrow { display: flex; align-items: center; gap: 14px; }
+.vq h1 { font-weight: 300; font-size: 32px; letter-spacing: -.01em; color: #f1f2f3; line-height: 1.1; }
+.vq .cn { color: #70757a; font-size: 13px; }
+.vq .q { width: 200px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid #2a2c2f; padding-bottom: 4px; color: #70757a; }
+.vq .q:focus-within { border-color: #70757a; }
+.vq .q input { color: #d6d8da; }
+.vq .q input::placeholder { color: #5f6469; }
+.vq .add { color: #f1f2f3; font-size: 13px; }
+.vq .frow { display: flex; gap: 18px; margin-top: 18px; font-size: 13px; color: #70757a; align-items: baseline; }
+.vq .fi:hover { color: #a9adb2; }
+.vq .fi.on { color: #f1f2f3; }
+.vq .body { flex: 1; min-height: 0; display: flex; margin-top: 10px; }
+.vq .g { display: flex; align-items: center; gap: 10px; height: 42px; padding: 12px 32px 0 21px; color: #70757a; font-size: 12.5px; cursor: pointer; }
+.vq .r { display: flex; align-items: center; gap: 10px; height: 46px; padding: 0 32px 0 21px; }
+.vq .r:hover { background: #131415; }
+.vq .r.sel { background: #181a1c; }
+.vq .nm { flex: 1; font-size: 15px; }
+.vq .r.off .nm { color: #70757a; }
+.vq .fl { gap: 14px; font-size: 12.5px; color: #70757a; }
+.vq .fl .bad { color: #c9a25a; }
+.vq .mt { width: 176px; white-space: nowrap; text-align: right; font-size: 12.5px; color: #70757a; font-variant-numeric: tabular-nums; }
+.vq .dot { width: 22px; height: 22px; display: grid; place-items: center; flex-shrink: 0; }
+.vq .dot::before { content: ""; width: 9px; height: 9px; border-radius: 50%; border: 1px solid #5f6469; box-sizing: border-box; }
+.vq .dot.on::before { background: #d6d8da; border-color: #d6d8da; }
+.vq .dot.mixed::before { background: linear-gradient(90deg, #d6d8da 50%, transparent 50%); border-color: #d6d8da; }
+.vq .dot.p::before { outline: 1px solid #70757a; outline-offset: 3px; }
+.vq .details { width: 312px; flex-shrink: 0; background: #131415; padding: 28px; overflow-y: auto; display: flex; flex-direction: column; gap: 22px; }
+.vq .shot { height: 112px; background: #1b1c1e; }
+.vq .details h3 { font-weight: 300; font-size: 22px; color: #f1f2f3; line-height: 1.2; }
+.vq .dsub { color: #70757a; font-size: 12.5px; margin-top: 4px; }
+.vq .spec { display: grid; grid-template-columns: 78px 1fr; gap: 8px 12px; font-size: 13px; }
+.vq .spec dt { color: #70757a; font-size: 12px; padding-top: 1px; }
+.vq .ds h4 { font-weight: 400; font-size: 12px; color: #70757a; margin-bottom: 6px; }
+.vq .files li { color: #a9adb2; font-size: 12.5px; line-height: 1.7; overflow-wrap: anywhere; }
+.vq .cf { font-size: 13px; color: #a9adb2; }
+.vq .note { font-size: 13px; color: #a9adb2; }
+.vq .hint { color: #70757a; }
+.vq .ap { height: 56px; flex-shrink: 0; display: flex; align-items: center; gap: 16px; padding: 0 32px; font-size: 13px; color: #70757a; }
+.vq .ap b { color: #f1f2f3; font-weight: 400; white-space: nowrap; }
+.vq .ap .pl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.vq .ap button { color: #f1f2f3; border-bottom: 1px solid #f1f2f3; padding-bottom: 1px; }
+.vq .stub { padding: 24px 32px; color: #70757a; font-size: 14px; max-width: 52ch; line-height: 1.6; }
+.vq .stub .lk { color: #f1f2f3; border-bottom: 1px solid #f1f2f3; }
+
+/* ═════════ 3 · ОДИН ЭКРАН — white sheet, no navigation ═════════ */
+.vs .app { background: #fff; color: #0a0a0a; font-family: "Golos Text", "Segoe UI", system-ui, sans-serif; border: 1px solid #0a0a0a; }
+.vs :focus-visible { outline: 2px solid #2340ff; outline-offset: 1px; }
+.vs .tb { height: 34px; display: flex; align-items: center; gap: 16px; padding: 0 0 0 40px; flex-shrink: 0; font-size: 12px; }
+.vs .tb b { font-weight: 500; }
+.vs .tb .flash { color: #2340ff; }
+.vs .menu { display: flex; gap: 8px; align-items: center; }
+.vs .menu kbd { font-family: inherit; color: #8a8a8a; font-size: 11px; }
+.vs .menu:hover kbd { color: #0a0a0a; }
+.vs .wb { gap: 18px; padding: 0 16px; color: #8a8a8a; }
+.vs .hd { padding: 14px 40px 0; flex-shrink: 0; }
+.vs .hrow { display: flex; align-items: flex-end; gap: 20px; }
+.vs h1, .vs .hf { font-weight: 500; font-size: 64px; letter-spacing: -.045em; line-height: .9; }
+.vs .hf { color: #cfcfcf; }
+.vs .q { width: 230px; display: flex; gap: 8px; border-bottom: 1px solid #0a0a0a; padding-bottom: 5px; margin-bottom: 4px; }
+.vs .q input::placeholder { color: #8a8a8a; }
+.vs .play { height: 32px; padding: 0 16px; background: #0a0a0a; color: #fff; font-weight: 500; margin-bottom: 2px; }
+.vs .frow { display: flex; align-items: baseline; gap: 22px; margin-top: 18px; padding-bottom: 10px; border-bottom: 1px solid #0a0a0a; font-size: 13px; color: #767676; }
+.vs .fi:hover, .vs .lk:hover { color: #0a0a0a; }
+.vs .fi.on { color: #0a0a0a; font-weight: 600; text-decoration: underline; text-decoration-color: #2340ff; text-decoration-thickness: 2px; text-underline-offset: 6px; }
+.vs .g { display: flex; align-items: center; gap: 12px; height: 34px; padding: 0 40px; font-size: 13px; font-weight: 600; cursor: pointer; border-bottom: 1px solid #dedede; }
+.vs .g .gc { color: #767676; font-weight: 400; }
+.vs .r { display: grid; grid-template-columns: 14px 44px minmax(0, 1fr) auto 84px 76px; gap: 14px; align-items: center; height: 40px; padding: 0 40px; border-bottom: 1px solid #ededed; }
+.vs .r:hover { background: #f7f7f7; }
+.vs .r.sel { background: #f0f2ff; }
+.vs .r.sel .nm { font-weight: 600; }
+.vs .pr { color: #a8a8a8; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.vs .r.p .pr { color: #2340ff; font-weight: 600; }
+.vs .nm { font-size: 14.5px; }
+.vs .r.off .nm { color: #9a9a9a; }
+.vs .fl { gap: 14px; font-size: 12.5px; color: #767676; }
+.vs .fl .tg::before { content: "#"; }
+.vs .fl .bad { color: #0a0a0a; font-weight: 600; }
+.vs .fl .pd { color: #2340ff; }
+.vs .ty, .vs .sz { font-size: 12.5px; color: #767676; }
+.vs .sz { text-align: right; font-variant-numeric: tabular-nums; }
+.vs .sq { width: 14px; height: 14px; border: 1.5px solid #0a0a0a; position: relative; display: block; box-sizing: border-box; }
+.vs .sq.on { background: #0a0a0a; }
+.vs .sq.on::after { content: ""; position: absolute; left: 3px; top: -1px; width: 3px; height: 7px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.vs .sq.mixed::after { content: ""; position: absolute; left: 2px; right: 2px; top: 4.5px; height: 2px; background: #0a0a0a; }
+.vs .dr { height: 190px; flex-shrink: 0; border-top: 1px solid #0a0a0a; padding: 16px 40px; display: grid; grid-template-columns: 1.1fr 1.3fr 1fr; gap: 0 48px; overflow-y: auto; }
+.vs .dr .hint { color: #767676; font-size: 14px; }
+.vs .dr h3 { font-size: 20px; font-weight: 600; letter-spacing: -.02em; line-height: 1.15; }
+.vs .dsub { color: #767676; font-size: 12.5px; margin: 4px 0 12px; }
+.vs .spec { display: grid; grid-template-columns: 84px 1fr; gap: 5px 10px; font-size: 12.5px; }
+.vs .spec dt { color: #767676; }
+.vs .dr h4 { font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+.vs .dr section + section { margin-top: 12px; }
+.vs .files { font-size: 12px; color: #4a4a4a; line-height: 1.65; overflow-wrap: anywhere; }
+.vs .cf { font-size: 12.5px; }
+.vs .cf b { font-weight: 600; }
+.vs .note { font-size: 12.5px; color: #4a4a4a; }
+.vs .prev { margin-top: 12px; font-size: 12.5px; text-decoration: underline; text-decoration-color: #2340ff; text-decoration-thickness: 2px; text-underline-offset: 4px; }
+.vs .ap { height: 46px; flex-shrink: 0; background: #0a0a0a; color: #fff; display: flex; align-items: center; gap: 16px; padding: 0 40px; font-size: 13px; }
+.vs .ap b { font-weight: 600; white-space: nowrap; }
+.vs .ap .pl { color: #bdbdbd; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.vs .ap button { background: #fff; color: #0a0a0a; height: 28px; padding: 0 14px; font-weight: 600; }
+.vs .stub { padding: 28px 40px; color: #767676; font-size: 15px; max-width: 56ch; line-height: 1.6; }
+.vs .pal { position: absolute; inset: 0; background: rgba(10, 10, 10, .14); display: flex; justify-content: center; align-items: flex-start; padding-top: 84px; z-index: 5; }
+.vs .pb { width: 480px; background: #fff; border: 1px solid #0a0a0a; max-height: 580px; overflow-y: auto; }
+.vs .pb input { width: 100%; height: 46px; padding: 0 18px; font-size: 15px; border-bottom: 1px solid #0a0a0a; display: block; box-sizing: border-box; }
+.vs .pb input::placeholder { color: #8a8a8a; }
+.vs .pi { display: flex; width: 100%; height: 36px; align-items: center; padding: 0 18px; justify-content: space-between; font-size: 14px; }
+.vs .pi span { color: #767676; font-size: 12px; }
+.vs .pi:hover, .vs .pi:focus-visible { background: #0a0a0a; color: #fff; outline: 0; }
+.vs .pi:hover span, .vs .pi:focus-visible span { color: #bdbdbd; }
+.vs .pe { padding: 14px 18px; color: #767676; }
+</style>
+
+<div class="shell">
+  <header class="sh-top">
+    <p class="sh-name"><b>SB Mod Manager</b> · ещё три направления, минимализм · экран «Mods»</p>
+    <div class="sh-tabs" role="tablist" aria-label="Направление">
+      <button class="sh-tab" role="tab" data-go="text"><span class="n">1</span>Текст</button>
+      <button class="sh-tab" role="tab" data-go="quiet"><span class="n">2</span>Тишина</button>
+      <button class="sh-tab" role="tab" data-go="sheet"><span class="n">3</span>Один экран</button>
+    </div>
+  </header>
+
+  <section class="brief" id="brief" aria-live="polite"></section>
+
+  <div class="stage"><div id="app"></div></div>
+
+  <div class="stage-note">
+    <span>Макет живой: строки выделяются, моды включаются, группы сворачиваются, поиск и фильтры работают, Apply применяет изменения. В третьем направлении меню открывается по Ctrl+K. Данные примерные.</span>
+    <button class="sh-reset" id="reset">Сбросить макет</button>
+  </div>
+
+  <section class="code">
+    <h2>Что меняется в коде</h2>
+    <div id="code"></div>
+  </section>
+</div>
+
+<script>
+const KB = 1024, MB = 1024 * 1024;
+const TYPES = {
+  pak: { l: "Pak", dest: "SB/Content/Paks/~mods" },
+  logic: { l: "Logic", dest: "SB/Content/Paks/LogicMods" },
+  lua: { l: "Lua", dest: "UE4SS Lua mod" },
+  movie: { l: "Movie", dest: "SB/Content/Movies" },
+  tweak: { l: "Engine tweak", dest: "Merged into Engine.ini in %LOCALAPPDATA%\\SB\\Saved\\Config" },
+  reshade: { l: "ReShade preset", dest: "SB/Binaries/Win64/reshade-presets" },
+};
+const GROUPS = [{ id: "outfits", name: "Outfits" }, { id: "gameplay", name: "Gameplay" }, { id: "visuals", name: "Visuals" }];
+const SEED = [
+  { id: 1, prio: 10, name: "Aurora Suit Recolour", group: "outfits", type: "pak", size: 7.0 * MB, ver: "1.2", on: true, tags: ["EVE"], date: "12 Oct 2026", nexus: 1287, slug: "AuroraSuit", loses: [[4, "Holiday Outfit Pack"]] },
+  { id: 2, prio: 20, name: "Holiday Outfit Pack", group: "outfits", type: "pak", size: 27 * MB, ver: "2.0", on: true, tags: ["EVE", "Seasonal"], date: "14 Oct 2026", nexus: 1342, slug: "HolidayOutfits", wins: [[4, "Aurora Suit Recolour"]], notes: "Pick the red variant on reinstall." },
+  { id: 3, prio: 30, name: "Planet Diving Suit — Black", group: "outfits", type: "pak", size: 12.4 * MB, ver: "1.0", on: true, tags: ["CNS"], date: "20 Oct 2026", nexus: 1410, slug: "PlanetDivingBlack", loses: [[2, "Eidos 7 Hair Physics"]] },
+  { id: 4, prio: 40, name: "Free Camera", group: "gameplay", type: "logic", size: 625 * KB, ver: "0.9.3", on: true, tags: [], date: "2 Sep 2026", nexus: 211, slug: "FreeCamera" },
+  { id: 5, prio: 50, name: "Cutscene Skip", group: "gameplay", type: "lua", size: 8.2 * KB, ver: "1.4", on: true, tags: [], date: "2 Sep 2026", nexus: 189, slug: "CutsceneSkip", needs: "UE4SS" },
+  { id: 6, prio: 60, name: "Combat Tweaks", group: "gameplay", type: "pak", size: 869 * KB, ver: "3.1", on: true, tags: ["Balance"], date: "9 Sep 2026", nexus: 402, slug: "CombatTweaks", order: "load after Free Camera" },
+  { id: 7, prio: 70, name: "Neon Blade VFX", group: "visuals", type: "pak", size: 2.0 * MB, ver: "1.1", on: true, base: false, tags: [], date: "28 Oct 2026", nexus: 1502, slug: "NeonBladeVFX" },
+  { id: 8, prio: 80, name: "ReShade Cinematic", group: "visuals", type: "reshade", size: 2.3 * MB, ver: "2.2", on: false, tags: ["Photo"], date: "1 Oct 2026", nexus: 977, slug: "Cinematic" },
+  { id: 9, prio: 90, name: "No Vignette & Film Grain", group: "visuals", type: "tweak", size: 1.1 * KB, ver: "1.0", on: true, tags: [], date: "1 Oct 2026", nexus: 655, slug: "NoVignette" },
+  { id: 10, prio: 100, name: "Intro Movie Replacer", group: null, type: "movie", size: 30 * MB, ver: "1.0", on: false, base: true, tags: [], date: "17 Aug 2026", nexus: 77, slug: "IntroMovie" },
+  { id: 11, prio: 110, name: "Eidos 7 Hair Physics", group: null, type: "pak", size: 4.6 * MB, ver: "0.6", on: true, tags: ["EVE"], date: "22 Oct 2026", nexus: 1455, slug: "HairPhysics", wins: [[2, "Planet Diving Suit — Black"]], notes: "Keep below the outfits." },
+];
+const NAV = [["mods", "Mods"], ["order", "Load order"], ["conflicts", "Conflicts"], ["files", "Files"], ["downloads", "Downloads", 2], ["collections", "Collections"], ["reshade", "ReShade"], ["settings", "Settings"]];
+const FILTERS = [["all", "All"], ["enabled", "Enabled"], ["disabled", "Disabled"], ["problems", "Problems"], ["pending", "Not applied"]];
+
+const VARIANTS = {
+  text: {
+    cls: "vt", title: "Текст",
+    thesis: "Список как обычный текстовый файл: один моноширинный шрифт, ни одной рамки, ни одной иконки. Состояние мода показывают символы.",
+    fonts: "JetBrains Mono",
+    moves: [
+      "Нет цвета. Чёрный на холодно-сером; в ход идут только жирность, подчёркивание и инверсия выбранной строки. Единственное исключение — красный «!» у проблем.",
+      "Переключатели стали символами: [x], [ ], [-]. Мод, который ещё не применён, помечен звёздочкой после имени.",
+      "Панели деталей нет. Выбранная строка раскрывается прямо в списке, поэтому список не делит ширину пополам.",
+      "Навигация — одна строка слов над списком. Внизу всегда статусная строка; когда есть изменения, она инвертируется и становится строкой Apply.",
+    ],
+    risk: "<b>Риск:</b> быстро и плотно для тех, кто любит клавиатуру, но выглядит инженерно. Картинки модов видны только после раскрытия строки, а новичку без иконок сложнее понять, что кликабельно.",
+    code: [
+      "<code>src/index.css</code>: токены сжимаются до трёх цветов, шрифт один, моноширинный; ставится из пакета, без сети.",
+      "<code>ui.tsx</code>: Checkbox становится текстовой кнопкой, Button — ссылкой с подчёркиванием, Badge — словом с символом-маркером, у Dialog пропадают скругления и тень.",
+      "<code>App.tsx</code>: левый рейл удаляется, навигация превращается в одну строку. <code>ModsView.tsx</code>: ModDetails переезжает из боковой панели в раскрывающийся блок под строкой.",
+      "Самый короткий CSS из всех направлений: почти всё держится на цвете текста и подчёркивании.",
+    ],
+  },
+  quiet: {
+    cls: "vq", title: "Тишина",
+    thesis: "Тёмный интерфейс, где ярко видно только имена модов. Остальное вдвое тусклее, а пустое место работает вместо рамок и разделителей.",
+    fonts: "Onest 300–500",
+    moves: [
+      "Нейтральный серый без оттенка. Янтарный только для проблем. Всё остальное — яркость текста: включено светлее, выключено тусклее.",
+      "Ни линий между строками, ни цветных заголовков групп. Строка 46 px, группа — тусклая подпись над ней.",
+      "Чекбокс заменён точкой: залитая — включён, кольцо — выключен, кольцо с ободком — ждёт Apply.",
+      "Заголовок экрана крупный и тонкий, навигация — просто слова слева. Без иконок, без подложки у активного пункта, только яркость.",
+    ],
+    risk: "<b>Риск:</b> без линий границы читаются хуже, а тусклый текст (тип, размер) легко сделать нечитаемым. Пары цветов придётся проверить на контраст WCAG AA на обычных мониторах, не только на своём.",
+    code: [
+      "<code>index.css</code>: палитра из пяти серых и одного янтарного; Inter заменяется на Onest.",
+      "<code>ui.tsx</code>: Checkbox → компонент Dot; у Badge пропадает фон; рамки убираются у Section и Dialog.",
+      "<code>App.tsx</code>: рейл 56 px → текстовая колонка 176 px; переключатель профиля уезжает из тулбара вниз колонки, рядом с Play.",
+      "<code>ModsView.tsx</code>: высота строки 38 → 46 px, разделители удаляются; ModDetails остаётся справа без рамки.",
+    ],
+  },
+  sheet: {
+    cls: "vs", title: "Один экран",
+    thesis: "Окно без навигации. Экран называется крупным заголовком, переключаются экраны меню по Ctrl+K. Из постоянного остаются список и полоса Apply.",
+    fonts: "Golos Text",
+    moves: [
+      "Белый лист и чёрная линейка. Синий — единственный цвет, и значит он одно: «не применено».",
+      "Заголовок экрана набран крупно вместе с долей включённых модов («Mods 9/11»); поиск стоит на его базовой линии.",
+      "Нет ни рейла, ни тулбара. Переходы и действия (Add mods, Apply, Play, Check updates) лежат в меню по Ctrl+K, где рядом написаны и горячие клавиши.",
+      "Детали мода открываются нижней панелью на всю ширину: три колонки текста — свойства, файлы с конфликтами, заметки.",
+    ],
+    risk: "<b>Риск:</b> спрятанную навигацию новичок не найдёт: до первого нажатия кнопки Menu он не знает, где Settings. В макете кнопка Menu лежит в углу окна; если этого мало, можно вернуть узкий рейл.",
+    code: [
+      "<code>App.tsx</code>: рейл и Play убираются; добавляется компонент Palette по образцу <code>ContextMenu.tsx</code> и Ctrl+K в тот же обработчик, где уже висят Ctrl+1…8.",
+      "Новый общий заголовок экрана: каждый View получает название и действие справа, поэтому поменяются все восемь экранов, а не только список.",
+      "<code>ModsView.tsx</code>: ModDetails переезжает вниз, Toolbar сводится к поиску. Play выносится в заголовок рядом с поиском.",
+      "Add mods остаётся и на Ctrl+O, и в меню; в макете отдельной кнопки у него нет.",
+    ],
+  },
+};
+
+let S, cur = "text", flashTimer;
+function reset() {
+  S = { mods: SEED.map((m) => ({ ...m, base: m.base ?? m.on })), sel: 2, collapsed: {}, q: "", view: "mods", filter: "all", flash: "", pal: false, palq: "", palFocus: false };
+}
+reset();
+
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+function fmt(b) {
+  if (b >= MB) return (b / MB >= 10 ? Math.round(b / MB) : (b / MB).toFixed(1)) + " MB";
+  if (b >= KB) return (b / KB >= 100 ? Math.round(b / KB) : (b / KB).toFixed(1)) + " KB";
+  return b + " B";
+}
+const prio4 = (p) => String(p).padStart(4, "0");
+const pending = () => S.mods.filter((m) => m.on !== m.base);
+const problem = (m) => m.on && (m.needs || m.order || (m.loses && m.loses.length));
+const groupName = (id) => (GROUPS.find((g) => g.id === id) || { name: "Ungrouped" }).name;
+function shown() {
+  const q = S.q.trim().toLowerCase();
+  return S.mods.filter((m) => {
+    if (q && !(m.name.toLowerCase().includes(q) || m.tags.some((t) => t.toLowerCase().includes(q)))) return false;
+    if (S.filter === "enabled") return m.on;
+    if (S.filter === "disabled") return !m.on;
+    if (S.filter === "problems") return problem(m);
+    if (S.filter === "pending") return m.on !== m.base;
+    return true;
+  });
+}
+function countOf(id) {
+  return S.mods.filter((m) => id === "all" || (id === "enabled" ? m.on : id === "disabled" ? !m.on : id === "problems" ? problem(m) : m.on !== m.base)).length;
+}
+function files(m) {
+  const p = `${prio4(m.prio)}_${m.slug}_P`;
+  switch (m.type) {
+    case "pak": return [`~mods/${p}.pak`, `~mods/${p}.utoc`, `~mods/${p}.ucas`];
+    case "logic": return [`LogicMods/${m.slug}.pak`];
+    case "lua": return [`ue4ss/Mods/${m.slug}/scripts/main.lua`, "ue4ss/Mods/mods.txt  +1 line"];
+    case "movie": return ["Movies/StartupMovie.bk2"];
+    case "tweak": return ["Engine.ini  [SystemSettings]  3 keys"];
+    case "reshade": return [`reshade-presets/${m.slug}.ini`];
+  }
+  return [];
+}
+function flagsOf(m) {
+  const f = [];
+  m.tags.slice(0, 2).forEach((t) => f.push(`<span class="tg">${esc(t)}</span>`));
+  if (m.on && m.needs) f.push(`<span class="bad">needs ${m.needs}</span>`);
+  if (m.on && m.order) f.push(`<span class="bad" title="Breaks: ${esc(m.order)}">order</span>`);
+  if (m.on && m.loses) f.push(`<span class="bad">${m.loses[0][0]} overridden</span>`);
+  if (m.on !== m.base) f.push(`<span class="pd">${m.on ? "will enable" : "will disable"}</span>`);
+  return f.join("");
+}
+function conflictsOf(m) {
+  return [
+    ...(m.wins || []).map(([n, o]) => ({ win: true, n, o })),
+    ...(m.loses || []).map(([n, o]) => ({ win: false, n, o })),
+  ];
+}
+function groupInfo(g) {
+  const all = S.mods.filter((m) => m.group === g.id);
+  const onN = all.filter((m) => m.on).length;
+  return { all, onN, state: onN === all.length ? "on" : onN === 0 ? "" : "mixed", key: g.id ?? "_", col: !!S.collapsed[g.id ?? "_"] };
+}
+/** Walks groups and mods the way the real list does, handing each to the variant's templates. */
+function walk(mods, groupFn, rowFn, afterRow) {
+  const out = [];
+  const narrowed = S.q.trim() !== "" || S.filter !== "all";
+  for (const g of [...GROUPS, { id: null, name: "Ungrouped" }]) {
+    const inG = mods.filter((m) => m.group === g.id);
+    const info = groupInfo(g);
+    if (inG.length === 0 && (narrowed || info.all.length === 0)) continue;
+    out.push(groupFn(g, info));
+    if (!info.col) inG.forEach((m) => { out.push(rowFn(m)); if (afterRow && S.sel === m.id) out.push(afterRow(m)); });
+  }
+  return out.join("");
+}
+function rowCls(m) { return `r ${S.sel === m.id ? "sel" : ""} ${m.on ? "" : "off"} ${m.on !== m.base ? "p" : ""}`; }
+function filterBtns() {
+  return FILTERS.map(([id, label]) => `<button class="fi ${S.filter === id ? "on" : ""}" data-act="filter" data-f="${id}">${label.toLowerCase()} ${countOf(id)}</button>`).join("");
+}
+const I = {
+  search: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
+  play: '<svg viewBox="0 0 24 24" width="10" height="10" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l13-7.5z"/></svg>',
+  min: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M5 12h14"/></svg>',
+  max: '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="5" y="5" width="14" height="14"/></svg>',
+  close: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>',
+};
+const WB = `<span class="wb" aria-hidden="true">${I.min}${I.max}${I.close}</span>`;
+const stubOf = () => NAV.find(([id]) => id === S.view)[1];
+
+/* ───────── 1 · Текст ───────── */
+const tgText = (s) => (s === "on" ? "[x]" : s === "mixed" ? "[-]" : "[ ]");
+function rText(mods) {
+  const p = pending(), on = S.mods.filter((m) => m.on).length;
+  const nav = NAV.map(([id, l, c], i) => `<button class="ni ${S.view === id ? "on" : ""}" data-act="nav" data-view="${id}" title="Ctrl+${i + 1}">${l.toLowerCase()}${c ? `<sup>${c}</sup>` : ""}</button>`).join("");
+  const ctl = `<div class="ctl">
+    <label class="q">/<input id="q" type="text" placeholder="search" aria-label="Search mods" value="${esc(S.q)}"></label>
+    ${filterBtns()}<span class="sp"></span>
+    <button class="lk" data-act="flash" data-msg="Drop .zip, .7z or .rar anywhere in the window">+ add mods</button>
+    <button class="lk" data-act="flash" data-msg="All 11 mods are up to date on Nexus">check updates</button></div>`;
+  const list = walk(mods,
+    (g, i) => `<div class="g" data-act="col" data-g="${i.key}" role="button" aria-expanded="${!i.col}"><span>${i.col ? "▸" : "▾"}</span><button data-act="gtog" data-g="${i.key}" aria-label="Toggle group ${g.name}">${tgText(i.state)}</button><span class="gn">${g.name.toLowerCase()}</span><span>${i.onN}/${i.all.length}</span><span class="rule"></span></div>`,
+    (m) => `<div class="${rowCls(m)}" data-act="sel" data-id="${m.id}">
+      <button data-act="tog" data-id="${m.id}" role="checkbox" aria-checked="${m.on}" aria-label="Toggle ${esc(m.name)}">${tgText(m.on ? "on" : "")}</button>
+      <span class="pr">${prio4(m.prio)}</span>
+      <span class="nm" title="${esc(m.name)}">${esc(m.name)}${m.on !== m.base ? '<i class="st">*</i>' : ""}</span>
+      <span class="fl">${flagsOf(m)}</span><span class="ty">${TYPES[m.type].l.toLowerCase()}</span><span class="sz">${fmt(m.size)}</span></div>`,
+    (m) => {
+      const c = conflictsOf(m);
+      return `<div class="xp"><div>
+        <p><i>type</i>${TYPES[m.type].l.toLowerCase()}</p><p><i>installs to</i><span class="xf">${esc(TYPES[m.type].dest)}</span></p>
+        <p><i>version</i>${m.ver} · installed ${m.date}</p><p><i>source</i>nexus · mod ${m.nexus}</p>
+        ${m.needs ? `<p><i>needs</i>${m.needs}</p>` : ""}${m.order ? `<p><i>rule</i>${esc(m.order)}</p>` : ""}${m.notes ? `<p><i>notes</i>${esc(m.notes)}</p>` : ""}
+      </div><div>
+        ${files(m).map((f, k) => `<p><i>${k === 0 ? "files" : ""}</i><span class="xf">${esc(f)}</span></p>`).join("")}
+        ${c.map((x, k) => `<p><i>${k === 0 ? "conflicts" : ""}</i>${x.win ? "+" : "-"} ${x.n} assets ${x.win ? "win over" : "replaced by"} ${esc(x.o)}</p>`).join("")}
+      </div></div>`;
+    });
+  const status = p.length
+    ? `<footer class="sb inv"><span>${p.length} pending</span><span class="pl">${esc(p.slice(0, 3).map((m) => `${m.on ? "enable" : "disable"} ${m.name}`).join(", "))}${p.length > 3 ? "…" : ""}</span><span class="sp"></span><button data-act="apply">[apply ^s]</button></footer>`
+    : `<footer class="sb"><span>${on}/${S.mods.length} enabled</span><span>deploy: hard links</span><span class="sp"></span><span>F1 shortcuts</span></footer>`;
+  return `<div class="app">
+    <header class="tb"><b>sb mod manager</b><span>0.7.1</span><span class="flash" role="status">${esc(S.flash)}</span><span class="sp"></span>${WB}</header>
+    <div class="head"><div class="navline">${nav}<span class="sp"></span><button class="lk" data-act="flash" data-msg="Profiles: default · cosmetics only · photo mode">profile: default</button><button class="play" data-act="play">▶ play</button></div>${S.view === "mods" ? ctl : ""}</div>
+    ${S.view === "mods" ? `<div class="list">${list || '<p class="stub">nothing matches. clear the search or the filter.</p>'}</div>` : `<div class="stub"><p>${stubOf().toLowerCase()}: this mockup draws only the mods screen.</p><p><button class="lk" data-act="nav" data-view="mods">back to mods</button></p></div>`}
+    ${status}</div>`;
+}
+
+/* ───────── 2 · Тишина ───────── */
+function rQuiet(mods) {
+  const p = pending(), on = S.mods.filter((m) => m.on).length;
+  const nav = NAV.map(([id, l, c], i) => `<button class="ni ${S.view === id ? "on" : ""}" data-act="nav" data-view="${id}" title="Ctrl+${i + 1}">${l}${c ? `<small>${c}</small>` : ""}</button>`).join("");
+  const dotCls = (m) => `dot ${m.on ? "on" : ""} ${m.on !== m.base ? "p" : ""}`;
+  const list = walk(mods,
+    (g, i) => `<div class="g" data-act="col" data-g="${i.key}" role="button" aria-expanded="${!i.col}"><button class="dot ${i.state}" data-act="gtog" data-g="${i.key}" aria-label="Toggle group ${g.name}"></button><span>${g.name}</span><span>${i.onN}/${i.all.length}</span></div>`,
+    (m) => `<div class="${rowCls(m)}" data-act="sel" data-id="${m.id}">
+      <button class="${dotCls(m)}" data-act="tog" data-id="${m.id}" role="checkbox" aria-checked="${m.on}" aria-label="Toggle ${esc(m.name)}"></button>
+      <span class="nm" title="${esc(m.name)}">${esc(m.name)}</span><span class="fl">${flagsOf(m)}</span><span class="mt">${TYPES[m.type].l} · ${fmt(m.size)}</span></div>`);
+  const m = S.mods.find((x) => x.id === S.sel);
+  const c = m ? conflictsOf(m) : [];
+  const details = m ? `<aside class="details" aria-label="Mod details">
+      <div class="shot"></div>
+      <div><h3>${esc(m.name)}</h3><p class="dsub">${m.ver} · ${fmt(m.size)} · installed ${m.date}</p></div>
+      <dl class="spec"><dt>Type</dt><dd>${TYPES[m.type].l}</dd><dt>Installs to</dt><dd>${esc(TYPES[m.type].dest)}</dd><dt>Priority</dt><dd>${prio4(m.prio)}</dd><dt>Source</dt><dd>Nexus · mod ${m.nexus}</dd>${m.needs ? `<dt>Needs</dt><dd>${m.needs}</dd>` : ""}${m.order ? `<dt>Rule</dt><dd>${esc(m.order)}</dd>` : ""}</dl>
+      ${c.length ? `<section class="ds"><h4>Conflicts</h4>${c.map((x) => `<p class="cf">${x.n} assets ${x.win ? "win over" : "replaced by"} ${esc(x.o)}</p>`).join("")}</section>` : ""}
+      <section class="ds"><h4>Files</h4><ul class="files">${files(m).map((f) => `<li>${esc(f)}</li>`).join("")}</ul></section>
+      <section class="ds"><h4>Notes</h4><p class="${m.notes ? "note" : "hint"}">${m.notes ? esc(m.notes) : "No notes yet."}</p></section>
+    </aside>` : `<aside class="details"><p class="hint">Select a mod to see its files, conflicts and notes.</p></aside>`;
+  const ap = p.length ? `<div class="ap"><b>${p.length} ${p.length === 1 ? "change" : "changes"} not applied</b><span class="pl">${esc(p.slice(0, 3).map((x) => `${x.on ? "enable" : "disable"} ${x.name}`).join(", "))}${p.length > 3 ? "…" : ""}</span><span class="sp"></span><button data-act="apply">Apply</button></div>` : "";
+  const mainTop = S.view === "mods" ? `
+      <div class="hd"><div class="hrow"><h1>Mods</h1><span class="cn">${on} of ${S.mods.length} enabled</span><span class="sp"></span>
+        <label class="q">${I.search}<input id="q" type="text" placeholder="Search" aria-label="Search mods" value="${esc(S.q)}"></label>
+        <button class="add" data-act="flash" data-msg="Drop .zip, .7z or .rar anywhere in the window">+ Add mods</button></div>
+        <div class="frow">${filterBtns()}<span class="sp"></span><button data-act="flash" data-msg="All 11 mods are up to date on Nexus">Check updates</button><span>Sort: load order</span></div></div>
+      <div class="body"><div class="list">${list || '<p class="stub">Nothing matches. Clear the search or the filter.</p>'}</div>${details}</div>`
+    : `<div class="hd"><div class="hrow"><h1>${stubOf()}</h1></div></div><div class="stub"><p>This mockup draws only the Mods screen.</p><p><button class="lk" data-act="nav" data-view="mods">Back to Mods</button></p></div>`;
+  return `<div class="app">
+    <header class="tb"><span>SB Mod Manager</span><span class="flash" role="status">${esc(S.flash)}</span><span class="sp"></span>${WB}</header>
+    <div class="cols"><nav class="nav" aria-label="Screens">${nav}<span class="sp"></span>
+      <div class="prof">Profile<b>Default</b></div>
+      <button class="play" data-act="play"><i>${I.play}</i>Play</button></nav>
+      <main class="main">${mainTop}${ap}</main></div></div>`;
+}
+
+/* ───────── 3 · Один экран ───────── */
+function palItems() {
+  const q = S.palq.trim().toLowerCase();
+  return [
+    ...NAV.map(([id, l], i) => ({ t: l, k: `Ctrl ${i + 1}`, a: "nav", v: id })),
+    { t: "Add mods", k: "Ctrl O", a: "flash", m: "Drop .zip, .7z or .rar anywhere in the window" },
+    { t: "Apply changes", k: "Ctrl S", a: "apply" },
+    { t: "Check for updates", k: "", a: "flash", m: "All 11 mods are up to date on Nexus" },
+    { t: "Play", k: "", a: "play" },
+    { t: "Keyboard shortcuts", k: "F1", a: "flash", m: "Ctrl K menu · Ctrl S apply · / search · Space toggle" },
+  ].filter((i) => !q || i.t.toLowerCase().includes(q));
+}
+function rSheet(mods) {
+  const p = pending(), on = S.mods.filter((m) => m.on).length;
+  const sq = (state) => `sq ${state}`;
+  const list = walk(mods,
+    (g, i) => `<div class="g" data-act="col" data-g="${i.key}" role="button" aria-expanded="${!i.col}"><button class="${sq(i.state)}" data-act="gtog" data-g="${i.key}" aria-label="Toggle group ${g.name}"></button><span>${g.name}</span><span class="gc">${i.onN}/${i.all.length}</span></div>`,
+    (m) => `<div class="${rowCls(m)}" data-act="sel" data-id="${m.id}">
+      <button class="${sq(m.on ? "on" : "")}" data-act="tog" data-id="${m.id}" role="checkbox" aria-checked="${m.on}" aria-label="Toggle ${esc(m.name)}"></button>
+      <span class="pr">${prio4(m.prio)}</span><span class="nm" title="${esc(m.name)}">${esc(m.name)}</span><span class="fl">${flagsOf(m)}</span>
+      <span class="ty">${TYPES[m.type].l}</span><span class="sz">${fmt(m.size)}</span></div>`);
+  const m = S.mods.find((x) => x.id === S.sel);
+  const c = m ? conflictsOf(m) : [];
+  const drawer = !m ? `<div class="dr"><p class="hint">Select a mod to see its files, conflicts and notes.</p></div>` : `<div class="dr">
+      <div><h3>${esc(m.name)}</h3><p class="dsub">${m.ver} · ${fmt(m.size)} · installed ${m.date}</p>
+        <dl class="spec"><dt>Type</dt><dd>${TYPES[m.type].l}</dd><dt>Installs to</dt><dd>${esc(TYPES[m.type].dest)}</dd><dt>Priority</dt><dd>${prio4(m.prio)}</dd><dt>Source</dt><dd>Nexus · mod ${m.nexus}</dd>${m.needs ? `<dt>Needs</dt><dd>${m.needs}</dd>` : ""}${m.order ? `<dt>Rule</dt><dd>${esc(m.order)}</dd>` : ""}</dl></div>
+      <div><section><h4>Files</h4><ul class="files">${files(m).map((f) => `<li>${esc(f)}</li>`).join("")}</ul></section>
+        ${c.length ? `<section><h4>Conflicts</h4>${c.map((x) => `<p class="cf"><b>${x.win ? "▲" : "▼"} ${x.n}</b> assets ${x.win ? "win over" : "replaced by"} ${esc(x.o)}</p>`).join("")}</section>` : ""}</div>
+      <div><section><h4>Notes</h4><p class="note">${m.notes ? esc(m.notes) : "No notes yet."}</p></section>
+        <button class="prev" data-act="flash" data-msg="Preview 1 of 3">Preview, 1 of 3</button></div></div>`;
+  const ap = p.length ? `<div class="ap"><b>${p.length} ${p.length === 1 ? "change" : "changes"} not applied</b><span class="pl">${esc(p.slice(0, 3).map((x) => `${x.on ? "enable" : "disable"} ${x.name}`).join(", "))}${p.length > 3 ? "…" : ""}</span><span class="sp"></span><button data-act="apply">Apply</button></div>` : "";
+  const head = S.view === "mods" ? `
+      <div class="hd"><div class="hrow"><h1>Mods</h1><span class="hf">${on}/${S.mods.length}</span><span class="sp"></span>
+        <label class="q"><input id="q" type="text" placeholder="Search" aria-label="Search mods" value="${esc(S.q)}"></label>
+        <button class="play" data-act="play">Play</button></div>
+        <div class="frow">${filterBtns()}<span class="sp"></span><button class="lk" data-act="flash" data-msg="Drop .zip, .7z or .rar anywhere in the window">+ Add mods</button><span>Profile: Default</span></div></div>`
+    : `<div class="hd"><div class="hrow"><h1>${stubOf()}</h1><span class="sp"></span><button class="play" data-act="play">Play</button></div><div class="frow"><span class="sp"></span><span>Profile: Default</span></div></div>`;
+  const pal = !S.pal ? "" : (() => {
+    const items = palItems();
+    return `<div class="pal" data-act="palx"><div class="pb" role="dialog" aria-label="Menu">
+      <input id="pq" type="text" placeholder="Go to or do…" aria-label="Menu search" value="${esc(S.palq)}">
+      ${items.length ? items.map((i, k) => `<button class="pi" data-act="pal" data-i="${k}">${i.t}<span>${i.k}</span></button>`).join("") : '<p class="pe">Nothing matches.</p>'}</div></div>`;
+  })();
+  return `<div class="app">
+    <header class="tb"><b>SB Mod Manager</b><span class="flash" role="status">${esc(S.flash)}</span><span class="sp"></span><button class="menu" data-act="palopen" title="Ctrl+K">Menu <kbd>Ctrl K</kbd></button>${WB}</header>
+    ${head}
+    ${S.view === "mods" ? `<div class="list">${list || '<p class="stub">Nothing matches. Clear the search or the filter.</p>'}</div>${drawer}` : `<div class="stub"><p>This mockup draws only the Mods screen.</p><p><button class="lk" data-act="nav" data-view="mods">Back to Mods</button></p></div><div class="sp"></div>`}
+    ${ap}${pal}</div>`;
+}
+
+const RENDER = { text: rText, quiet: rQuiet, sheet: rSheet };
+function render() {
+  const v = VARIANTS[cur];
+  const root = document.getElementById("app");
+  const a = document.activeElement;
+  const fid = a && (a.id === "q" || a.id === "pq") ? a.id : null;
+  const caret = fid ? a.selectionStart : 0;
+  const top = root.querySelector(".list")?.scrollTop ?? 0;
+  root.className = v.cls;
+  root.innerHTML = RENDER[cur](shown());
+  const l = root.querySelector(".list");
+  if (l) l.scrollTop = top;
+  if (fid) { const el = document.getElementById(fid); if (el) { el.focus(); el.setSelectionRange(caret, caret); } }
+  else if (S.pal && S.palFocus) { document.getElementById("pq")?.focus(); }
+  S.palFocus = false;
+}
+function renderShell() {
+  const v = VARIANTS[cur];
+  document.documentElement.dataset.v = cur;
+  document.querySelectorAll(".sh-tab").forEach((t) => t.setAttribute("aria-selected", String(t.dataset.go === cur)));
+  document.getElementById("brief").innerHTML = `
+    <div><h1>${v.title}</h1><p class="thesis">${v.thesis}</p><p class="fonts">${v.fonts}</p></div>
+    <div><ul class="moves">${v.moves.map((m) => `<li>${m}</li>`).join("")}</ul><p class="risk">${v.risk}</p></div>`;
+  document.getElementById("code").innerHTML = v.code.map((c) => `<p>${c}</p>`).join("");
+  S.pal = false;
+  render();
+}
+function flash(msg) {
+  S.flash = msg; render();
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => { S.flash = ""; render(); }, 2600);
+}
+function doApply() {
+  const n = pending().length;
+  if (!n) return;
+  S.mods.forEach((m) => (m.base = m.on));
+  flash(`Applied ${n} ${n === 1 ? "change" : "changes"} to the game folder`);
+}
+function closePal() { S.pal = false; S.palq = ""; }
+
+document.getElementById("app").addEventListener("click", (e) => {
+  const el = e.target.closest("[data-act]");
+  if (!el) return;
+  const act = el.dataset.act, id = Number(el.dataset.id);
+  if (act === "palx") { if (e.target === el) { closePal(); render(); } return; }
+  if (act === "sel") S.sel = id;
+  else if (act === "tog") { const m = S.mods.find((x) => x.id === id); m.on = !m.on; }
+  else if (act === "gtog") {
+    const g = el.dataset.g === "_" ? null : el.dataset.g;
+    const all = S.mods.filter((m) => m.group === g);
+    const next = !all.every((m) => m.on);
+    all.forEach((m) => (m.on = next));
+  }
+  else if (act === "col") S.collapsed[el.dataset.g] = !S.collapsed[el.dataset.g];
+  else if (act === "nav") S.view = el.dataset.view;
+  else if (act === "filter") S.filter = el.dataset.f;
+  else if (act === "apply") return doApply();
+  else if (act === "play") return flash("Starting Stellar Blade with 9 mods…");
+  else if (act === "flash") return flash(el.dataset.msg);
+  else if (act === "palopen") { S.pal = true; S.palFocus = true; }
+  else if (act === "pal") {
+    const it = palItems()[Number(el.dataset.i)];
+    closePal();
+    if (!it) return render();
+    if (it.a === "nav") S.view = it.v;
+    else if (it.a === "apply") return doApply();
+    else if (it.a === "play") return flash("Starting Stellar Blade with 9 mods…");
+    else if (it.a === "flash") return flash(it.m);
+  }
+  render();
+});
+document.getElementById("app").addEventListener("input", (e) => {
+  if (e.target.id === "q") { S.q = e.target.value; render(); }
+  else if (e.target.id === "pq") { S.palq = e.target.value; render(); }
+});
+document.addEventListener("keydown", (e) => {
+  const ctrl = e.ctrlKey || e.metaKey;
+  if (ctrl && e.key.toLowerCase() === "s" && pending().length) { e.preventDefault(); doApply(); }
+  else if (ctrl && e.key.toLowerCase() === "k" && cur === "sheet") { e.preventDefault(); if (S.pal) closePal(); else { S.pal = true; S.palFocus = true; } render(); }
+  else if (e.key === "Escape" && S.pal) { closePal(); render(); }
+});
+document.querySelectorAll(".sh-tab").forEach((t) => t.addEventListener("click", () => {
+  if (location.hash !== "#" + t.dataset.go) location.hash = t.dataset.go; else go(t.dataset.go);
+}));
+document.getElementById("reset").addEventListener("click", () => { reset(); render(); });
+function go(name) { cur = VARIANTS[name] ? name : "text"; renderShell(); }
+window.addEventListener("hashchange", () => go(location.hash.slice(1)));
+go(location.hash.slice(1));
+</script>
+
+</body>
+</html>
