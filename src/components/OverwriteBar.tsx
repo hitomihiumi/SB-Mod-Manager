@@ -38,8 +38,8 @@ export function OverwriteBar() {
   }
 
   return (
-    <div className="flex h-11 shrink-0 items-center gap-2 border-t border-line bg-surface px-3">
-      <PenLine size={14} className="text-accent-soft" />
+    <div className="flex h-11 shrink-0 items-center gap-2 bg-surface px-5">
+      <PenLine size={14} className="text-ink-soft" />
       <span className="text-[13px]">Overwrite</span>
       <span className="text-[11px] text-ink-muted">
         {overwrite.files} file{overwrite.files === 1 ? "" : "s"} · {formatBytes(overwrite.bytes)} the
@@ -109,7 +109,7 @@ export function OverwriteBar() {
             value={name}
             onChange={(event) => setName(event.target.value)}
             placeholder="Mod name"
-            className="h-8 w-full rounded-md border border-line bg-base px-2.5 text-[13px] focus:border-accent-soft focus:outline-none"
+            className="h-8 w-full rounded-md border border-transparent bg-base px-2.5 text-[13px] focus:border-accent-soft focus:outline-none"
           />
           <p className="text-[11px] leading-relaxed text-ink-muted">
             The files move out of overwrite into a new mod, enabled at the end of the load order —

@@ -37,8 +37,8 @@ export function DownloadsView() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="flex h-12 shrink-0 items-center gap-2 border-b border-line px-3">
-        <h1 className="text-[13px] font-semibold">Downloads</h1>
+      <header className="flex h-12 shrink-0 items-center gap-2 px-5">
+        <h1 className="text-[13px] font-medium">Downloads</h1>
         {limit?.dailyRemaining != null && (
           <span className="text-[11px] text-ink-muted" title="Nexus API allowance">
             {limit.dailyRemaining} requests left today
@@ -60,14 +60,14 @@ export function DownloadsView() {
       </header>
 
       {!hasKey && (
-        <p className="border-b border-line bg-warn/10 px-3 py-2 text-[12px] text-warn">
+        <p className="bg-surface px-5 py-2 text-[12px] text-warn">
           Add your Nexus API key in Settings before downloading — even a free
           account needs one to ask for a file.
         </p>
       )}
 
       <form
-        className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2.5"
+        className="flex shrink-0 items-center gap-2 px-5 py-2.5"
         onSubmit={(event) => {
           event.preventDefault();
           const url = link.trim();
@@ -81,7 +81,7 @@ export function DownloadsView() {
           onChange={(event) => setLink(event.target.value)}
           placeholder="Paste an nxm:// link"
           spellCheck={false}
-          className="h-8 min-w-0 flex-1 rounded-md border border-line-strong bg-base px-2.5 font-mono text-[12px] outline-none focus:border-accent"
+          className="h-8 min-w-0 flex-1 rounded-md border border-transparent bg-surface px-2.5 font-mono text-[12px] outline-none focus:border-accent"
         />
         <Button type="submit" size="sm" variant="outline" disabled={!link.trim()}>
           Add
@@ -110,7 +110,7 @@ function DownloadRow({ item, onCancel }: { item: QueueItem; onCancel: () => void
   const percent = total > 0 ? Math.min(100, (item.bytesDone / total) * 100) : 0;
 
   return (
-    <div className="border-b border-line/70 px-3 py-2.5">
+    <div className="px-5 py-2.5">
       <div className="flex items-center gap-2">
         <StateIcon state={item.state} />
         <span className="min-w-0 flex-1 truncate text-[13px]">{item.name}</span>
@@ -135,7 +135,7 @@ function DownloadRow({ item, onCancel }: { item: QueueItem; onCancel: () => void
         <div className="mt-1.5 flex items-center gap-2 pl-6">
           <div className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-hover">
             <div
-              className="h-full rounded-full bg-accent transition-[width]"
+              className="h-full rounded-full bg-ink transition-[width]"
               style={{ width: total > 0 ? `${percent}%` : "35%" }}
             />
           </div>
@@ -163,7 +163,7 @@ function DownloadRow({ item, onCancel }: { item: QueueItem; onCancel: () => void
 
 function StateIcon({ state }: { state: DownloadState }) {
   if (state === "running") {
-    return <Loader2 size={14} className="shrink-0 animate-spin text-accent" />;
+    return <Loader2 size={14} className="shrink-0 animate-spin text-ink-soft" />;
   }
   if (state === "done") return <CheckCircle2 size={14} className="shrink-0 text-ok" />;
   return (

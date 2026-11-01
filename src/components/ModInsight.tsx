@@ -18,7 +18,7 @@ import { Badge, Button } from "./ui";
 function Heading({ children, action }: { children: string; action?: React.ReactNode }) {
   return (
     <div className="mb-1.5 flex items-center gap-2">
-      <h4 className="flex-1 text-[12px] font-medium">{children}</h4>
+      <h4 className="flex-1 text-[12px] font-normal text-ink-muted">{children}</h4>
       {action}
     </div>
   );
@@ -117,7 +117,7 @@ export function NexusSection({ mod }: { mod: ModView }) {
                   return (
                     <li
                       key={`${req.modId}:${req.name}`}
-                      className="flex items-center gap-2 rounded-md border border-line px-2 py-1.5"
+                      className="flex items-center gap-2 rounded-sm bg-base px-2 py-1.5"
                     >
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-[12px]" title={req.name}>
@@ -205,7 +205,7 @@ export function ContentsSection({ mod }: { mod: ModView }) {
             <li key={clash.modId} className="flex items-center gap-2 text-[11px]">
               <span
                 className={clsx(
-                  "shrink-0 rounded px-1 font-medium",
+                  "shrink-0 rounded-sm px-1 font-medium",
                   clash.wins ? "bg-ok/15 text-ok" : "bg-danger/15 text-danger",
                 )}
               >
@@ -307,7 +307,7 @@ export function RulesSection({ mod }: { mod: ModView }) {
           value={side}
           onChange={(event) => setSide(event.target.value as "after" | "before")}
           aria-label="Load this"
-          className="h-7 rounded-md border border-line bg-base px-1.5 text-[11px]"
+          className="h-7 rounded-md border border-transparent bg-base px-1.5 text-[11px]"
         >
           <option value="after">Load after</option>
           <option value="before">Load before</option>
@@ -316,7 +316,7 @@ export function RulesSection({ mod }: { mod: ModView }) {
           value={other}
           onChange={(event) => setOther(event.target.value ? Number(event.target.value) : "")}
           aria-label="Which mod"
-          className="h-7 min-w-0 flex-1 rounded-md border border-line bg-base px-1.5 text-[11px]"
+          className="h-7 min-w-0 flex-1 rounded-md border border-transparent bg-base px-1.5 text-[11px]"
         >
           <option value="">Choose a mod…</option>
           {others.map((m) => (

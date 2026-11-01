@@ -75,7 +75,7 @@ export function SettingsView() {
           hint="The folder that contains SB/. Detected automatically for Steam and Epic installs."
         >
           <div className="flex items-center gap-2">
-            <code className="min-w-0 flex-1 truncate rounded-md border border-line bg-base px-2.5 py-2 font-mono text-[12px] text-ink-soft">
+            <code className="min-w-0 flex-1 truncate rounded-md border border-transparent bg-base px-2.5 py-2 font-mono text-[12px] text-ink-soft">
               {game?.root ?? "Not selected"}
             </code>
             <Button
@@ -143,7 +143,7 @@ export function SettingsView() {
           hint="Mods are kept unpacked here, outside the game folder, and hard-linked in when enabled. Move it to another drive to keep it off the system disk."
         >
           <div className="flex items-center gap-2">
-            <code className="min-w-0 flex-1 truncate rounded-md border border-line bg-base px-2.5 py-2 font-mono text-[12px] text-ink-soft">
+            <code className="min-w-0 flex-1 truncate rounded-md border border-transparent bg-base px-2.5 py-2 font-mono text-[12px] text-ink-soft">
               {folders?.library ?? "—"}
             </code>
             <Button variant="outline" disabled={moving} onClick={moveLibrary}>
@@ -158,7 +158,7 @@ export function SettingsView() {
           )}
 
           {folders && !folders.sameVolumeAsGame && (
-            <p className="mt-2 rounded-md border border-warn/40 bg-warn/10 px-2.5 py-2 text-[11px] leading-relaxed text-warn">
+            <p className="mt-2 bg-base px-2.5 py-2 text-[11px] leading-relaxed text-warn">
               The library is on a different drive from the game, so hard links are not
               possible. Enabled mods are copied instead, which stores every one of them
               twice and makes applying changes slower. Put the library on the same drive
@@ -256,7 +256,7 @@ function NexusSection() {
             onChange={(event) => setKey(event.target.value)}
             placeholder="Personal API key"
             spellCheck={false}
-            className="h-8 min-w-0 flex-1 rounded-md border border-line bg-base px-2.5 font-mono text-[12px] placeholder:font-sans placeholder:text-ink-muted focus:border-accent-soft focus:outline-none"
+            className="h-8 min-w-0 flex-1 rounded-md border border-transparent bg-base px-2.5 font-mono text-[12px] placeholder:font-sans placeholder:text-ink-muted focus:border-accent-soft focus:outline-none"
           />
           <Button
             variant="primary"
@@ -275,7 +275,7 @@ function NexusSection() {
       )}
 
       {account && !account.isPremium && (
-        <p className="mt-2.5 rounded-md border border-line bg-base px-2.5 py-2 text-[11px] leading-relaxed text-ink-muted">
+        <p className="mt-2.5 rounded-md border border-transparent bg-base px-2.5 py-2 text-[11px] leading-relaxed text-ink-muted">
           Nexus only hands direct download links to Premium accounts. Without it, use the
           <span className="text-ink-soft"> Mod Manager Download </span>
           button on a mod page — the manager picks the link up and installs the mod for you.
@@ -378,7 +378,7 @@ function UpdateSection() {
           {info?.currentVersion ?? version ?? "—"}
         </code>
         {channel === "nightly" && (
-          <span className="rounded bg-warn/15 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-warn uppercase">
+          <span className="rounded-sm bg-warn/15 px-1.5 py-0.5 text-[11px] text-warn">
             nightly
           </span>
         )}
@@ -401,8 +401,8 @@ function UpdateSection() {
             className={
               "rounded-md border px-2.5 py-2 text-left transition-colors " +
               (channel === id
-                ? "border-accent bg-accent/10"
-                : "border-line hover:border-line-strong")
+                ? "border-ink-muted bg-hover"
+                : "border-transparent bg-surface hover:bg-raised")
             }
           >
             <div className="text-[12px] font-medium">{label}</div>
@@ -414,7 +414,7 @@ function UpdateSection() {
       {info?.available && (
         <div className="mt-3 rounded-md border border-accent-soft/40 bg-accent-soft/10 p-3">
           <div className="flex items-center gap-2">
-            <Download size={14} className="shrink-0 text-accent-soft" />
+            <Download size={14} className="shrink-0 text-ink-soft" />
             <span className="text-[12px] font-medium">
               Version {info.available.version} is available
             </span>

@@ -97,8 +97,8 @@ export function FilesView() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="flex items-center gap-1 border-b border-line px-3 py-2 text-[12px]">
-        <div className="mr-2 flex rounded-md border border-line p-0.5">
+      <header className="flex items-center gap-1 px-5 py-2 text-[12px]">
+        <div className="mr-2 flex rounded-sm bg-surface p-0.5">
           {(
             [
               ["browse", "Browse", FolderTree],
@@ -110,7 +110,7 @@ export function FilesView() {
               onClick={() => setMode(id)}
               aria-pressed={mode === id}
               className={clsx(
-                "flex items-center gap-1 rounded px-2 py-0.5",
+                "flex items-center gap-1 rounded-sm px-2 py-0.5",
                 mode === id ? "bg-hover text-ink" : "text-ink-muted hover:text-ink",
               )}
             >
@@ -123,7 +123,7 @@ export function FilesView() {
           <>
             <button
               onClick={() => void load("")}
-              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-ink-soft hover:bg-hover hover:text-ink"
+              className="flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-ink-soft hover:bg-hover hover:text-ink"
             >
               <Home size={13} /> Game
             </button>
@@ -136,7 +136,7 @@ export function FilesView() {
                   <button
                     onClick={() => !last && void load(path)}
                     className={clsx(
-                      "rounded px-1.5 py-0.5",
+                      "rounded-sm px-1.5 py-0.5",
                       last ? "text-ink" : "text-ink-soft hover:bg-hover hover:text-ink",
                     )}
                   >
@@ -257,7 +257,7 @@ function ConflictRow({
           onReveal();
         }}
         title="Show the real file"
-        className="rounded p-1 text-ink-muted hover:bg-hover hover:text-ink"
+        className="rounded-sm p-1 text-ink-muted hover:bg-hover hover:text-ink"
       >
         <FolderOpen size={13} />
       </button>
@@ -285,7 +285,7 @@ function Row({
       )}
       onClick={entry.isDir ? onOpen : undefined}
     >
-      <Icon size={15} className={clsx("shrink-0", entry.isDir ? "text-accent-soft" : "text-ink-muted")} />
+      <Icon size={15} className={clsx("shrink-0", entry.isDir ? "text-ink-soft" : "text-ink-muted")} />
       <span className="min-w-0 flex-1 truncate">{entry.name}</span>
 
       {!entry.isDir && <OriginTag entry={entry} />}
@@ -301,7 +301,7 @@ function Row({
             onReveal();
           }}
           title="Show the real file"
-          className="rounded p-1 text-ink-muted hover:bg-hover hover:text-ink"
+          className="rounded-sm p-1 text-ink-muted hover:bg-hover hover:text-ink"
         >
           <FolderOpen size={13} />
         </button>
@@ -318,7 +318,7 @@ function OriginTag({ entry }: { entry: VfsEntry }) {
   const Icon = entry.origin === "overwrite" ? PenLine : entry.origin === "generated" ? Layers : Package;
   return (
     <span className="flex shrink-0 items-center gap-1 text-[11px] text-ink-soft">
-      <Icon size={11} className="text-accent-soft" />
+      <Icon size={11} className="text-ink-soft" />
       <span className="max-w-40 truncate">{entry.providedBy}</span>
     </span>
   );

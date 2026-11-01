@@ -5,7 +5,6 @@ import {
   AlertTriangle,
   ArrowDownWideNarrow,
   ArrowUpNarrowWide,
-  ChevronDown,
   ChevronRight,
   ExternalLink,
   FolderMinus,
@@ -349,14 +348,13 @@ function Toolbar({
 }) {
   const scope = selectionCount > 0 ? `${selectionCount} selected` : `all ${totalShown}`;
   return (
-    <div className="flex h-12 min-w-0 shrink-0 items-center gap-1.5 border-b border-line px-3 xl:gap-2">
+    <div className="flex h-14 min-w-0 shrink-0 items-center gap-1.5 px-5 xl:gap-2">
       <ProfileSwitcher />
-      <div className="mx-1 h-5 w-px bg-line" />
       {/* The search box gives up width first, so the buttons never run off the edge. */}
-      <div className="relative w-56 min-w-20 shrink">
+      <div className="relative ml-2 w-56 min-w-20 shrink">
         <Search
           size={13}
-          className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-ink-muted"
+          className="pointer-events-none absolute top-1/2 left-0 -translate-y-1/2 text-ink-muted"
         />
         <input
           ref={searchRef}
@@ -365,11 +363,9 @@ function Toolbar({
           placeholder="Search mods"
           title="Search names, tags and notes (Ctrl+F)"
           aria-label="Search mods"
-          className="h-8 w-full rounded-md border border-line bg-base pr-2 pl-7 text-[12px] placeholder:text-ink-muted focus:border-accent-soft focus:outline-none"
+          className="h-8 w-full border-b border-line bg-transparent pr-2 pl-6 text-[13px] transition-colors duration-150 ease-quiet placeholder:text-ink-muted focus:border-ink-muted focus:outline-none"
         />
       </div>
-
-      <div className="mx-1 h-5 w-px bg-line" />
 
       {/* With a selection the badge names the scope, so the buttons can stay short. */}
       {selectionCount > 0 && (
@@ -464,35 +460,36 @@ function GroupHeader({ row }: { row: Extract<Row, { kind: "group" }> }) {
   const someOn = enabled > 0 && enabled < mods.length;
 
   return (
-    <div className="group flex h-full items-center gap-2 border-b border-line/60 bg-raised/60 px-3">
-      {group ? (
-        <button
-          onClick={() => {
-            void ipc.setGroupCollapsed(group.id, !group.collapsed).then(refresh);
-          }}
-          className="text-ink-muted hover:text-ink"
-          aria-label={group.collapsed ? "Expand group" : "Collapse group"}
-        >
-          {group.collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-        </button>
-      ) : (
-        <span className="w-3.5" />
-      )}
-
+    <div className="group flex h-full items-end gap-2 px-5 pb-1.5">
       <Checkbox
         checked={allOn}
         indeterminate={someOn}
         onChange={(next) => toggle(mods.map((m) => m.id), next)}
         label={`Toggle ${group?.name ?? "ungrouped"}`}
+        className="-mb-[3px]"
       />
 
-      {group?.color && (
-        <span className="size-2 rounded-full" style={{ background: group.color }} />
+      {/* The name folds the group; the chevron only appears when it is folded. */}
+      {group ? (
+        <button
+          onClick={() => {
+            void ipc.setGroupCollapsed(group.id, !group.collapsed).then(refresh);
+          }}
+          className="flex items-center gap-2 text-[12.5px] text-ink-muted transition-colors duration-150 ease-quiet hover:text-ink"
+          aria-label={group.collapsed ? "Expand group" : "Collapse group"}
+          aria-expanded={!group.collapsed}
+        >
+          {group.color && <span className="size-1.5 rounded-full" style={{ background: group.color }} />}
+          {group.name}
+          <ChevronRight
+            size={12}
+            className={clsx("transition-transform duration-200 ease-quiet", !group.collapsed && "rotate-90")}
+          />
+        </button>
+      ) : (
+        <span className="text-[12.5px] text-ink-muted">Ungrouped</span>
       )}
-      <span className="text-[11px] font-semibold tracking-wide uppercase">
-        {group?.name ?? "Ungrouped"}
-      </span>
-      <span className="text-[11px] text-ink-muted">
+      <span className="font-mono text-[11px] text-ink-muted">
         {enabled}/{mods.length}
       </span>
 
@@ -507,7 +504,7 @@ function GroupHeader({ row }: { row: Extract<Row, { kind: "group" }> }) {
             });
             if (sure) await ipc.deleteGroup(group.id).then(refresh);
           }}
-          className="ml-auto text-ink-muted opacity-0 transition-opacity group-hover:opacity-100 hover:text-danger"
+          className="ml-auto text-ink-muted opacity-0 transition-opacity duration-150 ease-quiet group-hover:opacity-100 hover:text-danger"
           aria-label="Delete group"
         >
           <Trash2 size={13} />
@@ -540,16 +537,22 @@ function ModRow({
       onClick={onSelect}
       onContextMenu={onMenu}
       className={clsx(
-        "group flex h-full items-center gap-2.5 border-b border-line/40 px-3 transition-colors",
-        selected ? "bg-accent-soft/12" : "hover:bg-hover/60",
+        "group flex h-full items-center gap-2.5 px-5 transition-colors duration-200 ease-quiet",
+        selected ? "bg-raised" : "hover:bg-surface",
       )}
     >
-      <span className="w-3.5" />
       <Checkbox
         checked={mod.enabled}
+        pending={mod.enabled !== mod.deployed}
         onChange={(next) => toggle([mod.id], next)}
         label={`Toggle ${mod.name}`}
       />
+      <span
+        className="w-9 shrink-0 font-mono text-[11px] text-ink-muted tabular-nums"
+        title="Load order priority"
+      >
+        {String(mod.priority).padStart(4, "0")}
+      </span>
 
       <button
         onDoubleClick={(event) => {
@@ -557,7 +560,7 @@ function ModRow({
           void actions.rename(mod);
         }}
         className={clsx(
-          "min-w-0 flex-1 truncate text-left text-[13px]",
+          "min-w-0 flex-1 truncate text-left text-[14px] transition-colors duration-200 ease-quiet",
           mod.enabled ? "text-ink" : "text-ink-muted",
         )}
         title={mod.name}
@@ -568,13 +571,13 @@ function ModRow({
       {mod.tags.slice(0, 2).map((tag) => (
         <span
           key={tag}
-          className="shrink-0 rounded-full border border-line px-1.5 text-[10px] leading-4 text-ink-soft"
+          className="shrink-0 text-[12px] text-ink-muted"
         >
           {tag}
         </span>
       ))}
       {mod.tags.length > 2 && (
-        <span className="shrink-0 text-[10px] text-ink-muted" title={mod.tags.slice(2).join(", ")}>
+        <span className="shrink-0 text-[12px] text-ink-muted" title={mod.tags.slice(2).join(", ")}>
           +{mod.tags.length - 2}
         </span>
       )}
@@ -642,11 +645,16 @@ function ModRow({
         </button>
       )}
 
-      <div className="flex shrink-0 gap-1">
+      {/* Enabled but not on disk yet: the change is waiting for Apply. */}
+      {mod.enabled !== mod.deployed && (
+        <Badge tone="pending">{mod.enabled ? "Will enable" : "Will disable"}</Badge>
+      )}
+
+      <div className="flex w-28 shrink-0 gap-2">
         {mod.componentTypes.slice(0, 3).map((type) => (
           <Badge
             key={type}
-            tone={type === "unknown" ? "danger" : "accent"}
+            tone={type === "unknown" ? "danger" : "neutral"}
             title={MOD_TYPE_META[type].hint}
           >
             {MOD_TYPE_META[type].label}
@@ -654,10 +662,7 @@ function ModRow({
         ))}
       </div>
 
-      {/* Enabled but not on disk yet: the change is waiting for Apply. */}
-      {mod.enabled !== mod.deployed && <Badge tone="warn">Pending</Badge>}
-
-      <span className="w-16 shrink-0 text-right text-[11px] text-ink-muted tabular-nums">
+      <span className="w-16 shrink-0 text-right font-mono text-[11px] text-ink-muted tabular-nums">
         {formatBytes(mod.sizeBytes)}
       </span>
 
@@ -666,7 +671,7 @@ function ModRow({
           event.stopPropagation();
           void actions.uninstallMany([mod.id]);
         }}
-        className="shrink-0 text-ink-muted opacity-0 transition-opacity group-hover:opacity-100 hover:text-danger"
+        className="shrink-0 text-ink-muted opacity-0 transition-opacity duration-150 ease-quiet group-hover:opacity-100 hover:text-danger"
         aria-label={`Uninstall ${mod.name}`}
       >
         <Trash2 size={13} />
@@ -745,25 +750,25 @@ function FilterBar({ shown, total }: { shown: number; total: number }) {
     listView.filter !== "all" || listView.type !== null || listView.tag !== null ||
     listView.sort !== "order" || listView.descending;
   const select =
-    "h-6 rounded-md border border-line bg-base px-1.5 text-[11px] text-ink-soft focus:border-accent-soft focus:outline-none";
+    "h-6 rounded-sm bg-surface px-1.5 text-[11px] text-ink-soft transition-colors duration-150 ease-quiet hover:text-ink focus:outline-none";
 
   return (
-    <div className="flex h-9 shrink-0 items-center gap-1 overflow-x-auto border-b border-line px-3 text-[11px]">
+    <div className="flex h-9 shrink-0 items-center gap-1 overflow-x-auto px-5 text-[12px]">
       {FILTERS.map((filter) => (
         <button
           key={filter.id}
           onClick={() => setListView({ filter: filter.id })}
           className={clsx(
-            "h-6 shrink-0 rounded-full px-2.5 transition-colors",
+            "h-6 shrink-0 px-2.5 transition-colors duration-150 ease-quiet",
             listView.filter === filter.id
-              ? "bg-accent/15 text-accent-soft"
-              : "text-ink-muted hover:bg-hover hover:text-ink-soft",
+              ? "text-ink"
+              : "text-ink-muted hover:text-ink-soft",
           )}
         >
           {filter.label}
         </button>
       ))}
-      <div className="mx-1 h-4 w-px shrink-0 bg-line" />
+      <span className="mx-2 shrink-0" />
       <select
         aria-label="Filter by type"
         value={listView.type ?? ""}
@@ -801,7 +806,7 @@ function FilterBar({ shown, total }: { shown: number; total: number }) {
             title="Clear filters and sorting"
             aria-label="Clear filters and sorting"
             onClick={() => setListView(DEFAULT_LIST_VIEW)}
-            className="grid size-6 place-items-center rounded-md text-ink-muted hover:bg-hover hover:text-ink"
+            className="grid size-6 place-items-center rounded-sm text-ink-muted transition-colors duration-150 ease-quiet hover:text-ink"
           >
             <X size={12} />
           </button>
@@ -823,7 +828,7 @@ function FilterBar({ shown, total }: { shown: number; total: number }) {
           title={listView.descending ? "Descending" : "Ascending"}
           aria-label="Reverse the order"
           onClick={() => setListView({ descending: !listView.descending })}
-          className="grid size-6 place-items-center rounded-md text-ink-muted hover:bg-hover hover:text-ink"
+          className="grid size-6 place-items-center rounded-sm text-ink-muted transition-colors duration-150 ease-quiet hover:text-ink"
         >
           {listView.descending ? <ArrowDownWideNarrow size={13} /> : <ArrowUpNarrowWide size={13} />}
         </button>

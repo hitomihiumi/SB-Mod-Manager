@@ -21,12 +21,9 @@ export function SetupWizard() {
   return (
     <div className="grid h-full place-items-center px-8">
       <div className="w-full max-w-md">
-        <div className="mb-5 flex items-center gap-3">
-          <div className="size-9 rounded-lg bg-gradient-to-b from-accent to-accent-soft" />
-          <div>
-            <h1 className="text-[15px] font-semibold">SB Mod Manager</h1>
-            <p className="text-[12px] text-ink-muted">Point it at your Stellar Blade install.</p>
-          </div>
+        <div className="mb-6 animate-rise">
+          <h1 className="text-[28px] leading-tight font-light">SB Mod Manager</h1>
+          <p className="mt-1.5 text-[13px] text-ink-muted">Point it at your Stellar Blade install.</p>
         </div>
 
         {found === null ? (
@@ -37,7 +34,7 @@ export function SetupWizard() {
               <button
                 key={install.root}
                 onClick={() => void chooseGame(install.root)}
-                className="flex w-full items-center gap-3 rounded-lg border border-line bg-surface px-3 py-2.5 text-left transition-colors hover:border-accent-soft"
+                className="flex w-full items-center gap-3 bg-surface px-3 py-2.5 text-left transition-colors hover:bg-raised"
               >
                 <HardDrive size={16} className="shrink-0 text-ink-muted" />
                 <div className="min-w-0 flex-1">

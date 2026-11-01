@@ -134,7 +134,7 @@ export function Ue4ssBanner() {
 
   const count = status.neededBy.length;
   return (
-    <div className="flex shrink-0 items-center gap-2 border-b border-danger/30 bg-danger/10 px-3 py-2 text-[12px]">
+    <div className="flex shrink-0 items-center gap-2 bg-surface px-5 py-2 text-[12px]">
       <AlertTriangle size={14} className="shrink-0 text-danger" />
       <span className="min-w-0 flex-1">
         {count} enabled mod{count === 1 ? " needs" : "s need"} UE4SS,{" "}

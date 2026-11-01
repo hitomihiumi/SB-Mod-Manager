@@ -1,32 +1,63 @@
 @import "tailwindcss";
 
-/* Dark-first palette. The app ships one theme on purpose: it is a tool that
-   sits next to a game, and a single well-tuned dark surface keeps the CSS
-   (and the bundle) small. */
+/* Layered dark palette ("Layers of quiet").
+   Boundaries are drawn by tone, not by lines: the window is `base`, lists sit
+   on `surface`, selected rows and panels on `raised`, dialogs on `hover`.
+   Text has three brightnesses, and the one cold hue, `accent`, only ever means
+   "waiting for Apply" and keyboard focus. The app ships one theme on purpose:
+   it is a tool that sits next to a game. */
 @theme {
-  --color-base: #0b0d11;
-  --color-surface: #12151b;
-  --color-raised: #171b22;
-  --color-hover: #1d222b;
-  --color-line: #232833;
-  --color-line-strong: #2f3644;
+  --color-base: #0a0b0d;
+  --color-surface: #101215;
+  --color-raised: #161a1e;
+  --color-hover: #1c2126;
+  --color-line: #23282e;
+  --color-line-strong: #2f353c;
 
-  --color-ink: #e7e9ee;
-  --color-ink-soft: #a8b0c0;
-  --color-ink-muted: #78808f;
+  --color-ink: #e7e9eb;
+  --color-ink-soft: #a3a8ae;
+  --color-ink-muted: #8a9097;
 
-  --color-accent: #d946a6;
-  --color-accent-soft: #7c7ff5;
-  --color-accent-ink: #ffffff;
+  --color-accent: #8fb4ff;
+  --color-accent-soft: #8fb4ff;
+  --color-accent-ink: #0a0b0d;
 
-  --color-ok: #34d399;
-  --color-warn: #fbbf24;
-  --color-danger: #f87171;
+  --color-ok: #72cf98;
+  --color-warn: #d3a85e;
+  --color-danger: #e5786d;
 
-  --radius-panel: 12px;
+  /* Nearly square: tone does the separating, so corners stay out of the way. */
+  --radius-panel: 0px;
+  --radius-sm: 2px;
+  --radius-md: 2px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
 
-  --font-sans: "Inter", ui-sans-serif, system-ui, "Segoe UI", sans-serif;
-  --font-mono: ui-monospace, "Cascadia Code", "Consolas", monospace;
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, "Cascadia Code", "Consolas", monospace;
+
+  /* One curve, three speeds: fast out, no spring. */
+  --ease-quiet: cubic-bezier(0.22, 0.7, 0.2, 1);
+  --animate-rise: rise 240ms var(--ease-quiet) both;
+  --animate-fade: fade 140ms var(--ease-quiet) both;
+  --animate-bar: bar 320ms var(--ease-quiet) both;
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+  }
+  @keyframes fade {
+    from {
+      opacity: 0;
+    }
+  }
+  @keyframes bar {
+    from {
+      opacity: 0;
+      transform: translateY(100%);
+    }
+  }
 }
 
 @layer base {
@@ -46,6 +77,8 @@
     color: var(--color-ink);
     font-family: var(--font-sans);
     font-size: 13px;
+    font-weight: 400;
+    font-feature-settings: "tnum" 0;
     -webkit-font-smoothing: antialiased;
     overflow: hidden;
     /* The window has its own title bar; nothing should select by accident. */
@@ -71,12 +104,51 @@
     border: 3px solid var(--color-base);
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: #3c4557;
+    background: #3c444d;
+  }
+
+  /* Native tick boxes follow the dot language of the list: a ring, filled when on. */
+  input[type="checkbox"] {
+    appearance: none;
+    flex-shrink: 0;
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    border-radius: 9999px;
+    border: 1px solid var(--color-ink-muted);
+    background: transparent;
+    cursor: pointer;
+    transition:
+      background-color 200ms var(--ease-quiet),
+      border-color 200ms var(--ease-quiet);
+  }
+  input[type="checkbox"]:hover {
+    border-color: var(--color-ink-soft);
+  }
+  input[type="checkbox"]:checked {
+    border-color: var(--color-ink);
+    background: radial-gradient(circle at center, var(--color-ink) 0 3.5px, transparent 4px);
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--color-accent) 28%, transparent);
   }
 
   :focus-visible {
-    outline: 2px solid var(--color-accent-soft);
-    outline-offset: 1px;
+    outline: 1px solid var(--color-accent);
+    outline-offset: 3px;
+  }
+
+  /* Whatever moves is there to show a state changing, so nothing moves for
+     people who asked the system for less motion. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation: none !important;
+      transition: none !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
 

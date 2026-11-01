@@ -106,7 +106,7 @@ export function ProfileSwitcher() {
         disabled={working}
         onChange={(event) => void switchTo(Number(event.target.value))}
         title="Active profile"
-        className="no-drag h-8 w-32 rounded-md xl:w-44 border border-line bg-base px-2 text-[12px] focus:border-accent-soft focus:outline-none"
+        className="no-drag h-8 w-32 rounded-md xl:w-44 border border-transparent bg-base px-2 text-[12px] focus:border-accent-soft focus:outline-none"
       >
         {profiles.map((profile) => (
           <option key={profile.id} value={profile.id}>
@@ -200,7 +200,7 @@ export function ProfileSwitcher() {
                 const profile = profiles.find((p) => p.id === Number(event.target.value));
                 if (profile) setEditing({ kind: "delete", profile });
               }}
-              className="h-8 w-full rounded-md border border-line bg-base px-2 text-[12px]"
+              className="h-8 w-full rounded-md border border-transparent bg-base px-2 text-[12px]"
             >
               {profiles
                 .filter((p) => !p.active)
@@ -219,7 +219,7 @@ export function ProfileSwitcher() {
               onChange={(event) => setName(event.target.value)}
               onKeyDown={(event) => event.key === "Enter" && name.trim() && confirm()}
               placeholder="Profile name"
-              className="h-8 w-full rounded-md border border-line bg-base px-2.5 text-[13px] focus:border-accent-soft focus:outline-none"
+              className="h-8 w-full rounded-md border border-transparent bg-base px-2.5 text-[13px] focus:border-accent-soft focus:outline-none"
             />
             <p className="text-[11px] leading-relaxed text-ink-muted">
               {editing?.kind === "new" &&

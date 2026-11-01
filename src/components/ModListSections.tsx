@@ -160,14 +160,14 @@ function ImportDialog({
       <input
         value={name}
         onChange={(event) => setName(event.target.value)}
-        className="mb-3 h-8 w-full rounded-md border border-line bg-base px-2.5 text-[13px] focus:border-accent-soft focus:outline-none"
+        className="mb-3 h-8 w-full rounded-md border border-transparent bg-base px-2.5 text-[13px] focus:border-accent-soft focus:outline-none"
       />
       <p className="mb-2 text-[12px] text-ink-muted">
         {plan.entries.length} mods: {count("installed")} already installed, {count("download")} to
         download from Nexus, {count("manual")} to get by hand
         {plan.rules > 0 ? ` · ${plan.rules} load order rule${plan.rules === 1 ? "" : "s"}` : ""}.
       </p>
-      <ul className="max-h-72 divide-y divide-line overflow-y-auto rounded-md border border-line">
+      <ul className="max-h-72 divide-y divide-line/50 overflow-y-auto bg-base">
         {plan.entries.map((entry, index) => {
           const status = STATUS[entry.status];
           return (

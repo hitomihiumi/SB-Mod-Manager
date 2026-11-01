@@ -41,7 +41,7 @@ export function GameUpdateBanner() {
   }
 
   return (
-    <div className="flex shrink-0 items-center gap-2 border-b border-warn/30 bg-warn/10 px-3 py-2 text-[12px]">
+    <div className="flex shrink-0 items-center gap-2 bg-surface px-5 py-2 text-[12px]">
       <RefreshCw size={14} className="shrink-0 text-warn" />
       <span className="min-w-0 flex-1 leading-relaxed">
         Stellar Blade was updated ({buildName(update.previous)} → {buildName(update.current)}). Mods
@@ -122,7 +122,7 @@ export function RestorePointsSection() {
             })
           }
           placeholder="Name the current setup, e.g. Before the new outfits"
-          className="h-8 min-w-0 flex-1 rounded-md border border-line bg-base px-2.5 text-[12px] focus:border-accent-soft focus:outline-none"
+          className="h-8 min-w-0 flex-1 rounded-md border border-transparent bg-base px-2.5 text-[12px] focus:border-accent-soft focus:outline-none"
         />
         <Button
           variant="outline"
@@ -144,7 +144,7 @@ export function RestorePointsSection() {
           None yet — the first is kept the next time changes are applied.
         </p>
       ) : (
-        <ul className="max-h-72 divide-y divide-line overflow-y-auto rounded-md border border-line">
+        <ul className="max-h-72 divide-y divide-line/50 overflow-y-auto bg-base">
           {points.map((point, index) => (
             <li key={point.id} className="flex items-center gap-2 px-2.5 py-2">
               <div className="min-w-0 flex-1">
@@ -273,7 +273,7 @@ export function SavesSection() {
       hint="A mod that goes wrong can damage a save, and a save made with a mod may not load without it. The saves folder is zipped before each launch when something in it changed."
     >
       <div className="flex items-center gap-2">
-        <code className="min-w-0 flex-1 truncate rounded-md border border-line bg-base px-2.5 py-2 font-mono text-[12px] text-ink-soft">
+        <code className="min-w-0 flex-1 truncate rounded-md border border-transparent bg-base px-2.5 py-2 font-mono text-[12px] text-ink-soft">
           {saves?.dir ?? "Not found — choose the folder"}
         </code>
         {saves?.exists && saves.dir && (
@@ -321,7 +321,7 @@ export function SavesSection() {
       </div>
 
       {saves && saves.backups.length > 0 && (
-        <ul className="mt-3 max-h-64 divide-y divide-line overflow-y-auto rounded-md border border-line">
+        <ul className="mt-3 max-h-64 divide-y divide-line/50 overflow-y-auto bg-base">
           {saves.backups.map((backup) => (
             <li key={backup.file} className="flex items-center gap-2 px-2.5 py-2">
               <div className="min-w-0 flex-1">

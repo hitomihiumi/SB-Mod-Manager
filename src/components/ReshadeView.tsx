@@ -166,8 +166,8 @@ export function ReshadeView() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="flex h-12 shrink-0 items-center gap-2 border-b border-line px-3">
-        <h1 className="text-[13px] font-semibold">ReShade</h1>
+      <header className="flex h-12 shrink-0 items-center gap-2 px-5">
+        <h1 className="text-[13px] font-medium">ReShade</h1>
         {view && (
           <span className="text-[11px] text-ink-muted">
             {view.presets.length} preset{view.presets.length === 1 ? "" : "s"} · {view.effects}{" "}
@@ -179,7 +179,7 @@ export function ReshadeView() {
             value={filter}
             onChange={(event) => setFilter(event.target.value)}
             placeholder="Filter by name, mod or effect"
-            className="h-8 w-56 rounded-md border border-line bg-base px-2.5 text-[12px] placeholder:text-ink-muted focus:border-accent-soft focus:outline-none"
+            className="h-8 w-56 rounded-md border border-transparent bg-surface px-2.5 text-[12px] placeholder:text-ink-muted focus:border-accent-soft focus:outline-none"
           />
           <Button size="sm" variant="ghost" onClick={load}>
             <RefreshCw size={13} /> Refresh
@@ -188,7 +188,7 @@ export function ReshadeView() {
       </header>
 
       {view && (
-        <div className="shrink-0 space-y-2 border-b border-line px-3 py-2.5 text-[12px]">
+        <div className="shrink-0 space-y-2 px-5 py-2.5 text-[12px]">
           {view.installed ? (
             <div className="flex flex-wrap items-center gap-2">
               <Palette size={14} className="text-ink-muted" />
@@ -233,7 +233,7 @@ export function ReshadeView() {
                   const chosen = view.presets.find((p) => p.path === event.target.value) ?? null;
                   void pin(chosen);
                 }}
-                className="h-7 max-w-72 rounded-md border border-line bg-base px-2 text-[12px] focus:border-accent-soft focus:outline-none"
+                className="h-7 max-w-72 rounded-md border border-transparent bg-surface px-2 text-[12px] focus:border-accent-soft focus:outline-none"
               >
                 <option value="">whatever ReShade last used</option>
                 {pinnedMissing && (
@@ -313,7 +313,7 @@ function PresetRow({
       onDoubleClick={() => !preset.active && onUse()}
       className={clsx(
         "group flex items-center gap-3 px-3 py-2 hover:bg-hover/50",
-        preset.active && "bg-accent-soft/5",
+        preset.active && "bg-surface",
       )}
     >
       <button
@@ -324,10 +324,10 @@ function PresetRow({
         onClick={onUse}
         className={clsx(
           "grid size-4 shrink-0 place-items-center rounded-full border transition-colors",
-          preset.active ? "border-accent" : "border-line-strong hover:border-ink-muted",
+          preset.active ? "border-ink" : "border-line-strong hover:border-ink-muted",
         )}
       >
-        {preset.active && <span className="size-2 rounded-full bg-accent" />}
+        {preset.active && <span className="size-2 rounded-full bg-ink" />}
       </button>
 
       <div className="min-w-0 flex-1">

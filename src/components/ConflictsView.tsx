@@ -50,8 +50,8 @@ export function ConflictsView() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="flex h-12 shrink-0 items-center gap-2 border-b border-line px-3">
-        <h1 className="text-[13px] font-semibold">Conflicts</h1>
+      <header className="flex h-12 shrink-0 items-center gap-2 px-5">
+        <h1 className="text-[13px] font-medium">Conflicts</h1>
         {report && (
           <span className="text-[11px] text-ink-muted">
             {report.conflicts.length === 0
@@ -65,7 +65,7 @@ export function ConflictsView() {
             value={filter}
             onChange={(event) => setFilter(event.target.value)}
             placeholder="Filter by asset or mod"
-            className="h-8 w-56 rounded-md border border-line bg-base px-2.5 text-[12px] placeholder:text-ink-muted focus:border-accent-soft focus:outline-none"
+            className="h-8 w-56 rounded-md border border-transparent bg-surface px-2.5 text-[12px] placeholder:text-ink-muted focus:border-accent-soft focus:outline-none"
           />
           <Button size="sm" variant="ghost" onClick={() => void refreshConflicts()}>
             <RefreshCw size={13} /> Refresh
@@ -74,7 +74,7 @@ export function ConflictsView() {
       </header>
 
       {report && report.unreadable.length > 0 && (
-        <div className="border-b border-line bg-warn/10 px-3 py-2 text-[12px] leading-relaxed text-warn">
+        <div className="bg-surface px-5 py-2 text-[12px] leading-relaxed text-warn">
           The contents of {report.unreadable.join(", ")} could not be read, so
           anything those mods replace is missing from this list.{" "}
           <button className="underline hover:no-underline" onClick={() => void reindex()}>
@@ -131,7 +131,7 @@ function ConflictRow({
   const losers = conflict.claimants.filter((c) => !c.wins);
 
   return (
-    <div className="flex h-full flex-col justify-center border-b border-line/50 px-3">
+    <div className="flex h-full flex-col justify-center px-5">
       <div className="flex items-center gap-2">
         <span
           className="min-w-0 flex-1 truncate font-mono text-[12px]"

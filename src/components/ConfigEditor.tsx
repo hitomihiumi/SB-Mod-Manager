@@ -123,13 +123,13 @@ export function ConfigEditor({
       }
     >
       {isIni && sections.length > 0 && (
-        <div className="mb-3 inline-flex rounded-md border border-line p-0.5 text-[12px]">
+        <div className="mb-3 inline-flex rounded-sm bg-surface p-0.5 text-[12px]">
           {(["form", "text"] as const).map((each) => (
             <button
               key={each}
               onClick={() => setMode(each)}
               className={clsx(
-                "rounded px-2.5 py-1 transition-colors",
+                "rounded-sm px-2.5 py-1 transition-colors",
                 mode === each ? "bg-hover text-ink" : "text-ink-muted hover:text-ink-soft",
               )}
             >
@@ -157,7 +157,7 @@ export function ConfigEditor({
           {sections.map((section) => (
             <fieldset key={`${section.name}:${section.settings[0]?.line}`}>
               {section.name && (
-                <legend className="mb-1.5 font-mono text-[12px] font-medium text-accent-soft">
+                <legend className="mb-1.5 font-mono text-[12px] font-medium text-ink-soft">
                   [{section.name}]
                 </legend>
               )}
@@ -193,7 +193,7 @@ export function ConfigEditor({
           onChange={(event) => setText(event.target.value)}
           spellCheck={false}
           aria-label={path}
-          className="h-[60vh] w-full resize-none rounded-md border border-line bg-base p-3 font-mono text-[12px] leading-relaxed text-ink focus:border-accent-soft focus:outline-none"
+          className="h-[60vh] w-full resize-none rounded-md border border-transparent bg-base p-3 font-mono text-[12px] leading-relaxed text-ink focus:border-accent-soft focus:outline-none"
         />
       )}
     </Dialog>
@@ -228,7 +228,7 @@ function SettingInput({ value, onChange }: { value: string; onChange: (value: st
       value={value}
       onChange={(event) => onChange(event.target.value)}
       spellCheck={false}
-      className="h-8 w-full rounded-md border border-line bg-base px-2.5 font-mono text-[12px] focus:border-accent-soft focus:outline-none"
+      className="h-8 w-full rounded-md border border-transparent bg-base px-2.5 font-mono text-[12px] focus:border-accent-soft focus:outline-none"
     />
   );
 }
@@ -264,7 +264,7 @@ export function GameConfigSection() {
             <li key={file.path}>
               <button
                 onClick={() => setEditing(file.path)}
-                className="flex w-full items-center gap-2 rounded-md border border-line px-2.5 py-1.5 text-left hover:border-line-strong"
+                className="flex w-full items-center gap-2 rounded-sm bg-base px-2.5 py-1.5 text-left transition-colors duration-150 ease-quiet hover:bg-raised"
               >
                 <FileCog size={13} className="shrink-0 text-ink-muted" />
                 <span className="min-w-0 flex-1 truncate font-mono text-[12px]">{file.path}</span>

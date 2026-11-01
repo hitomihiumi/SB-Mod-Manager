@@ -93,10 +93,10 @@ export function DeploymentSection() {
               aria-pressed={selected}
               className={clsx(
                 "no-drag flex w-full gap-2.5 rounded-md border px-3 py-2.5 text-left transition-colors disabled:opacity-60",
-                selected ? "border-accent-soft bg-accent-soft/10" : "border-line bg-base hover:border-line-strong",
+                selected ? "border-ink-muted bg-hover" : "border-transparent bg-base hover:bg-raised",
               )}
             >
-              <Icon size={16} className={clsx("mt-0.5 shrink-0", selected ? "text-accent-soft" : "text-ink-muted")} />
+              <Icon size={16} className={clsx("mt-0.5 shrink-0", selected ? "text-ink-soft" : "text-ink-muted")} />
               <span className="min-w-0">
                 <span className="flex items-center gap-2 text-[13px] font-medium">
                   {option.title}
@@ -113,7 +113,7 @@ export function DeploymentSection() {
 
       {mode === "virtual" && folders && (
         <div className="mt-3 flex items-center gap-2">
-          <code className="min-w-0 flex-1 truncate rounded-md border border-line bg-base px-2.5 py-1.5 font-mono text-[11px] text-ink-soft">
+          <code className="min-w-0 flex-1 truncate rounded-md border border-transparent bg-base px-2.5 py-1.5 font-mono text-[11px] text-ink-soft">
             {folders.overwrite}
           </code>
           <Button size="sm" variant="outline" onClick={() => void revealItemInDir(folders.overwrite)}>

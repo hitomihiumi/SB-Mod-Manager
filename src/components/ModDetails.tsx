@@ -60,13 +60,13 @@ export function ModDetails({ mod, onClose }: { mod: ModView; onClose: () => void
   }
 
   return (
-    <aside className="flex w-80 shrink-0 flex-col border-l border-line bg-surface">
-      <div className="flex items-start gap-2 border-b border-line px-3 py-2.5">
+    <aside className="flex w-80 shrink-0 animate-fade flex-col bg-surface">
+      <div className="flex items-start gap-2 px-5 pt-5 pb-3">
         <div className="min-w-0 flex-1">
-          <h3 className="truncate text-[13px] font-semibold" title={mod.name}>
+          <h3 className="truncate text-[20px] leading-tight font-light" title={mod.name}>
             {mod.name}
           </h3>
-          <p className="text-[11px] text-ink-muted">
+          <p className="mt-1 text-[12px] text-ink-muted">
             {mod.version ? `${mod.version} · ` : ""}
             {formatBytes(mod.sizeBytes)} · installed {formatDate(mod.installedAt)}
           </p>
@@ -76,7 +76,7 @@ export function ModDetails({ mod, onClose }: { mod: ModView; onClose: () => void
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3">
+      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 pb-5">
         <section>
           <Preview
             folder={mod.folder}
@@ -93,7 +93,7 @@ export function ModDetails({ mod, onClose }: { mod: ModView; onClose: () => void
                   onClick={() => void save(() => ipc.setModImage(mod.id, image))}
                   className={clsx(
                     "shrink-0 rounded-md border-2",
-                    mod.image === image ? "border-accent" : "border-transparent",
+                    mod.image === image ? "border-ink" : "border-transparent",
                   )}
                 >
                   <Preview folder={mod.folder} path={image} alt={image} className="size-12" />
@@ -104,7 +104,7 @@ export function ModDetails({ mod, onClose }: { mod: ModView; onClose: () => void
                 onClick={() => void save(() => ipc.setModImage(mod.id, null))}
                 className={clsx(
                   "grid size-[52px] shrink-0 place-items-center rounded-md border-2 text-ink-muted",
-                  mod.image === null ? "border-accent" : "border-line",
+                  mod.image === null ? "border-ink" : "border-line",
                 )}
               >
                 <ImageOff size={14} />
@@ -123,7 +123,7 @@ export function ModDetails({ mod, onClose }: { mod: ModView; onClose: () => void
           {mod.nexusModId !== null && (
             <button
               onClick={() => void openUrl(modPageUrl(mod.nexusModId!))}
-              className="inline-flex items-center gap-1 text-[11px] text-accent-soft hover:underline"
+              className="inline-flex items-center gap-1 text-[11px] text-ink-soft hover:underline"
             >
               Nexus page <ExternalLink size={10} />
             </button>
@@ -133,12 +133,12 @@ export function ModDetails({ mod, onClose }: { mod: ModView; onClose: () => void
         <NexusSection mod={mod} />
 
         <section>
-          <h4 className="mb-1.5 text-[12px] font-medium">Tags</h4>
+          <h4 className="mb-1.5 text-[12px] font-normal text-ink-muted">Tags</h4>
           <div className="flex flex-wrap gap-1.5">
             {mod.tags.map((each) => (
               <span
                 key={each}
-                className="inline-flex items-center gap-1 rounded-full border border-line bg-base px-2 py-0.5 text-[11px]"
+                className="inline-flex items-center gap-1 rounded-full border border-transparent bg-base px-2 py-0.5 text-[11px]"
               >
                 {each}
                 <button
@@ -159,7 +159,7 @@ export function ModDetails({ mod, onClose }: { mod: ModView; onClose: () => void
                 onKeyDown={(event) => event.key === "Enter" && addTag()}
                 placeholder="Add a tag"
                 aria-label="New tag"
-                className="h-6 w-24 rounded-full border border-line bg-base px-2 text-[11px] focus:border-accent-soft focus:outline-none"
+                className="h-6 w-24 rounded-full border border-transparent bg-base px-2 text-[11px] focus:border-accent-soft focus:outline-none"
               />
               {tag.trim() && (
                 <button onClick={addTag} aria-label="Add tag" className="text-ink-muted hover:text-ink">
@@ -171,7 +171,7 @@ export function ModDetails({ mod, onClose }: { mod: ModView; onClose: () => void
         </section>
 
         <section>
-          <h4 className="mb-1.5 text-[12px] font-medium">Notes</h4>
+          <h4 className="mb-1.5 text-[12px] font-normal text-ink-muted">Notes</h4>
           <textarea
             value={notes}
             onChange={(event) => setNotes(event.target.value)}
@@ -180,12 +180,12 @@ export function ModDetails({ mod, onClose }: { mod: ModView; onClose: () => void
             }}
             placeholder="What it needs, what it clashes with, which options you picked…"
             rows={4}
-            className="w-full resize-y rounded-md border border-line bg-base px-2.5 py-2 text-[12px] leading-relaxed focus:border-accent-soft focus:outline-none"
+            className="w-full resize-y rounded-md border border-transparent bg-base px-2.5 py-2 text-[12px] leading-relaxed focus:border-accent-soft focus:outline-none"
           />
         </section>
 
         <section>
-          <h4 className="mb-1.5 text-[12px] font-medium">Settings files</h4>
+          <h4 className="mb-1.5 text-[12px] font-normal text-ink-muted">Settings files</h4>
           {files.length === 0 ? (
             <p className="text-[11px] text-ink-muted">This mod has none.</p>
           ) : (
@@ -195,7 +195,7 @@ export function ModDetails({ mod, onClose }: { mod: ModView; onClose: () => void
                   <button
                     onClick={() => setEditing(file.path)}
                     title={file.path}
-                    className="flex w-full items-center gap-2 rounded-md border border-line px-2 py-1.5 text-left hover:border-line-strong"
+                    className="flex w-full items-center gap-2 rounded-sm bg-base px-2 py-1.5 text-left hover:border-line-strong"
                   >
                     <FileCog size={13} className="shrink-0 text-ink-muted" />
                     <span className="min-w-0 flex-1 truncate font-mono text-[11px]">

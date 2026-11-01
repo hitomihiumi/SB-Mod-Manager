@@ -121,7 +121,7 @@ export function AskHost() {
             onKeyDown={(event) => {
               if (event.key === "Enter" && trimmed) finish(trimmed);
             }}
-            className="h-9 w-full rounded-md border border-line bg-base px-2.5 text-[13px] focus:border-accent-soft focus:outline-none"
+            className="h-9 w-full rounded-md border border-transparent bg-base px-2.5 text-[13px] focus:border-accent-soft focus:outline-none"
           />
         </>
       ) : (

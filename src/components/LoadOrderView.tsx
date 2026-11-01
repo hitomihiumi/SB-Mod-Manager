@@ -63,7 +63,7 @@ export function LoadOrderView() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {misordered > 0 && (
-        <div className="flex shrink-0 items-center gap-2 border-b border-warn/30 bg-warn/10 px-4 py-2 text-[12px]">
+        <div className="flex shrink-0 items-center gap-2 bg-surface px-5 py-2 text-[12px]">
           <AlertTriangle size={14} className="shrink-0 text-warn" />
           <span className="flex-1">
             The order breaks load order rules for {misordered} mod{misordered === 1 ? "" : "s"}.
@@ -73,7 +73,7 @@ export function LoadOrderView() {
           </Button>
         </div>
       )}
-      <div className="flex h-12 shrink-0 items-center border-b border-line px-4">
+      <div className="flex h-12 shrink-0 items-center px-5">
         <p className="text-[12px] text-ink-muted">
           Mods higher in this list load first, and a later mod wins where two change the same
           thing. Paks are renamed with a numeric prefix so the game mounts them in this order.
@@ -94,7 +94,7 @@ export function LoadOrderView() {
               }}
               onDragEnd={() => setDragging(null)}
               className={clsx(
-                "flex h-10 items-center gap-2.5 rounded-md border border-line bg-surface px-2.5",
+                "flex h-10 items-center gap-2.5 rounded-sm bg-surface px-2.5",
                 dragging === index && "opacity-40",
                 !mod.enabled && "opacity-55",
               )}

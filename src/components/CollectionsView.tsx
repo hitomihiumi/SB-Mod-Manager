@@ -104,8 +104,8 @@ export function CollectionsView() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="flex h-12 shrink-0 items-center gap-2 border-b border-line px-3">
-        <h1 className="text-[13px] font-semibold">Collections</h1>
+      <header className="flex h-12 shrink-0 items-center gap-2 px-5">
+        <h1 className="text-[13px] font-medium">Collections</h1>
         {plan && (
           <span className="text-[11px] text-ink-muted">
             {plan.name} · revision {plan.revision || "latest"}
@@ -114,13 +114,13 @@ export function CollectionsView() {
       </header>
 
       {!hasKey && (
-        <p className="border-b border-line bg-warn/10 px-3 py-2 text-[12px] text-warn">
+        <p className="bg-surface px-5 py-2 text-[12px] text-warn">
           Add your Nexus API key in Settings before installing a collection.
         </p>
       )}
 
       <form
-        className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2.5"
+        className="flex shrink-0 items-center gap-2 px-5 py-2.5"
         onSubmit={(event) => {
           event.preventDefault();
           if (link.trim()) void resolve(link);
@@ -131,7 +131,7 @@ export function CollectionsView() {
           onChange={(event) => setLink(event.target.value)}
           placeholder="Collection link or slug"
           spellCheck={false}
-          className="h-8 min-w-0 flex-1 rounded-md border border-line-strong bg-base px-2.5 font-mono text-[12px] outline-none focus:border-accent"
+          className="h-8 min-w-0 flex-1 rounded-md border border-transparent bg-surface px-2.5 font-mono text-[12px] outline-none focus:border-accent"
         />
         <Button type="submit" size="sm" variant="outline" disabled={busy || !link.trim()}>
           {busy && !plan ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
@@ -160,7 +160,7 @@ export function CollectionsView() {
             {plan.manual.length > 0 && <ManualList entries={plan.manual} />}
           </div>
 
-          <footer className="flex h-12 shrink-0 items-center gap-3 border-t border-line bg-raised px-3">
+          <footer className="flex h-12 shrink-0 items-center gap-3 bg-surface px-5">
             <span className="text-[12px] text-ink-soft">
               {chosen.size} of {plan.mods.length} selected
             </span>
@@ -195,7 +195,7 @@ function ModRow({
   onToggle: () => void;
 }) {
   return (
-    <div className="flex items-center gap-2.5 border-b border-line/50 px-3 py-2">
+    <div className="flex items-center gap-2.5 px-5 py-2">
       <Checkbox checked={checked} onChange={onToggle} label={`Include ${mod.name}`} />
       <span
         className={clsx(
@@ -219,7 +219,7 @@ function ModRow({
 function ManualList({ entries }: { entries: ManualMod[] }) {
   return (
     <div className="border-t border-line px-3 py-3">
-      <h2 className="text-[12px] font-semibold text-warn">
+      <h2 className="text-[12px] font-medium text-warn">
         {entries.length} mod{entries.length === 1 ? "" : "s"} must be downloaded by hand
       </h2>
       <p className="mt-0.5 mb-2 text-[11px] leading-relaxed text-ink-muted">
