@@ -59,7 +59,10 @@ export default function App() {
   // Dropping archives onto the window is the primary way to install.
   useEffect(() => {
     const unlisten = getCurrentWebview().onDragDropEvent((event) => {
-      if (event.payload.type === "over") setDropping(true);
+      // The window reports every drag, including a row being dragged inside it.
+      // Only a drag that carries files is an install, so only that shows the
+      // overlay; "over" fires continuously and says nothing about the content.
+      if (event.payload.type === "enter") setDropping(event.payload.paths.length > 0);
       else if (event.payload.type === "leave") setDropping(false);
       else if (event.payload.type === "drop") {
         setDropping(false);
