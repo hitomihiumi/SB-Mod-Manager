@@ -18,7 +18,7 @@ pub struct PlannedFile {
 }
 
 /// Everything the deployment backend needs to install one mod.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeployPlan {
     pub mod_id: i64,

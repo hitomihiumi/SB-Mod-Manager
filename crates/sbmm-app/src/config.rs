@@ -274,9 +274,7 @@ impl App {
             return Ok(());
         }
         let ctx = self.deploy_context()?;
-        let record = self.record(mod_id)?;
-        let components = self.store.components_for(mod_id)?;
-        let plan = self.deploy_plan_for(&record, &components)?;
+        let plan = self.deploy_plan(mod_id)?;
         let targets: Vec<PathBuf> = plan
             .files
             .iter()
