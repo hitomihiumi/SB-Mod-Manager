@@ -28,7 +28,7 @@ export function GameUpdateBanner() {
   const repairDrift = useApp((s) => s.repairDrift);
   const refresh = useApp((s) => s.refresh);
   const toast = useApp((s) => s.toast);
-  const setView = useApp((s) => s.setView);
+  const openSettings = useApp((s) => s.openSettings);
   if (!update) return null;
 
   async function dismiss() {
@@ -55,7 +55,7 @@ export function GameUpdateBanner() {
           <Wrench size={12} /> Repair files
         </Button>
       )}
-      <Button size="sm" variant="outline" onClick={() => setView("settings")}>
+      <Button size="sm" variant="outline" onClick={() => openSettings("backups")}>
         <History size={12} /> Restore points
       </Button>
       <Button size="sm" onClick={() => void dismiss()}>
