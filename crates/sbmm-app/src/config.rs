@@ -157,7 +157,7 @@ impl App {
         Ok(())
     }
 
-    fn pristine_dir(&self, staging_folder: &str) -> PathBuf {
+    pub(crate) fn pristine_dir(&self, staging_folder: &str) -> PathBuf {
         self.library_root().join("pristine").join(staging_folder)
     }
 

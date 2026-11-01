@@ -14,6 +14,9 @@ use crate::{App, AppError, Result};
 
 /// Logs larger than this are cut to their end, which is where a failure is.
 const MAX_LOG_BYTES: u64 = 2 * 1024 * 1024;
+/// A crash report file larger than this is a full memory dump, not the
+/// small one Unreal writes by default; it is left out.
+const MAX_CRASH_FILE_BYTES: u64 = 32 * 1024 * 1024;
 
 /// The frame generation package keeps a log per run; the newest few are
 /// enough to see the current problem.
@@ -49,6 +52,46 @@ impl App {
         }
 
         if let Some(game) = self.game()? {
+            // What UE4SS was told to load and what it did, and the game's own
+            // log and crash reports: most "the mod does nothing" and "the
+            // game crashes" questions are answered there.
+            let ue4ss = game.binaries_dir().join("ue4ss");
+            for (path, name) in [
+                (ue4ss.join("UE4SS.log"), "ue4ss/UE4SS.log".to_string()),
+                (
+                    ue4ss.join("Mods").join("mods.txt"),
+                    "ue4ss/mods.txt".to_string(),
+                ),
+            ] {
+                if let Some(bytes) = read_tail(&path) {
+                    add(&mut zip, dest, &name, &bytes)?;
+                }
+            }
+            let saved = std::env::var_os("LOCALAPPDATA")
+                .map(|local| PathBuf::from(local).join("SB").join("Saved"));
+            if let Some(saved) = saved {
+                if let Some(bytes) = read_tail(&saved.join("Logs").join("SB.log")) {
+                    add(&mut zip, dest, "game/SB.log", &bytes)?;
+                }
+                // The newest crash report, whole: a minidump cut short is
+                // no minidump.
+                if let Some(crash) = newest_dir(&saved.join("Crashes")) {
+                    for path in newest_files(&crash, 8) {
+                        let name = path.file_name().unwrap_or_default().to_string_lossy();
+                        let keep = [".dmp", ".log", ".xml", ".runtime-xml"]
+                            .iter()
+                            .any(|ext| name.to_ascii_lowercase().ends_with(ext));
+                        let small =
+                            std::fs::metadata(&path).is_ok_and(|m| m.len() <= MAX_CRASH_FILE_BYTES);
+                        if keep && small {
+                            if let Ok(bytes) = std::fs::read(&path) {
+                                add(&mut zip, dest, &format!("game/crash/{name}"), &bytes)?;
+                            }
+                        }
+                    }
+                }
+            }
+
             let logs = game.binaries_dir().join("dlssg_sm86").join("logs");
             for path in newest_files(&logs, FRAMEGEN_LOGS) {
                 let Some(bytes) = read_tail(&path) else {
@@ -209,6 +252,24 @@ fn newest_files(dir: &Path, count: usize) -> Vec<PathBuf> {
         .collect();
     files.sort_by_key(|(modified, _)| std::cmp::Reverse(*modified));
     files.into_iter().take(count).map(|(_, p)| p).collect()
+}
+
+/// The most recently written folder directly in `dir`.
+fn newest_dir(dir: &Path) -> Option<PathBuf> {
+    std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .filter_map(|entry| {
+            let meta = entry.metadata().ok()?;
+            meta.is_dir().then(|| {
+                (
+                    meta.modified().unwrap_or(std::time::UNIX_EPOCH),
+                    entry.path(),
+                )
+            })
+        })
+        .max_by_key(|(modified, _)| *modified)
+        .map(|(_, path)| path)
 }
 
 #[cfg(test)]
