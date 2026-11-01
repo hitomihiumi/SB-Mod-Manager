@@ -1759,6 +1759,11 @@ impl App {
             plan.files
                 .retain(|file| must_be_physical(&record.source, &file.target));
         }
+        // UE4SS's `mods.txt` is the manager's to write, from the one shipped
+        // and the registrations; see `sync_ue4ss_registrations`.
+        let mods_txt = comparable_path(sbmm_core::paths::UE4SS_MODS_TXT);
+        plan.files
+            .retain(|file| comparable_path(&file.target.to_string_lossy()) != mods_txt);
         plan
     }
 
@@ -1943,12 +1948,13 @@ impl App {
     /// UE4SS only loads mods listed in `mods.txt`, so enabling a Lua or C++
     /// mod means rewriting that file as well as placing its folder.
     fn sync_ue4ss_registrations(&self, ctx: &DeployContext) -> Result<()> {
+        let records = self.store.list_mods()?;
         let mut states: BTreeMap<String, bool> = BTreeMap::new();
         let mut any = false;
 
-        for record in self.store.list_mods()? {
+        for record in &records {
             let components = self.store.components_for(record.id)?;
-            let plan = self.plan_for(&record, &components);
+            let plan = self.plan_for(record, &components);
             for name in plan.ue4ss_registrations {
                 any = true;
                 // If two mods share a folder name, enabled wins.
@@ -1957,19 +1963,57 @@ impl App {
             }
         }
 
-        if !any {
-            return Ok(());
-        }
-
-        if states.values().any(|enabled| *enabled) {
-            mods_txt::sync_mods_txt(&ctx.game_root, &ctx.backup_root, &states)?;
-        } else {
+        // `mods.txt` is never deployed as a mod's file (see
+        // `physical_plan_for`): it is written here, from the one the enabled
+        // UE4SS ships — which switches on BPModLoaderMod and the rest of its
+        // bundled mods — with the registrations on top. The same file the
+        // virtual file system serves.
+        let shipped = self.shipped_mods_txt(&records)?;
+        if shipped.is_some() || states.values().any(|enabled| *enabled) {
+            let base = match &shipped {
+                Some(path) => std::fs::read_to_string(path).map_err(|e| AppError::io(path, e))?,
+                None => {
+                    std::fs::read_to_string(ctx.game_root.join(sbmm_core::paths::UE4SS_MODS_TXT))
+                        .unwrap_or_default()
+                }
+            };
+            mods_txt::write_mods_txt(&ctx.game_root, &ctx.backup_root, &base, &states)?;
+        } else if any || mods_txt::touched(&ctx.backup_root) {
             // Nothing left for UE4SS to load: take our mods.txt back out and
             // let the folders it lived in go with it.
             mods_txt::clear_registrations(&ctx.game_root, &ctx.backup_root)?;
             self.prune_empty_dirs(ctx)?;
         }
         Ok(())
+    }
+
+    /// The `mods.txt` the enabled mod furthest down the order ships — UE4SS's
+    /// own, normally — as the mod was installed with it. The copy in the
+    /// mod's folder may have been edited through a hard link by an older
+    /// version of the manager; the one kept at install time has not.
+    fn shipped_mods_txt(&self, records: &[ModRecord]) -> Result<Option<PathBuf>> {
+        let wanted = comparable_path(sbmm_core::paths::UE4SS_MODS_TXT);
+        let mut enabled: Vec<&ModRecord> = records.iter().filter(|m| m.enabled).collect();
+        enabled.sort_by_key(|m| (m.priority, m.id));
+        let mut shipped = None;
+        for record in enabled {
+            let components = self.store.components_for(record.id)?;
+            let plan = self.plan_for(record, &components);
+            if let Some(file) = plan
+                .files
+                .iter()
+                .find(|f| comparable_path(&f.target.to_string_lossy()) == wanted)
+            {
+                let pristine = self.pristine_dir(&record.staging_folder).join(&file.source);
+                let source = plan.staging_root.join(&file.source);
+                if pristine.is_file() {
+                    shipped = Some(pristine);
+                } else if source.is_file() {
+                    shipped = Some(source);
+                }
+            }
+        }
+        Ok(shipped)
     }
 
     /// Drop any directory we created that is now empty, and stop tracking it.
@@ -2125,19 +2169,13 @@ impl App {
             });
         }
 
-        if registrations.values().any(|enabled| *enabled) {
-            // Start from the `mods.txt` the game would otherwise see: the one
-            // the highest enabled mod ships — UE4SS's own, which switches on
-            // BPModLoaderMod and its other bundled mods — or else the real
-            // one. Starting from the real file alone would drop those, and
-            // logic mods need BPModLoaderMod to load at all.
-            let mods_txt = comparable_path(sbmm_core::paths::UE4SS_MODS_TXT);
-            let shipped = layers
-                .iter()
-                .rev()
-                .flat_map(|layer| layer.files.iter())
-                .find(|file| comparable_path(&file.target.to_string_lossy()) == mods_txt)
-                .map(|file| file.source.clone());
+        // Start from the `mods.txt` the game would otherwise see: the one the
+        // highest enabled mod ships — UE4SS's own, which switches on
+        // BPModLoaderMod and its other bundled mods — or else the real one.
+        // Starting from the real file alone would drop those, and logic mods
+        // need BPModLoaderMod to load at all.
+        let shipped = self.shipped_mods_txt(&records)?;
+        if shipped.is_some() || registrations.values().any(|enabled| *enabled) {
             let real = shipped.unwrap_or_else(|| game.root.join(sbmm_core::paths::UE4SS_MODS_TXT));
             let real = std::fs::read_to_string(real).unwrap_or_default();
             let generated = self

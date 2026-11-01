@@ -39,7 +39,7 @@ export function DiagnosticsSection() {
   return (
     <Section
       title="Diagnostics"
-      hint="Collects everything needed to look into a problem into one zip: the setup, your mod list, and the launch, virtual file system and frame generation logs. Your Nexus key is never included; folder paths are, and can contain your Windows user name."
+      hint="Collects everything needed to look into a problem into one zip: the setup, your mod list, the launch, virtual file system and frame generation logs, UE4SS's log and mods.txt, and the game's log with its latest crash report. Your Nexus key is never included; folder paths are, and can contain your Windows user name."
     >
       <Button variant="outline" disabled={working} onClick={() => void collect()}>
         <LifeBuoy size={13} />

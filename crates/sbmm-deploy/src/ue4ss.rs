@@ -42,6 +42,33 @@ pub fn sync_mods_txt(
     write(&path, &apply(&existing, states))
 }
 
+/// Write `mods.txt` as `base` with `states` applied — `base` being the
+/// file UE4SS itself ships, which switches on its bundled mods.
+///
+/// The result is the manager's own file. Whatever stood there is removed
+/// first rather than written through: a `mods.txt` deployed earlier as a
+/// hard link into a mod's folder would otherwise take the edit into the mod.
+pub fn write_mods_txt(
+    game_root: &Path,
+    backup_root: &Path,
+    base: &str,
+    states: &BTreeMap<String, bool>,
+) -> Result<(), DeployError> {
+    let path = game_root.join(paths::UE4SS_MODS_TXT);
+    remember_ownership(&path, backup_root)?;
+    match fs::remove_file(&path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(DeployError::io(&path, e)),
+    }
+    write(&path, &apply(base, states))
+}
+
+/// Whether the manager has ever written `mods.txt`.
+pub fn touched(backup_root: &Path) -> bool {
+    ownership_path(backup_root).exists()
+}
+
 /// What `mods.txt` reads after applying `states` to `existing`, without
 /// touching the disk — for the virtual file system, which serves the result
 /// instead of writing it into the game folder.

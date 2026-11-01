@@ -3350,3 +3350,77 @@ fn the_mod_further_down_wins_a_shared_file_whatever_was_deployed_last() {
     fx.app.apply().unwrap();
     assert_eq!(fx.game_snapshot(), before, "the game's own file is back");
 }
+
+/// UE4SS's own `mods.txt` switches on its bundled mods — BPModLoaderMod,
+/// which every logic mod needs, among them. With hard links the game gets
+/// that file with the registrations added, written as the manager's own: the
+/// UE4SS mod's copy is never edited through a link, a UE4SS replaced by
+/// another leaves the newer one's list, and switching everything off leaves
+/// the folder as it was.
+#[test]
+fn ue4ss_keeps_its_bundled_mods_switched_on_with_hard_links() {
+    let mut fx = Fixture::new();
+    let before = fx.game_snapshot();
+    let mods_txt = fx.game.join("SB/Binaries/Win64/ue4ss/Mods/mods.txt");
+
+    let old = fx.install_folder(
+        "Old UE4SS",
+        &[
+            ("dwmapi.dll", "MZ old"),
+            ("ue4ss/UE4SS.dll", "MZ old"),
+            ("ue4ss/Mods/mods.txt", "OldBundled : 1\n"),
+        ],
+    );
+    let new = fx.install_folder(
+        "UE4SS 3.1.0-6",
+        &[
+            ("dwmapi.dll", "MZ new"),
+            ("ue4ss/UE4SS.dll", "MZ new"),
+            ("ue4ss/Mods/mods.txt", "BPModLoaderMod : 1\nKeybinds : 1\n"),
+            ("ue4ss/Mods/BPModLoaderMod/Scripts/main.lua", "-- loader"),
+        ],
+    );
+    let lua = fx.install_folder("DekCNS", &[("DekCNS/Scripts/main.lua", "-- cns")]);
+    fx.app.set_enabled(&[old, new, lua], true).unwrap();
+    fx.app.apply().unwrap();
+
+    let text = fs::read_to_string(&mods_txt).unwrap();
+    assert!(text.contains("BPModLoaderMod : 1"), "{text}");
+    assert!(text.contains("Keybinds : 1"), "{text}");
+    assert!(text.contains("DekCNS : 1"), "{text}");
+    assert!(
+        !text.contains("OldBundled"),
+        "the newer UE4SS's list: {text}"
+    );
+    assert_eq!(
+        fs::read_to_string(fx.game.join("SB/Binaries/Win64/ue4ss/UE4SS.dll")).unwrap(),
+        "MZ new"
+    );
+    let shipped = fx
+        .data
+        .join("mods")
+        .read_dir()
+        .unwrap()
+        .flatten()
+        .map(|e| e.path().join("ue4ss/Mods/mods.txt"))
+        .find(|p| fs::read_to_string(p).is_ok_and(|t| t.starts_with("BPModLoaderMod")))
+        .expect("the UE4SS mod's own mods.txt");
+    assert_eq!(
+        fs::read_to_string(shipped).unwrap(),
+        "BPModLoaderMod : 1\nKeybinds : 1\n",
+        "the mod's copy is not edited"
+    );
+
+    // The Lua mod off: the bundled mods stay on.
+    fx.app.set_enabled(&[lua], false).unwrap();
+    fx.app.apply().unwrap();
+    let text = fs::read_to_string(&mods_txt).unwrap();
+    assert!(
+        text.contains("BPModLoaderMod : 1") && text.contains("DekCNS : 0"),
+        "{text}"
+    );
+
+    fx.app.set_enabled(&[old, new], false).unwrap();
+    fx.app.apply().unwrap();
+    assert_eq!(fx.game_snapshot(), before);
+}
