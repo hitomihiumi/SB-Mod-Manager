@@ -38,6 +38,11 @@ pub enum ModType {
     /// into their own folder beside the executable, where the ReShade screen
     /// lists them to start the game with.
     ReshadePreset,
+    /// An addon for Custom Nanosuit System — outfit definitions
+    /// (`*.dekcns.json`) and the paks they use — installed whole into CNS's
+    /// own folder under the names the author gave them, outside the pak load
+    /// order. CNS itself has to be installed for it to do anything.
+    CnsAddon,
     /// Files whose type we could not infer; the user is asked to choose.
     Unknown,
 }
@@ -57,6 +62,7 @@ impl ModType {
             ModType::GenericPak => paths::PAKS_MODS,
             ModType::GameRootOverlay => paths::GAME_SUBDIR,
             ModType::ReshadePreset => paths::RESHADE_PRESETS,
+            ModType::CnsAddon => paths::CNS_DEFINITIONS,
             ModType::ConfigTweak | ModType::Unknown => "",
         }
     }
@@ -103,6 +109,7 @@ impl ModType {
             ModType::GameRootOverlay => "gameRootOverlay",
             ModType::ConfigTweak => "configTweak",
             ModType::ReshadePreset => "reshadePreset",
+            ModType::CnsAddon => "cnsAddon",
             ModType::Unknown => "unknown",
         }
     }
@@ -120,6 +127,7 @@ impl ModType {
             "gameRootOverlay" => ModType::GameRootOverlay,
             "configTweak" => ModType::ConfigTweak,
             "reshadePreset" => ModType::ReshadePreset,
+            "cnsAddon" => ModType::CnsAddon,
             "unknown" => ModType::Unknown,
             _ => return None,
         })
@@ -139,6 +147,7 @@ impl ModType {
             ModType::GameRootOverlay,
             ModType::ConfigTweak,
             ModType::ReshadePreset,
+            ModType::CnsAddon,
         ]
     }
 }

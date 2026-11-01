@@ -484,7 +484,7 @@ fn a_cns_outfit_goes_into_cns_folder_whole() {
         "(CNS) EVE - Herald of Goddess/~mods/CustomNanosuitSystem/Herald_of_Goddess.dekcns.json",
     ]);
     assert_eq!(nested.len(), 1, "{nested:?}");
-    assert_eq!(nested[0].mod_type, ModType::GameRootOverlay);
+    assert_eq!(nested[0].mod_type, ModType::CnsAddon);
     assert_eq!(nested[0].confidence, Confidence::High);
     assert_eq!(
         targets(&nested[0]),
@@ -516,6 +516,45 @@ fn a_cns_outfit_goes_into_cns_folder_whole() {
             "SB/Content/Paks/~mods/CustomNanosuitSystem/ff7_cns_657.dekcns.utoc",
         ]
     );
+
+    // Extra textures for an outfit, shipped alone: CNS's by their name.
+    let extra = detect(&[
+        "VikingOneSoul_CNS_TachyOn_ExtraTextures_1100.pak",
+        "VikingOneSoul_CNS_TachyOn_ExtraTextures_1100.utoc",
+        "VikingOneSoul_CNS_TachyOn_ExtraTextures_1100.ucas",
+    ]);
+    assert_eq!(extra.len(), 1, "{extra:?}");
+    assert_eq!(extra[0].mod_type, ModType::CnsAddon);
+    assert!(extra[0].warnings.is_empty());
+    assert_eq!(
+        targets(&extra[0])[0],
+        "SB/Content/Paks/~mods/CustomNanosuitSystem/VikingOneSoul_CNS_TachyOn_ExtraTextures_1100.pak"
+    );
+    // "cns" inside a word is not CNS.
+    assert_eq!(
+        detect(&["Ocnsea_P.pak", "Ocnsea_P.utoc", "Ocnsea_P.ucas"])[0].mod_type,
+        ModType::GenericPak
+    );
+
+    // CNS itself, shipped as an `SB/` tree: its own definitions are CNS's
+    // too, kept exactly where they are.
+    let framework = detect(&[
+        "SB/Content/Paks/LogicMods/DekCNS_P.pak",
+        "SB/Content/Paks/~mods/CustomNanosuitSystem/CNS-Version_P.pak",
+        "SB/Content/Paks/~mods/CustomNanosuitSystem/Cosmetics/DekCNS-DefaultOutfitsEve.dekcns.json",
+    ]);
+    let addon = framework
+        .iter()
+        .find(|c| c.mod_type == ModType::CnsAddon)
+        .unwrap();
+    assert_eq!(
+        targets(addon),
+        [
+            "SB/Content/Paks/~mods/CustomNanosuitSystem/CNS-Version_P.pak",
+            "SB/Content/Paks/~mods/CustomNanosuitSystem/Cosmetics/DekCNS-DefaultOutfitsEve.dekcns.json",
+        ]
+    );
+    assert!(framework.iter().any(|c| c.mod_type == ModType::LogicMod));
 
     // A pak mod without a definition is still an ordinary pak mod.
     let plain = detect(&[

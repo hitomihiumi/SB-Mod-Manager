@@ -3534,3 +3534,53 @@ fn explorer_moves_files_inside_the_library_and_nowhere_else() {
     assert!(fx.app.library_move(&["..\\x".into()], &content).is_err());
     assert!(fx.app.library_mkdir("", "x").is_err());
 }
+
+/// CNS addons are a type of their own — the whole lot can be picked out of
+/// the list and switched off together — and say so when CNS is not there.
+#[test]
+fn cns_addons_are_their_own_type_and_need_cns() {
+    let mut fx = Fixture::new();
+    let outfit = fx.install_folder(
+        "Herald",
+        &[
+            ("Herald_P.pak", "p"),
+            ("Herald_P.utoc", "u"),
+            ("Herald_P.ucas", "c"),
+            ("Herald.dekcns.json", "{}"),
+        ],
+    );
+    let textures = fx.install_folder(
+        "TachyOn textures",
+        &[
+            ("VikingOneSoul_CNS_TachyOn_ExtraTextures_1100.pak", "p"),
+            ("VikingOneSoul_CNS_TachyOn_ExtraTextures_1100.utoc", "u"),
+            ("VikingOneSoul_CNS_TachyOn_ExtraTextures_1100.ucas", "c"),
+        ],
+    );
+    fx.app.set_enabled(&[outfit, textures], true).unwrap();
+    fx.app.apply().unwrap();
+
+    let snapshot = fx.app.snapshot().unwrap();
+    for id in [outfit, textures] {
+        let view = snapshot.mods.iter().find(|m| m.id == id).unwrap();
+        assert_eq!(view.mod_type, "cnsAddon");
+        assert_eq!(view.missing_requirements, ["CNS"]);
+    }
+    assert!(fx
+        .game
+        .join("SB/Content/Paks/~mods/CustomNanosuitSystem/VikingOneSoul_CNS_TachyOn_ExtraTextures_1100.pak")
+        .is_file());
+
+    let cns = fx.install_folder(
+        "CustomNanosuitSystem",
+        &[
+            ("SB/Content/Paks/LogicMods/DekCNS_P.pak", "p"),
+            ("SB/Content/Paks/LogicMods/DekCNS_P.utoc", "u"),
+            ("SB/Content/Paks/LogicMods/DekCNS_P.ucas", "c"),
+        ],
+    );
+    fx.app.set_enabled(&[cns], true).unwrap();
+    let snapshot = fx.app.snapshot().unwrap();
+    let view = snapshot.mods.iter().find(|m| m.id == outfit).unwrap();
+    assert!(view.missing_requirements.is_empty());
+}

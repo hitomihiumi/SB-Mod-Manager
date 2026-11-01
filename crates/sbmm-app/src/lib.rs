@@ -1233,6 +1233,7 @@ impl App {
         let ue4ss_loads = self.ue4ss_presence(&records)?.loads();
         // Only looked for when an enabled mod has presets to show.
         let mut reshade_there: Option<bool> = None;
+        let mut cns_there: Option<bool> = None;
         let mut nexus_missing = self.missing_nexus_requirements(&records)?;
         let mut misordered = self.misordered(&records)?;
         let tweaked = self.tweaked_mods()?;
@@ -1306,6 +1307,16 @@ impl App {
                             missing.push("ReShade".to_string());
                         }
                     }
+                    let cns_addon = components.iter().any(|c| c.mod_type == ModType::CnsAddon);
+                    if record.enabled && cns_addon && !self.provides_cns(&components) {
+                        let there = match cns_there {
+                            Some(there) => there,
+                            None => *cns_there.insert(self.cns_present(&records)?),
+                        };
+                        if !there {
+                            missing.push("CNS".to_string());
+                        }
+                    }
                     missing.extend(nexus_missing.remove(&record.id).unwrap_or_default());
                     missing
                 },
@@ -1347,6 +1358,34 @@ impl App {
             overwrite: self.overwrite_summary(),
             ue4ss: self.ue4ss_status()?,
         })
+    }
+
+    /// Whether a mod's files include CNS itself: its Blueprint half,
+    /// `LogicMods/DekCNS_P`.
+    fn provides_cns(&self, components: &[DetectedComponent]) -> bool {
+        components
+            .iter()
+            .flat_map(|c| &c.files)
+            .any(|f| is_cns_logic(&f.target))
+    }
+
+    /// Whether Custom Nanosuit System will run: an enabled mod brings it, or
+    /// it is in the game folder by hand.
+    fn cns_present(&self, records: &[ModRecord]) -> Result<bool> {
+        for record in records.iter().filter(|m| m.enabled) {
+            if self.provides_cns(&self.store.components_for(record.id)?) {
+                return Ok(true);
+            }
+        }
+        let Some(game) = self.game()? else {
+            return Ok(true);
+        };
+        let logic = game.root.join(sbmm_core::paths::PAKS_LOGICMODS);
+        Ok(std::fs::read_dir(logic)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .any(|entry| is_cns_logic(Path::new(&entry.file_name()))))
     }
 
     fn drift(&self) -> Result<Vec<String>> {
@@ -2711,6 +2750,13 @@ fn detect_in(root: &Path, tree: &FileTree) -> Vec<DetectedComponent> {
         }
         config::read_text(&full).ok().map(|(text, _)| text)
     })
+}
+
+/// CNS's Blueprint half, `DekCNS_P.pak` and its IoStore siblings, by name.
+fn is_cns_logic(path: &Path) -> bool {
+    path.file_name()
+        .map(|n| n.to_string_lossy().to_ascii_lowercase())
+        .is_some_and(|n| n.starts_with("dekcns_p."))
 }
 
 /// A game-relative path in a form two spellings of it agree on: Windows paths
