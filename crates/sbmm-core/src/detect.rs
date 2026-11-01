@@ -125,7 +125,12 @@ fn detect_game_relative(entries: &[TreeEntry]) -> Vec<DetectedComponent> {
                     target: e.rel.clone(),
                 })
                 .collect();
-            let (pak_sets, warnings) = build_pak_sets(&entries);
+            // CNS addons keep their authors' names: no suffix to miss.
+            let (pak_sets, warnings) = if mod_type == ModType::CnsAddon {
+                (Vec::new(), Vec::new())
+            } else {
+                build_pak_sets(&entries)
+            };
             let mut notes = Vec::new();
             if mod_type == ModType::GameRootOverlay {
                 notes.push(
@@ -151,6 +156,9 @@ fn detect_game_relative(entries: &[TreeEntry]) -> Vec<DetectedComponent> {
 fn classify_game_relative(rel: &str, entry: &TreeEntry) -> (ModType, Option<String>) {
     if rel.starts_with("content/paks/logicmods/") {
         return (ModType::LogicMod, None);
+    }
+    if rel.starts_with("content/paks/~mods/customnanosuitsystem/") {
+        return (ModType::CnsAddon, None);
     }
     if rel.starts_with("content/movies/") {
         return (ModType::Movie, None);
@@ -275,6 +283,23 @@ fn is_cns_definition(entry: &TreeEntry) -> bool {
             .is_some_and(|(_, kind)| kind.starts_with("dek"))
 }
 
+/// Whether a pak names itself as one for CNS: `CNS` as a word of its name,
+/// as in `VikingOneSoul_CNS_TachyOn_ExtraTextures_1100`, or a `.dekcns`
+/// stem. Extra textures for an outfit often ship on their own like this,
+/// with the definition in another archive.
+fn is_cns_pak(entry: &TreeEntry) -> bool {
+    if !entry
+        .extension()
+        .is_some_and(|ext| matches!(ext, "pak" | "utoc" | "ucas" | "sig"))
+    {
+        return false;
+    }
+    let name = entry.file_name();
+    let stem = name.rsplit_once('.').map(|(stem, _)| stem).unwrap_or(name);
+    stem.split(|c: char| !c.is_ascii_alphanumeric())
+        .any(|word| word == "cns" || word == "dekcns")
+}
+
 fn claim_cns_definitions(
     tree: &FileTree,
     claimed: &mut HashSet<String>,
@@ -284,23 +309,26 @@ fn claim_cns_definitions(
         .entries()
         .iter()
         .any(|e| !claimed.contains(&e.norm) && is_cns_definition(e));
-    if !definitions {
-        return;
-    }
     // An outfit for CNS goes into CNS's folder whole, as its page says:
     // definitions and paks together, under the names the author gave them.
-    // Its paks are not ordinary pak mods to rename into the load order.
+    // Its paks are not ordinary pak mods to rename into the load order. A
+    // pak that only names itself as CNS's goes there too.
     let entries: Vec<TreeEntry> = tree
         .entries()
         .iter()
         .filter(|e| !claimed.contains(&e.norm))
         .filter(|e| {
             is_cns_definition(e)
-                || e.extension()
-                    .is_some_and(|ext| matches!(ext, "pak" | "utoc" | "ucas" | "sig"))
+                || is_cns_pak(e)
+                || (definitions
+                    && e.extension()
+                        .is_some_and(|ext| matches!(ext, "pak" | "utoc" | "ucas" | "sig")))
         })
         .cloned()
         .collect();
+    if entries.is_empty() {
+        return;
+    }
     let files = entries
         .iter()
         .map(|e| {
@@ -320,7 +348,7 @@ fn claim_cns_definitions(
         .collect();
     mark_claimed(&entries, claimed);
     out.push(DetectedComponent {
-        mod_type: ModType::GameRootOverlay,
+        mod_type: ModType::CnsAddon,
         confidence: Confidence::High,
         files,
         target_subdir: PathBuf::from(paths::CNS_DEFINITIONS),
@@ -328,7 +356,7 @@ fn claim_cns_definitions(
         pak_sets: Vec::new(),
         warnings: Vec::new(),
         notes: vec![
-            "An outfit for Custom Nanosuit System, installed into its folder whole. CNS itself \
+            "An addon for Custom Nanosuit System, installed into its folder whole. CNS itself \
              has to be installed for it to do anything."
                 .into(),
         ],

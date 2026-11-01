@@ -18,6 +18,7 @@ export type ModTypeId =
   | "gameRootOverlay"
   | "configTweak"
   | "reshadePreset"
+  | "cnsAddon"
   | "unknown";
 
 export type Confidence = "high" | "medium" | "askUser";
@@ -997,6 +998,10 @@ export const MOD_TYPE_META: Record<ModTypeId, { label: string; hint: string }> =
     label: "ReShade preset",
     hint: "SB/Binaries/Win64/reshade-presets — picked on the ReShade screen",
   },
+  cnsAddon: {
+    label: "CNS",
+    hint: "Custom Nanosuit System addon — SB/Content/Paks/~mods/CustomNanosuitSystem, as its author laid it out",
+  },
   unknown: { label: "Unknown", hint: "Needs a type before it can install" },
 };
 
@@ -1012,4 +1017,5 @@ export const SELECTABLE_TYPES: ModTypeId[] = [
   "gameRootOverlay",
   "configTweak",
   "reshadePreset",
+  "cnsAddon",
 ];
