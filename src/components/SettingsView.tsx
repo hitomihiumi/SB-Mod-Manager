@@ -2,11 +2,12 @@ import { getVersion } from "@tauri-apps/api/app";
 import { open } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { Download, FolderOpen, UserRound } from "lucide-react";
-import { useEffect, useState } from "react";
+import clsx from "clsx";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { formatBytes } from "../lib/format";
 import { ipc, type Folders, type UpdateChannel, type UpdateInfo } from "../lib/ipc";
-import { useApp } from "../store/useApp";
+import { useApp, type SettingsTab } from "../store/useApp";
 import { Button, Checkbox, Section } from "./ui";
 import { DeploymentSection } from "./DeploymentSection";
 import { DiagnosticsSection } from "./DiagnosticsSection";
@@ -67,135 +68,241 @@ export function SettingsView() {
     }
   }
 
+  const tab = useApp((s) => s.settingsTab);
+  const setTab = useApp((s) => s.setSettingsTab);
+
+  /** What each group holds, in the order the list shows them. */
+  const groups: { id: SettingsTab; label: string; hint: string; content: ReactNode }[] = [
+    {
+      id: "game",
+      label: "Game",
+      hint: "Folder, applying changes, deployment, UE4SS",
+      content: (
+        <>
+          <Section
+            title="Game folder"
+            hint="The folder that contains SB/. Detected automatically for Steam and Epic installs."
+          >
+            <div className="flex items-center gap-2">
+              <code className="min-w-0 flex-1 truncate rounded-md border border-transparent bg-base px-2.5 py-2 font-mono text-[12px] text-ink-soft">
+                {game?.root ?? "Not selected"}
+              </code>
+              <Button
+                variant="outline"
+                onClick={async () => {
+                  const picked = await open({ directory: true, title: "Select the Stellar Blade folder" });
+                  if (typeof picked === "string") await chooseGame(picked);
+                }}
+              >
+                Change
+              </Button>
+            </div>
+            {game && (
+              <p className="mt-2 text-[11px] text-ink-muted">
+                Found via {game.source}
+                {game.executable ? ` · ${game.executable}` : ""}
+              </p>
+            )}
+          </Section>
+
+          <Section
+            title="Applying changes"
+            hint="With this off, toggles are staged and only touch the game folder when you press Apply."
+          >
+            <label className="flex cursor-pointer items-center gap-2.5">
+              <input
+                type="checkbox"
+                checked={snapshot?.autoApply ?? true}
+                onChange={async (event) => {
+                  await ipc.setAutoApply(event.target.checked);
+                  await refresh();
+                }}
+                className="size-4 accent-[var(--color-accent)]"
+              />
+              <span className="text-[13px]">Apply automatically after every change</span>
+            </label>
+          </Section>
+          <DeploymentSection />
+          <Ue4ssSection />
+          <GameConfigSection />
+        </>
+      ),
+    },
+    {
+      id: "library",
+      label: "Library",
+      hint: "Where mods are kept, mod lists, disk space",
+      content: (
+        <>
+          <Section
+            title="Mod library"
+            hint="Mods are kept unpacked here, outside the game folder, and hard-linked in when enabled. Move it to another drive to keep it off the system disk."
+          >
+            <div className="flex items-center gap-2">
+              <code className="min-w-0 flex-1 truncate rounded-md border border-transparent bg-base px-2.5 py-2 font-mono text-[12px] text-ink-soft">
+                {folders?.library ?? "—"}
+              </code>
+              <Button variant="outline" disabled={moving} onClick={moveLibrary}>
+                {moving ? "Moving…" : "Move…"}
+              </Button>
+            </div>
+
+            {folders && (
+              <p className="mt-2 text-[11px] text-ink-muted">
+                {formatBytes(folders.libraryBytes)} in use
+              </p>
+            )}
+
+            {folders && !folders.sameVolumeAsGame && (
+              <p className="mt-2 bg-base px-2.5 py-2 text-[11px] leading-relaxed text-warn">
+                The library is on a different drive from the game, so hard links are not
+                possible. Enabled mods are copied instead, which stores every one of them
+                twice and makes applying changes slower. Put the library on the same drive
+                as the game to avoid that.
+              </p>
+            )}
+
+            <div className="mt-3 flex items-center gap-2 border-t border-line pt-3">
+              <p className="flex-1 text-[11px] leading-relaxed text-ink-muted">
+                Mods installed by an older version, or with a type chosen for the whole archive,
+                may sit in the wrong places. Detecting them again fixes the ones the manager now
+                recognises; the rest are left as they are.
+              </p>
+              <Button variant="outline" onClick={() => void redetect(null)}>
+                Detect all mods again
+              </Button>
+            </div>
+
+            <div className="mt-3 space-y-1.5 border-t border-line pt-3">
+              <PathRow label="Staged mods" path={folders?.mods} />
+              <PathRow label="Backups of replaced game files" path={folders?.backups} />
+            </div>
+          </Section>
+          <ModListSection />
+          <StorageSection />
+        </>
+      ),
+    },
+    {
+      id: "nexus",
+      label: "Nexus",
+      hint: "Account, downloads folder",
+      content: (
+        <>
+          <NexusSection />
+          <WatchSection />
+        </>
+      ),
+    },
+    {
+      id: "graphics",
+      label: "Graphics",
+      hint: "Upscaling, frame generation",
+      content: (
+        <>
+          <UpscalerSection />
+          <FramegenSection />
+        </>
+      ),
+    },
+    {
+      id: "backups",
+      label: "Backups",
+      hint: "Restore points, save backups",
+      content: (
+        <>
+          <RestorePointsSection />
+          <SavesSection />
+        </>
+      ),
+    },
+    {
+      id: "app",
+      label: "App",
+      hint: "Updates, Discord, diagnostics, about",
+      content: (
+        <>
+          <UpdateSection />
+          <DiscordSection />
+          <DiagnosticsSection />
+          <Section title="About" hint="">
+            <p className="text-[12px] leading-relaxed text-ink-muted">
+              Stellar Blade is Unreal Engine 4.26 with IoStore, so pak mods are
+              <code className="mx-1 font-mono text-ink-soft">.pak/.utoc/.ucas</code>
+              triplets that must share a base name and end in <code className="font-mono text-ink-soft">_P</code>.
+              The manager handles that, along with the separate locations UE4SS, logic, movie and
+              root mods need.
+            </p>
+          </Section>
+        </>
+      ),
+    },
+  ];
+  const current = groups.find((g) => g.id === tab) ?? groups[0]!;
+
+  /** Arrow keys walk the list, as in any tab strip. */
+  function onKeyDown(event: React.KeyboardEvent) {
+    const step = event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0;
+    if (step === 0) return;
+    event.preventDefault();
+    const next = groups[(groups.indexOf(current) + step + groups.length) % groups.length]!;
+    setTab(next.id);
+    document.getElementById(`settings-tab-${next.id}`)?.focus();
+  }
+
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-2xl space-y-6 p-6">
-        <Section
-          title="Game folder"
-          hint="The folder that contains SB/. Detected automatically for Steam and Epic installs."
-        >
-          <div className="flex items-center gap-2">
-            <code className="min-w-0 flex-1 truncate rounded-md border border-line bg-base px-2.5 py-2 font-mono text-[12px] text-ink-soft">
-              {game?.root ?? "Not selected"}
-            </code>
-            <Button
-              variant="outline"
-              onClick={async () => {
-                const picked = await open({ directory: true, title: "Select the Stellar Blade folder" });
-                if (typeof picked === "string") await chooseGame(picked);
-              }}
+    <div className="flex min-h-0 flex-1">
+      <nav
+        role="tablist"
+        aria-label="Settings"
+        aria-orientation="vertical"
+        onKeyDown={onKeyDown}
+        className="flex w-56 shrink-0 flex-col gap-1 px-5 pt-6"
+      >
+        {groups.map((group) => {
+          const selected = group.id === current.id;
+          return (
+            <button
+              key={group.id}
+              id={`settings-tab-${group.id}`}
+              role="tab"
+              aria-selected={selected}
+              aria-controls="settings-panel"
+              tabIndex={selected ? 0 : -1}
+              onClick={() => setTab(group.id)}
+              className="group/tab flex flex-col py-1.5 text-left"
             >
-              Change
-            </Button>
-          </div>
-          {game && (
-            <p className="mt-2 text-[11px] text-ink-muted">
-              Found via {game.source}
-              {game.executable ? ` · ${game.executable}` : ""}
-            </p>
-          )}
-        </Section>
+              <span
+                className={clsx(
+                  "text-[15px] font-light transition-colors duration-150 ease-quiet",
+                  selected ? "text-ink" : "text-ink-muted group-hover/tab:text-ink-soft",
+                )}
+              >
+                {group.label}
+              </span>
+              <span
+                className={clsx(
+                  "mt-0.5 text-[11.5px] leading-snug transition-colors duration-150 ease-quiet",
+                  selected ? "text-ink-muted" : "text-ink-muted/60",
+                )}
+              >
+                {group.hint}
+              </span>
+            </button>
+          );
+        })}
+      </nav>
 
-        <Section
-          title="Applying changes"
-          hint="With this off, toggles are staged and only touch the game folder when you press Apply."
-        >
-          <label className="flex cursor-pointer items-center gap-2.5">
-            <input
-              type="checkbox"
-              checked={snapshot?.autoApply ?? true}
-              onChange={async (event) => {
-                await ipc.setAutoApply(event.target.checked);
-                await refresh();
-              }}
-              className="size-4 accent-[var(--color-accent)]"
-            />
-            <span className="text-[13px]">Apply automatically after every change</span>
-          </label>
-        </Section>
-
-        <DeploymentSection />
-
-        <ModListSection />
-
-        <RestorePointsSection />
-
-        <SavesSection />
-
-        <GameConfigSection />
-
-        <Ue4ssSection />
-
-        <NexusSection />
-
-        <WatchSection />
-
-        <DiscordSection />
-
-        <UpscalerSection />
-
-        <FramegenSection />
-
-        <UpdateSection />
-
-        <Section
-          title="Mod library"
-          hint="Mods are kept unpacked here, outside the game folder, and hard-linked in when enabled. Move it to another drive to keep it off the system disk."
-        >
-          <div className="flex items-center gap-2">
-            <code className="min-w-0 flex-1 truncate rounded-md border border-line bg-base px-2.5 py-2 font-mono text-[12px] text-ink-soft">
-              {folders?.library ?? "—"}
-            </code>
-            <Button variant="outline" disabled={moving} onClick={moveLibrary}>
-              {moving ? "Moving…" : "Move…"}
-            </Button>
-          </div>
-
-          {folders && (
-            <p className="mt-2 text-[11px] text-ink-muted">
-              {formatBytes(folders.libraryBytes)} in use
-            </p>
-          )}
-
-          {folders && !folders.sameVolumeAsGame && (
-            <p className="mt-2 rounded-md border border-warn/40 bg-warn/10 px-2.5 py-2 text-[11px] leading-relaxed text-warn">
-              The library is on a different drive from the game, so hard links are not
-              possible. Enabled mods are copied instead, which stores every one of them
-              twice and makes applying changes slower. Put the library on the same drive
-              as the game to avoid that.
-            </p>
-          )}
-
-          <div className="mt-3 flex items-center gap-2 border-t border-line pt-3">
-            <p className="flex-1 text-[11px] leading-relaxed text-ink-muted">
-              Mods installed by an older version, or with a type chosen for the whole archive,
-              may sit in the wrong places. Detecting them again fixes the ones the manager now
-              recognises; the rest are left as they are.
-            </p>
-            <Button variant="outline" onClick={() => void redetect(null)}>
-              Detect all mods again
-            </Button>
-          </div>
-
-          <div className="mt-3 space-y-1.5 border-t border-line pt-3">
-            <PathRow label="Staged mods" path={folders?.mods} />
-            <PathRow label="Backups of replaced game files" path={folders?.backups} />
-          </div>
-        </Section>
-
-        <StorageSection />
-
-        <DiagnosticsSection />
-
-        <Section title="About" hint="">
-          <p className="text-[12px] leading-relaxed text-ink-muted">
-            Stellar Blade is Unreal Engine 4.26 with IoStore, so pak mods are
-            <code className="mx-1 font-mono text-ink-soft">.pak/.utoc/.ucas</code>
-            triplets that must share a base name and end in <code className="font-mono text-ink-soft">_P</code>.
-            The manager handles that, along with the separate locations UE4SS, logic, movie and
-            root mods need.
-          </p>
-        </Section>
+      <div
+        id="settings-panel"
+        role="tabpanel"
+        aria-labelledby={`settings-tab-${current.id}`}
+        className="min-h-0 flex-1 overflow-y-auto"
+      >
+        {/* Keyed by group, so each one eases in rather than swapping abruptly. */}
+        <div key={current.id} className="max-w-2xl animate-rise space-y-6 px-6 py-6">
+          {current.content}
+        </div>
       </div>
     </div>
   );
@@ -256,7 +363,7 @@ function NexusSection() {
             onChange={(event) => setKey(event.target.value)}
             placeholder="Personal API key"
             spellCheck={false}
-            className="h-8 min-w-0 flex-1 rounded-md border border-line bg-base px-2.5 font-mono text-[12px] placeholder:font-sans placeholder:text-ink-muted focus:border-accent-soft focus:outline-none"
+            className="h-8 min-w-0 flex-1 rounded-md border border-transparent bg-base px-2.5 font-mono text-[12px] placeholder:font-sans placeholder:text-ink-muted focus:border-accent-soft focus:outline-none"
           />
           <Button
             variant="primary"
@@ -275,7 +382,7 @@ function NexusSection() {
       )}
 
       {account && !account.isPremium && (
-        <p className="mt-2.5 rounded-md border border-line bg-base px-2.5 py-2 text-[11px] leading-relaxed text-ink-muted">
+        <p className="mt-2.5 rounded-md border border-transparent bg-base px-2.5 py-2 text-[11px] leading-relaxed text-ink-muted">
           Nexus only hands direct download links to Premium accounts. Without it, use the
           <span className="text-ink-soft"> Mod Manager Download </span>
           button on a mod page — the manager picks the link up and installs the mod for you.
@@ -378,7 +485,7 @@ function UpdateSection() {
           {info?.currentVersion ?? version ?? "—"}
         </code>
         {channel === "nightly" && (
-          <span className="rounded bg-warn/15 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-warn uppercase">
+          <span className="rounded-sm bg-warn/15 px-1.5 py-0.5 text-[11px] text-warn">
             nightly
           </span>
         )}
@@ -401,8 +508,8 @@ function UpdateSection() {
             className={
               "rounded-md border px-2.5 py-2 text-left transition-colors " +
               (channel === id
-                ? "border-accent bg-accent/10"
-                : "border-line hover:border-line-strong")
+                ? "border-ink-muted bg-hover"
+                : "border-transparent bg-surface hover:bg-raised")
             }
           >
             <div className="text-[12px] font-medium">{label}</div>
@@ -414,7 +521,7 @@ function UpdateSection() {
       {info?.available && (
         <div className="mt-3 rounded-md border border-accent-soft/40 bg-accent-soft/10 p-3">
           <div className="flex items-center gap-2">
-            <Download size={14} className="shrink-0 text-accent-soft" />
+            <Download size={14} className="shrink-0 text-ink-soft" />
             <span className="text-[12px] font-medium">
               Version {info.available.version} is available
             </span>

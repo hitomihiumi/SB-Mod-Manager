@@ -5,13 +5,10 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 export function TitleBar() {
   const win = getCurrentWindow();
   return (
-    <header data-tauri-drag-region className="drag-region flex h-9 shrink-0 items-center justify-between border-b border-line bg-surface pl-3">
-      <div data-tauri-drag-region className="flex items-center gap-2">
-        <div className="size-3.5 rounded-[3px] bg-gradient-to-b from-accent to-accent-soft" />
-        <span className="text-[12px] font-semibold tracking-tight text-ink-soft">
-          SB Mod Manager
-        </span>
-      </div>
+    <header data-tauri-drag-region className="drag-region flex h-9 shrink-0 items-center justify-between bg-base pl-5">
+      <span data-tauri-drag-region className="text-[12px] text-ink-muted">
+        SB Mod Manager
+      </span>
       <div className="no-drag flex h-full">
         <WindowButton onClick={() => win.minimize()} label="Minimise">
           <Minus size={14} />
@@ -43,8 +40,8 @@ function WindowButton({
       aria-label={label}
       onClick={onClick}
       className={
-        "grid h-full w-11 place-items-center text-ink-muted transition-colors " +
-        (danger ? "hover:bg-danger hover:text-white" : "hover:bg-hover hover:text-ink")
+        "grid h-full w-11 place-items-center text-ink-muted transition-colors duration-150 ease-quiet " +
+        (danger ? "hover:bg-danger/15 hover:text-danger" : "hover:bg-raised hover:text-ink")
       }
     >
       {children}

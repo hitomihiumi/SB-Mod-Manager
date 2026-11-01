@@ -144,7 +144,7 @@ function VariantBody({
       <input
         value={name}
         onChange={(event) => setName(event.target.value)}
-        className="mb-4 h-8 w-full rounded-md border border-line bg-base px-2.5 text-[13px] focus:border-accent-soft focus:outline-none"
+        className="mb-4 h-8 w-full rounded-md border border-transparent bg-base px-2.5 text-[13px] focus:border-accent-soft focus:outline-none"
       />
 
       <label className="mb-1.5 flex items-center gap-2 text-[12px] font-medium">
@@ -162,14 +162,14 @@ function VariantBody({
               aria-checked={selected}
               className={
                 "flex w-full items-center gap-2.5 rounded-md border px-2.5 py-2 text-left transition-colors " +
-                (selected ? "border-accent bg-accent/10" : "border-line hover:border-line-strong")
+                (selected ? "border-ink-muted bg-hover" : "border-transparent bg-surface hover:bg-raised")
               }
             >
               <span
                 className={
                   "grid size-4 shrink-0 place-items-center border " +
-                  (variants.exclusive ? "rounded-full " : "rounded ") +
-                  (selected ? "border-accent bg-accent" : "border-line-strong")
+                  (variants.exclusive ? "rounded-full " : "rounded-sm ") +
+                  (selected ? "border-ink bg-ink" : "border-line-strong")
                 }
               >
                 {selected && <span className="size-1.5 rounded-full bg-accent-ink" />}
@@ -252,7 +252,7 @@ function TypeBody({
       <input
         value={name}
         onChange={(event) => setName(event.target.value)}
-        className="mb-4 h-8 w-full rounded-md border border-line bg-base px-2.5 text-[13px] focus:border-accent-soft focus:outline-none"
+        className="mb-4 h-8 w-full rounded-md border border-transparent bg-base px-2.5 text-[13px] focus:border-accent-soft focus:outline-none"
       />
 
       <label className="mb-1.5 block text-[12px] font-medium">Type</label>
@@ -264,8 +264,8 @@ function TypeBody({
             className={
               "rounded-md border px-2.5 py-2 text-left transition-colors " +
               (type === candidate
-                ? "border-accent bg-accent/10"
-                : "border-line hover:border-line-strong")
+                ? "border-ink-muted bg-hover"
+                : "border-transparent bg-surface hover:bg-raised")
             }
           >
             <div className="text-[12px] font-medium">{MOD_TYPE_META[candidate].label}</div>
@@ -276,7 +276,7 @@ function TypeBody({
         ))}
       </div>
 
-      <div className="mt-4 rounded-md border border-line bg-base p-3">
+      <div className="mt-4 rounded-md border border-transparent bg-base p-3">
         <div className="mb-2 flex items-center gap-2">
           <Badge tone="accent">{MOD_TYPE_META[type].label}</Badge>
           <span className="text-[11px] text-ink-muted">

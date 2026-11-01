@@ -100,7 +100,7 @@ export function ShortcutDialog({
       <select
         value={profileId}
         onChange={(event) => setProfileId(Number(event.target.value))}
-        className="mb-4 h-8 w-full rounded-md border border-line bg-base px-2 text-[12px] focus:border-accent-soft focus:outline-none"
+        className="mb-4 h-8 w-full rounded-md border border-transparent bg-base px-2 text-[12px] focus:border-accent-soft focus:outline-none"
       >
         {profiles.map((profile) => (
           <option key={profile.id} value={profile.id}>
@@ -122,12 +122,12 @@ export function ShortcutDialog({
               onClick={() => setLaunch(choice.value)}
               className={
                 "flex w-full items-start gap-2.5 rounded-md border px-2.5 py-2 text-left transition-colors " +
-                (selected ? "border-accent bg-accent/10" : "border-line hover:border-line-strong")
+                (selected ? "border-ink-muted bg-hover" : "border-transparent bg-surface hover:bg-raised")
               }
             >
               <Icon
                 size={14}
-                className={"mt-0.5 shrink-0 " + (selected ? "text-accent-soft" : "text-ink-muted")}
+                className={"mt-0.5 shrink-0 " + (selected ? "text-ink-soft" : "text-ink-muted")}
               />
               <span className="min-w-0">
                 <span className="block text-[13px] font-medium">{choice.label}</span>
@@ -145,7 +145,7 @@ export function ShortcutDialog({
       <div className="flex items-start gap-1.5">
         <code
           aria-label="Command line"
-          className="min-w-0 flex-1 rounded-md border border-line bg-base px-2.5 py-1.5 font-mono text-[11px] leading-relaxed break-all text-ink-soft select-all"
+          className="min-w-0 flex-1 rounded-md border border-transparent bg-base px-2.5 py-1.5 font-mono text-[11px] leading-relaxed break-all text-ink-soft select-all"
         >
           {command}
         </code>

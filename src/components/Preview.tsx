@@ -55,7 +55,7 @@ export function Preview({
     return (
       <div
         className={clsx(
-          "grid place-items-center rounded-md border border-line bg-base text-ink-muted",
+          "grid place-items-center rounded-md border border-transparent bg-base text-ink-muted",
           className,
         )}
       >
@@ -70,7 +70,7 @@ export function Preview({
     <img
       src={src}
       alt={alt}
-      className={clsx("rounded-md border border-line bg-base object-contain", className)}
+      className={clsx("rounded-md border border-transparent bg-base object-contain", className)}
     />
   );
 }
@@ -92,7 +92,7 @@ export function Gallery({ folder, paths }: { folder: string; paths: string[] }) 
               title={path}
               className={clsx(
                 "shrink-0 rounded-md border-2",
-                index === current ? "border-accent" : "border-transparent",
+                index === current ? "border-ink" : "border-transparent",
               )}
             >
               <Preview folder={folder} path={path} alt={path} className="size-14" />

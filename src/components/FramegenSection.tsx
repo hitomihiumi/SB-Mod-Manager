@@ -138,7 +138,7 @@ export function FramegenSection() {
         <>
           <ul className="space-y-1.5">
             {assessment.checks.map((check) => (
-              <li key={check.id} className="flex gap-2 rounded-md border border-line bg-base px-2.5 py-2">
+              <li key={check.id} className="flex gap-2 rounded-md border border-transparent bg-base px-2.5 py-2">
                 <StateIcon state={check.state} />
                 <div className="min-w-0">
                   <div className="text-[12px] font-medium">{check.title}</div>
@@ -159,7 +159,7 @@ export function FramegenSection() {
                   setProxy(next);
                   void load(next);
                 }}
-                className="no-drag h-7 rounded-md border border-line-strong bg-base px-2 text-[12px]"
+                className="no-drag h-7 rounded-md border border-transparent bg-base px-2 text-[12px]"
               >
                 {PROXIES.map((p) => (
                   <option key={p.id} value={p.id}>
@@ -247,7 +247,7 @@ export function FramegenSection() {
 function StateIcon({ state }: { state: FramegenCheckState }) {
   const className = clsx(
     "mt-0.5 shrink-0",
-    state === "pass" && "text-accent-soft",
+    state === "pass" && "text-ink-soft",
     state === "warn" && "text-warn",
     state === "fail" && "text-danger",
     state === "info" && "text-ink-muted",

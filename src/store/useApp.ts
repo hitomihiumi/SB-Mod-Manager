@@ -44,6 +44,9 @@ export type View =
   | "reshade"
   | "settings";
 
+/** The groups the settings screen is divided into. */
+export type SettingsTab = "game" | "library" | "nexus" | "graphics" | "backups" | "app";
+
 interface Toast {
   id: number;
   kind: "info" | "error" | "success";
@@ -92,6 +95,11 @@ interface AppStore {
   refreshConflicts: () => Promise<void>;
   reindexAssets: () => Promise<void>;
   setView: (view: View) => void;
+  /** Which group of settings is open. */
+  settingsTab: SettingsTab;
+  setSettingsTab: (tab: SettingsTab) => void;
+  /** Open the settings screen on one group, e.g. from a banner that points at it. */
+  openSettings: (tab: SettingsTab) => void;
   /** The mod the Files view's conflict list is narrowed to, if any. */
   conflictFocus: { modId: number; name: string } | null;
   /** Open the Files view on the clashes one mod takes part in. */
@@ -135,6 +143,7 @@ let toastSeq = 0;
 export const useApp = create<AppStore>((set, get) => ({
   ready: false,
   view: "mods",
+  settingsTab: "game",
   conflictFocus: null,
   snapshot: null,
   selection: [],
@@ -259,6 +268,8 @@ export const useApp = create<AppStore>((set, get) => ({
   },
 
   setView: (view) => set({ view }),
+  setSettingsTab: (settingsTab) => set({ settingsTab }),
+  openSettings: (settingsTab) => set({ view: "settings", settingsTab }),
   showFileConflicts: (modId, name) => set({ view: "files", conflictFocus: { modId, name } }),
   setConflictFocus: (conflictFocus) => set({ conflictFocus }),
   setSearch: (search) => set({ search }),

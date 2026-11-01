@@ -2,23 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
 import clsx from "clsx";
-import {
-  AlertTriangle,
-  Boxes,
-  CheckCircle2,
-  Download,
-  FolderTree,
-  Keyboard,
-  Layers,
-  ListOrdered,
-  Loader2,
-  Palette,
-  Play,
-  Settings,
-  Swords,
-  Wrench,
-  X,
-} from "lucide-react";
+import { AlertTriangle, Download, Loader2, Play, Wrench, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { AskHost, isAsking } from "./components/Ask";
@@ -38,15 +22,16 @@ import { Button, Dialog } from "./components/ui";
 import { ipc, type FoundArchive, type QueueItem, type StagedInstall } from "./lib/ipc";
 import { useApp, type View } from "./store/useApp";
 
-const NAV: { id: View; label: string; icon: typeof Layers }[] = [
-  { id: "mods", label: "Mods", icon: Layers },
-  { id: "order", label: "Load order", icon: ListOrdered },
-  { id: "conflicts", label: "Conflicts", icon: Swords },
-  { id: "files", label: "Files", icon: FolderTree },
-  { id: "downloads", label: "Downloads", icon: Download },
-  { id: "collections", label: "Collections", icon: Boxes },
-  { id: "reshade", label: "ReShade", icon: Palette },
-  { id: "settings", label: "Settings", icon: Settings },
+// Words only: the screens are named plainly, and Ctrl+1…8 reach them in this order.
+const NAV: { id: View; label: string }[] = [
+  { id: "mods", label: "Mods" },
+  { id: "order", label: "Load order" },
+  { id: "conflicts", label: "Conflicts" },
+  { id: "files", label: "Files" },
+  { id: "downloads", label: "Downloads" },
+  { id: "collections", label: "Collections" },
+  { id: "reshade", label: "ReShade" },
+  { id: "settings", label: "Settings" },
 ];
 
 export default function App() {
@@ -190,34 +175,24 @@ export default function App() {
       ) : !snapshot?.game ? (
         <SetupWizard />
       ) : (
-        <div className="flex min-h-0 flex-1">
-          <nav className="flex w-14 shrink-0 flex-col items-center gap-1 border-r border-line bg-surface py-2">
-            {NAV.map((item) => {
-              const Icon = item.icon;
+        <div className="flex min-h-0 flex-1 flex-col">
+          <nav className="flex h-11 shrink-0 items-center gap-6 px-5" aria-label="Screens">
+            {NAV.map((item, index) => {
               const count = item.id === "downloads" ? active : 0;
+              const current = view === item.id;
               return (
                 <button
                   key={item.id}
                   onClick={() => setView(item.id)}
-                  title={`${item.label} (Ctrl+${NAV.indexOf(item) + 1})`}
-                  aria-label={item.label}
-                  aria-current={view === item.id}
+                  title={`${item.label} (Ctrl+${index + 1})`}
+                  aria-current={current ? "page" : undefined}
                   className={clsx(
-                    "relative grid size-10 place-items-center rounded-lg transition-colors",
-                    view === item.id
-                      ? "bg-hover text-ink"
-                      : "text-ink-muted hover:bg-hover/60 hover:text-ink-soft",
+                    "flex items-baseline gap-1.5 pt-0.5 text-[14px] font-light transition-colors duration-150 ease-quiet",
+                    current ? "text-ink" : "text-ink-muted hover:text-ink-soft",
                   )}
                 >
-                  {view === item.id && (
-                    <span className="absolute top-1/2 -left-2 h-5 w-[3px] -translate-y-1/2 rounded-r bg-accent" />
-                  )}
-                  <Icon size={17} />
-                  {count > 0 && (
-                    <span className="absolute top-1 right-1 grid h-4 min-w-4 place-items-center rounded-full bg-accent px-1 text-[9px] font-bold text-accent-ink tabular-nums">
-                      {count}
-                    </span>
-                  )}
+                  {item.label}
+                  {count > 0 && <span className="font-mono text-[10.5px] text-ink-soft">{count}</span>}
                 </button>
               );
             })}
@@ -226,38 +201,41 @@ export default function App() {
               onClick={() => setShortcuts(true)}
               title="Keyboard shortcuts (F1)"
               aria-label="Keyboard shortcuts"
-              className="mb-1 grid size-10 place-items-center rounded-lg text-ink-muted transition-colors hover:bg-hover/60 hover:text-ink-soft"
+              className="font-mono text-[12px] text-ink-muted transition-colors duration-150 ease-quiet hover:text-ink"
             >
-              <Keyboard size={16} />
+              ?
             </button>
             <PlayButton />
           </nav>
 
-          <main className="flex min-w-0 flex-1 flex-col">
-            {view === "mods" && <ModsView onAdd={pickFiles} />}
-            {view === "order" && <LoadOrderView />}
-            {view === "conflicts" && <ConflictsView />}
-            {view === "files" && <FilesView />}
-            {view === "downloads" && <DownloadsView />}
-            {view === "collections" && <CollectionsView />}
-            {view === "reshade" && <ReshadeView />}
-            {view === "settings" && <SettingsView />}
+          <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+            {/* Keyed by screen, so each one eases in rather than appearing. */}
+            <div key={view} className="flex min-h-0 flex-1 animate-rise flex-col">
+              {view === "mods" && <ModsView onAdd={pickFiles} />}
+              {view === "order" && <LoadOrderView />}
+              {view === "conflicts" && <ConflictsView />}
+              {view === "files" && <FilesView />}
+              {view === "downloads" && <DownloadsView />}
+              {view === "collections" && <CollectionsView />}
+              {view === "reshade" && <ReshadeView />}
+              {view === "settings" && <SettingsView />}
+            </div>
             <ApplyBar />
           </main>
         </div>
       )}
 
       {dropping && (
-        <div className="pointer-events-none fixed inset-0 z-40 grid place-items-center bg-base/80">
-          <div className="rounded-xl border-2 border-dashed border-accent px-8 py-6 text-center">
-            <p className="text-[14px] font-semibold">Drop to install</p>
+        <div className="pointer-events-none fixed inset-0 z-40 grid animate-fade place-items-center bg-base/85">
+          <div className="border border-dashed border-ink-muted px-8 py-6 text-center">
+            <p className="text-[15px] font-light">Drop to install</p>
             <p className="mt-1 text-[12px] text-ink-muted">.zip, .7z, .rar or a mod folder</p>
           </div>
         </div>
       )}
 
       {busy && (
-        <div className="fixed inset-x-0 bottom-0 z-40 flex items-center gap-2 border-t border-line bg-surface px-4 py-2 text-[12px] text-ink-soft">
+        <div className="fixed inset-x-0 bottom-0 z-40 flex animate-rise items-center gap-2 bg-raised px-5 py-2.5 text-[12px] text-ink-soft">
           <Loader2 size={13} className="animate-spin" />
           <span className="truncate">{busy.label}</span>
           {busy.total > 1 && (
@@ -289,7 +267,7 @@ function ApplyBar() {
   if (pending.length === 0 && drift.length === 0) return null;
 
   return (
-    <div className="flex h-11 shrink-0 items-center gap-3 border-t border-line bg-raised px-3">
+    <div className="flex h-12 shrink-0 animate-bar items-center gap-4 bg-surface px-5">
       {drift.length > 0 && (
         <span className="flex items-center gap-1.5 text-[12px] text-warn">
           <AlertTriangle size={13} />
@@ -298,10 +276,10 @@ function ApplyBar() {
       )}
       {pending.length > 0 && (
         <>
-          <span className="text-[12px] text-ink-soft">
-            {pending.length} pending change{pending.length === 1 ? "" : "s"}
+          <span className="text-[13px] whitespace-nowrap text-ink">
+            {pending.length} change{pending.length === 1 ? "" : "s"} not applied
           </span>
-          <span className="truncate text-[11px] text-ink-muted">
+          <span className="min-w-0 truncate text-[12px] text-ink-muted">
             {pending
               .slice(0, 3)
               .map((p) => `${p.kind} ${p.name}`)
@@ -322,8 +300,8 @@ function ApplyBar() {
         </Button>
       )}
       {pending.length > 0 && (
-        <Button variant="primary" size="sm" onClick={() => void applyChanges()}>
-          <CheckCircle2 size={13} /> Apply
+        <Button variant="primary" onClick={() => void applyChanges()}>
+          Apply
         </Button>
       )}
     </div>
@@ -337,8 +315,8 @@ function FoundBar() {
   if (found.length === 0) return null;
   const names = found.map((a) => a.name);
   return (
-    <div className="fixed bottom-14 left-1/2 z-40 flex w-[min(640px,90vw)] -translate-x-1/2 items-center gap-3 rounded-lg border border-accent/40 bg-raised px-3 py-2.5 shadow-lg">
-      <Download size={15} className="shrink-0 text-accent-soft" />
+    <div className="fixed bottom-14 left-1/2 z-40 flex w-[min(640px,90vw)] -translate-x-1/2 animate-rise items-center gap-3 bg-hover px-4 py-3">
+      <Download size={15} className="shrink-0 text-ink-soft" />
       <p className="min-w-0 flex-1 text-[12px] leading-relaxed">
         {found.length === 1 ? "New mod archive" : `${found.length} new mod archives`} in your
         downloads folder:{" "}
@@ -368,7 +346,7 @@ function Toasts() {
       {toasts.length > 1 && (
         <button
           onClick={dismissAll}
-          className="self-end rounded-md border border-line bg-raised px-2 py-1 text-[11px] text-ink-soft shadow hover:text-ink"
+          className="self-end bg-hover px-2.5 py-1 text-[11px] text-ink-soft transition-colors duration-150 ease-quiet hover:text-ink"
         >
           Dismiss all ({toasts.length})
         </button>
@@ -377,22 +355,19 @@ function Toasts() {
         {toasts.map((toast) => (
           <div
             key={toast.id}
-            className={clsx(
-              // Opaque, so whatever is underneath never shows through.
-              "flex shrink-0 items-start gap-2 rounded-lg border border-l-4 bg-raised px-3 py-2.5 shadow-lg",
-              toast.kind === "error"
-                ? "border-danger/50 border-l-danger"
-                : toast.kind === "success"
-                  ? "border-ok/40 border-l-ok"
-                  : "border-line border-l-accent",
-            )}
+            // Opaque and one layer up, so whatever is underneath never shows through.
+            className="flex shrink-0 animate-rise items-start gap-3 bg-hover px-4 py-3"
           >
-            <p className="min-w-0 flex-1 text-[12px] leading-relaxed break-words">
-              {toast.message}
-            </p>
+            <span
+              className={clsx(
+                "mt-[7px] size-1.5 shrink-0 rounded-full",
+                toast.kind === "error" ? "bg-danger" : toast.kind === "success" ? "bg-ok" : "bg-ink-muted",
+              )}
+            />
+            <p className="min-w-0 flex-1 text-[12px] leading-relaxed break-words">{toast.message}</p>
             <button
               onClick={() => dismiss(toast.id)}
-              className="shrink-0 text-ink-muted hover:text-ink"
+              className="shrink-0 text-ink-muted transition-colors duration-150 ease-quiet hover:text-ink"
               aria-label="Dismiss"
             >
               <X size={13} />
@@ -444,13 +419,13 @@ function ShortcutsDialog({ onClose }: { onClose: () => void }) {
       <div className="space-y-4">
         {SHORTCUTS.map((section) => (
           <section key={section.group}>
-            <h3 className="mb-1.5 text-[11px] font-semibold tracking-wide text-ink-muted uppercase">
+            <h3 className="mb-2 text-[12px] text-ink-muted">
               {section.group}
             </h3>
             <ul className="space-y-1">
               {section.keys.map(([keys, what]) => (
                 <li key={keys} className="flex items-center gap-3 text-[12px]">
-                  <kbd className="w-36 shrink-0 rounded border border-line bg-base px-1.5 py-0.5 text-center font-mono text-[11px] text-ink-soft">
+                  <kbd className="w-36 shrink-0 bg-base px-1.5 py-0.5 text-center font-mono text-[11px] text-ink-soft">
                     {keys}
                   </kbd>
                   <span className="text-ink-soft">{what}</span>
@@ -466,7 +441,7 @@ function ShortcutsDialog({ onClose }: { onClose: () => void }) {
 
 /**
  * Start the game. Under the virtual file system this is the only way the game
- * sees its mods, so it lives on the rail rather than in a menu.
+ * sees its mods, so it stays in reach on every screen.
  */
 function PlayButton() {
   const snapshot = useApp((s) => s.snapshot);
@@ -492,14 +467,17 @@ function PlayButton() {
       disabled={starting}
       title={label}
       aria-label={label}
-      className="relative grid size-10 place-items-center rounded-lg bg-accent text-accent-ink transition-colors hover:bg-accent/85 disabled:opacity-50"
+      className="group flex items-center gap-2.5 text-[14px] font-light text-ink disabled:opacity-50"
     >
-      {starting ? <Loader2 size={17} className="animate-spin" /> : <Play size={17} />}
-      {virtual && (
-        <span className="absolute -right-0.5 -bottom-0.5 grid size-3.5 place-items-center rounded-full border border-surface bg-base">
-          <Layers size={8} className="text-accent-soft" />
-        </span>
-      )}
+      <span className="grid size-[26px] place-items-center rounded-full border border-ink-muted transition-[border-color,transform] duration-200 ease-quiet group-hover:border-ink group-active:scale-90">
+        {starting ? (
+          <Loader2 size={11} className="animate-spin" />
+        ) : (
+          <Play size={10} fill="currentColor" strokeWidth={0} className="translate-x-px" />
+        )}
+      </span>
+      Play
+      {virtual && <span className="font-mono text-[10.5px] text-ink-muted">virtual</span>}
     </button>
   );
 }

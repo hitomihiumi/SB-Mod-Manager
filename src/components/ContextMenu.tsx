@@ -86,7 +86,7 @@ function Panel({ items, x, y, side }: { items: MenuItem[]; x: number; y: number;
       role="menu"
       onMouseDown={(event) => event.stopPropagation()}
       onContextMenu={(event) => event.preventDefault()}
-      className="fixed z-[60] min-w-48 rounded-lg border border-line-strong bg-raised p-1 shadow-2xl"
+      className="fixed z-[60] min-w-48 animate-rise bg-hover p-1"
       style={place}
     >
       {items.map((item, index) =>
@@ -103,7 +103,7 @@ function Panel({ items, x, y, side }: { items: MenuItem[]; x: number; y: number;
                 item.onSelect?.();
               }}
               className={clsx(
-                "flex h-7 w-full items-center gap-2 rounded px-2 text-left text-[12px] disabled:opacity-40",
+                "flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left text-[12px] disabled:opacity-40",
                 item.danger ? "text-danger hover:bg-danger/10" : "hover:bg-hover",
                 open === index && item.items && "bg-hover",
               )}

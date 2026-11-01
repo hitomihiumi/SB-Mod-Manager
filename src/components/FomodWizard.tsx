@@ -155,14 +155,14 @@ export function FomodWizard({ staged, queueLength }: { staged: StagedInstall; qu
           value={name}
           onChange={(event) => setName(event.target.value)}
           aria-label="Mod name"
-          className="h-8 min-w-0 flex-1 rounded-md border border-line bg-base px-2.5 text-[13px] focus:border-accent-soft focus:outline-none"
+          className="h-8 min-w-0 flex-1 rounded-md border border-transparent bg-base px-2.5 text-[13px] focus:border-accent-soft focus:outline-none"
         />
         {fomod.remembered && <Badge tone="accent">Your answers last time</Badge>}
       </div>
 
       <div className="grid grid-cols-[1fr_300px] gap-4">
         <div className="min-h-72 space-y-4">
-          <h3 className="text-[14px] font-semibold">{step?.name}</h3>
+          <h3 className="text-[14px] font-medium">{step?.name}</h3>
           {step?.groups.map((group, g) => (
             <GroupView
               key={`${stepIndex}:${g}`}
@@ -255,15 +255,15 @@ function GroupView({
               aria-disabled={locked}
               className={clsx(
                 "flex w-full items-center gap-2.5 rounded-md border px-2.5 py-1.5 text-left transition-colors",
-                on ? "border-accent bg-accent/10" : "border-line hover:border-line-strong",
+                on ? "border-ink-muted bg-hover" : "border-transparent bg-surface hover:bg-raised",
                 kind === "notUsable" && "opacity-50",
               )}
             >
               <span
                 className={clsx(
                   "grid size-4 shrink-0 place-items-center border",
-                  radio ? "rounded-full" : "rounded",
-                  on ? "border-accent bg-accent" : "border-line-strong",
+                  radio ? "rounded-full" : "rounded-sm",
+                  on ? "border-ink bg-ink" : "border-line-strong",
                 )}
               >
                 {on &&
