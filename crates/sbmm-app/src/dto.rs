@@ -696,3 +696,45 @@ pub struct RedetectReport {
     /// Set when the changes were applied at once.
     pub applied: Option<ApplyReport>,
 }
+
+/// One entry of the mod library on disk, for the explorer's real-files view.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryEntry {
+    /// The file or folder name as it is on disk.
+    pub name: String,
+    /// What to call it instead: a mod's name, where this is that mod's own folder.
+    pub label: Option<String>,
+    pub is_dir: bool,
+    /// Relative to the mods folder, `/`-separated; what the other calls take.
+    pub path: String,
+    /// Where it really is, for opening it in another program.
+    pub absolute: String,
+    pub size: i64,
+    /// Seconds since the Unix epoch.
+    pub modified: Option<i64>,
+    /// The mod whose folder this lies in (or is), when there is one.
+    pub mod_id: Option<i64>,
+}
+
+/// A folder of the mod library.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryListing {
+    /// Relative to the mods folder; empty is the root, which lists the mods.
+    pub dir: String,
+    pub mod_id: Option<i64>,
+    pub mod_name: Option<String>,
+    pub entries: Vec<LibraryEntry>,
+}
+
+/// What a move, rename or new folder did.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryChange {
+    pub moved: u32,
+    /// One line per thing that was left alone, and why.
+    pub skipped: Vec<String>,
+    /// The mods whose files changed place, which need detecting again.
+    pub mod_ids: Vec<i64>,
+}

@@ -104,8 +104,8 @@ function Panel({ items, x, y, side }: { items: MenuItem[]; x: number; y: number;
               }}
               className={clsx(
                 "flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left text-[12px] disabled:opacity-40",
-                item.danger ? "text-danger hover:bg-danger/10" : "hover:bg-hover",
-                open === index && item.items && "bg-hover",
+                item.danger ? "text-danger hover:bg-danger/10" : "transition-colors duration-100 ease-quiet hover:bg-line",
+                open === index && item.items && "bg-line",
               )}
             >
               <span className="grid w-4 shrink-0 place-items-center text-ink-muted">{item.icon}</span>

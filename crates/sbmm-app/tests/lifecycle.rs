@@ -3424,3 +3424,113 @@ fn ue4ss_keeps_its_bundled_mods_switched_on_with_hard_links() {
     fx.app.apply().unwrap();
     assert_eq!(fx.game_snapshot(), before);
 }
+
+/// Where `name` is inside the library listing at `dir`, searching down.
+fn find_in_library(app: &App, dir: &str, name: &str) -> Option<String> {
+    for entry in app.library_list(dir).unwrap().entries {
+        if entry.name == name {
+            return Some(entry.path);
+        }
+        if entry.is_dir {
+            if let Some(found) = find_in_library(app, &entry.path, name) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
+#[test]
+fn explorer_moves_files_inside_the_library_and_nowhere_else() {
+    let mut fx = Fixture::new();
+    let id = fx.install_folder(
+        "Looks",
+        &[("SB/Content/a.txt", "a"), ("SB/Content/b.txt", "b")],
+    );
+
+    // The root lists mods, under their own names.
+    let root = fx.app.library_list("").unwrap();
+    let top = root
+        .entries
+        .iter()
+        .find(|e| e.label.as_deref() == Some("Looks"))
+        .expect("the mod shows up by name");
+    assert_eq!(top.mod_id, Some(id));
+    let top = top.path.clone();
+
+    let a = find_in_library(&fx.app, "", "a.txt").expect("a.txt is listed");
+    let content = a.rsplit_once('/').unwrap().0.to_string();
+    let inside = fx.app.library_list(&content).unwrap();
+    assert_eq!(inside.mod_id, Some(id));
+    assert_eq!(inside.entries.len(), 2);
+
+    // A new folder, and a file moved into it.
+    fx.app.library_mkdir(&content, "Extra").unwrap();
+    assert!(
+        fx.app.library_mkdir(&content, "Extra").is_err(),
+        "no duplicate folders"
+    );
+    let change = fx
+        .app
+        .library_move(std::slice::from_ref(&a), &format!("{content}/Extra"))
+        .unwrap();
+    assert_eq!((change.moved, change.mod_ids.clone()), (1, vec![id]));
+    assert!(change.skipped.is_empty());
+    assert!(find_in_library(&fx.app, &format!("{content}/Extra"), "a.txt").is_some());
+    assert!(find_in_library(&fx.app, &content, "b.txt").is_some());
+
+    // A name that is taken is left alone, and says so; the rest still moves.
+    let b = find_in_library(&fx.app, &content, "b.txt").unwrap();
+    fs::write(fx.app.mods_dir().join(&content).join("a.txt"), "again").unwrap();
+    let again = format!("{content}/a.txt");
+    let change = fx
+        .app
+        .library_move(&[again.clone(), b.clone()], &format!("{content}/Extra"))
+        .unwrap();
+    assert_eq!(change.moved, 1);
+    assert_eq!(change.skipped.len(), 1);
+    assert!(
+        fx.app.mods_dir().join(&again).exists(),
+        "the clash stayed put"
+    );
+
+    // A folder cannot be moved into itself, nor a mod's own folder anywhere.
+    let change = fx
+        .app
+        .library_move(&[format!("{content}/Extra")], &format!("{content}/Extra"))
+        .unwrap();
+    assert_eq!(change.moved, 0);
+    assert_eq!(change.skipped.len(), 1);
+    let change = fx
+        .app
+        .library_move(std::slice::from_ref(&top), &content)
+        .unwrap();
+    assert_eq!((change.moved, change.skipped.len()), (0, 1));
+
+    // Renaming works inside a mod, not on the mod's folder, and not onto a name in use.
+    let renamed = fx
+        .app
+        .library_rename(&format!("{content}/Extra/b.txt"), "c.txt")
+        .unwrap();
+    assert_eq!(renamed.mod_ids, vec![id]);
+    assert!(find_in_library(&fx.app, &content, "c.txt").is_some());
+    assert!(fx.app.library_rename(&top, "Other").is_err());
+    assert!(fx
+        .app
+        .library_rename(&format!("{content}/Extra/c.txt"), "a.txt")
+        .is_err());
+    assert!(fx
+        .app
+        .library_rename(&format!("{content}/Extra/c.txt"), "..")
+        .is_err());
+
+    // Nothing reaches outside the mods folder, however the path is spelled.
+    assert!(fx.app.library_list("../").is_err());
+    assert!(fx.app.library_list(&format!("{top}/../..")).is_err());
+    assert!(
+        fx.app.library_move(&[a], "").is_err(),
+        "the top level takes no files"
+    );
+    assert!(fx.app.library_move(&["..\\x".into()], &content).is_err());
+    assert!(fx.app.library_mkdir("", "x").is_err());
+}
