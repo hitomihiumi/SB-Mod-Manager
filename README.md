@@ -61,10 +61,13 @@ reason a mod "doesn't work". This manager gets it right for you.
   loose files.
 - **Explorer.** The Files screen has tabs, each showing the game folder as
   mods make it, the mod library as it lies on disk, or the clashing paths.
-  In the library, files move between folders by dragging (also onto another
-  tab) or Cut and Paste, and can be renamed; the mods touched are detected
-  again so their files land where they should. Any file opens in the system's
-  program, or in one you pick.
+  In the library, files move by dragging (Ctrl+drag copies, also onto another
+  tab) or Cut/Copy and Paste; they are renamed in place, duplicated, deleted
+  into a trash the last delete can be undone from, and copied in by dropping
+  them from Windows Explorer. Columns sort, a filter narrows the folder, tabs
+  keep a back/forward history, and a preview shows pictures and text files.
+  The mods touched are detected again so their files land where they should.
+  Any file opens in the system's program, or in one you pick.
 - **Mod details.** What a mod changes, its Nexus page info and requirements,
   notes, tags, a picture, and an editor for its INI/JSON/Lua settings.
   Your settings are kept across reinstalls and updates.

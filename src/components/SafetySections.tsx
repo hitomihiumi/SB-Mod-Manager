@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { formatBytes } from "../lib/format";
 import { ipc, type GameBuild, type RestorePoint, type Saves } from "../lib/ipc";
 import { useApp } from "../store/useApp";
-import { Badge, Button, Checkbox, Section } from "./ui";
+import { Badge, Button, Section, SwitchRow } from "./ui";
 
 function buildName(build: GameBuild): string {
   if (build.buildId) return `build ${build.buildId}`;
@@ -299,13 +299,13 @@ export function SavesSection() {
       </p>
 
       <div className="mt-3 flex items-center gap-3">
-        <label className="flex flex-1 cursor-pointer items-center gap-2.5">
-          <Checkbox
+        <div className="flex-1">
+          <SwitchRow
+            label="Back up before every launch"
             checked={saves?.backupOnLaunch ?? true}
             onChange={(next) => void run(() => ipc.setBackupSavesOnLaunch(next))}
           />
-          <span className="text-[13px]">Back up before every launch</span>
-        </label>
+        </div>
         <Button
           variant="outline"
           disabled={working || !saves?.exists}

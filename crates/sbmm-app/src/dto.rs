@@ -737,4 +737,21 @@ pub struct LibraryChange {
     pub skipped: Vec<String>,
     /// The mods whose files changed place, which need detecting again.
     pub mod_ids: Vec<i64>,
+    /// After a delete: what to pass to `library_restore` to take it back.
+    pub undo: Option<String>,
+}
+
+/// A file of the library as the explorer's preview shows it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryPreview {
+    /// `image`, `text`, or `none` for anything else (or too large).
+    pub kind: String,
+    /// A `data:` URL for an image.
+    pub image: Option<String>,
+    /// The start of a text file.
+    pub text: Option<String>,
+    /// The text was cut short.
+    pub truncated: bool,
+    pub size: i64,
 }

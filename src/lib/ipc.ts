@@ -191,6 +191,17 @@ export interface LibraryChange {
   skipped: string[];
   /** The mods whose files changed place, which need detecting again. */
   modIds: number[];
+  /** After a delete: hand to `libraryRestore` to take it back. */
+  undo: string | null;
+}
+
+/** A library file as the explorer's preview shows it. */
+export interface LibraryPreview {
+  kind: "image" | "text" | "none";
+  image: string | null;
+  text: string | null;
+  truncated: boolean;
+  size: number;
 }
 
 export interface VfsListing {
@@ -616,6 +627,13 @@ export const ipc = {
   libraryRename: (path: string, newName: string) =>
     invoke<LibraryChange>("library_rename", { path, newName }),
   libraryMkdir: (dir: string, name: string) => invoke<void>("library_mkdir", { dir, name }),
+  libraryCopy: (paths: string[], toDir: string) =>
+    invoke<LibraryChange>("library_copy", { paths, toDir }),
+  libraryImport: (sources: string[], toDir: string) =>
+    invoke<LibraryChange>("library_import", { sources, toDir }),
+  libraryDelete: (paths: string[]) => invoke<LibraryChange>("library_delete", { paths }),
+  libraryRestore: (undo: string) => invoke<LibraryChange>("library_restore", { undo }),
+  libraryPreview: (path: string) => invoke<LibraryPreview>("library_preview", { path }),
   /** Open with the program the system has for it, or with the program at `program`. */
   openPath: (path: string, program?: string) =>
     invoke<void>("open_path", { path, with: program ?? null }),

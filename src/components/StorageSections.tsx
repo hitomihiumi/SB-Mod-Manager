@@ -7,7 +7,7 @@ import { formatBytes } from "../lib/format";
 import { ipc, type Cleanup, type StorageReport, type WatchSettings } from "../lib/ipc";
 import { useApp } from "../store/useApp";
 import { askConfirm } from "./Ask";
-import { Button, Checkbox, Section } from "./ui";
+import { Button, Section, SwitchRow } from "./ui";
 
 /** Which cleanup frees what in each part of the library. */
 const CLEANUP: Record<string, { what: Cleanup; label: string; hint: string }> = {
@@ -210,13 +210,13 @@ export function WatchSection() {
         )}
       </div>
       {settings?.dir && (
-        <label className="mt-3 flex cursor-pointer items-center gap-2.5">
-          <Checkbox
+        <div className="mt-3">
+          <SwitchRow
+            label="Install without asking"
             checked={settings.autoInstall}
             onChange={(next) => void change(() => ipc.setWatchAutoInstall(next))}
           />
-          <span className="text-[13px]">Install without asking</span>
-        </label>
+        </div>
       )}
     </Section>
   );

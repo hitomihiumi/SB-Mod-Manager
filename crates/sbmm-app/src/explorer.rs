@@ -9,8 +9,19 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::time::UNIX_EPOCH;
 
-use crate::dto::{LibraryChange, LibraryEntry, LibraryListing};
-use crate::{path_string, App, AppError, Result};
+use base64::Engine;
+
+use crate::dto::{LibraryChange, LibraryEntry, LibraryListing, LibraryPreview};
+use crate::{copy_tree, path_string, App, AppError, Result};
+
+/// Deleted items are kept this long in the library's trash, to undo.
+const TRASH_DAYS: u64 = 7;
+/// The start of a text file the preview shows.
+const PREVIEW_TEXT_BYTES: u64 = 128 * 1024;
+/// An image larger than this is not previewed.
+const PREVIEW_IMAGE_BYTES: u64 = 12 * 1024 * 1024;
+/// What a trash entry remembers: where each item came from.
+const TRASH_MANIFEST: &str = "restore.json";
 
 /// A name that is one plain component: no separators, no way up, nothing a
 /// file system treats specially.
@@ -205,6 +216,7 @@ impl App {
             moved: 1,
             skipped: Vec::new(),
             mod_ids: self.mods_in(&BTreeSet::from([names[0].to_string()]))?,
+            undo: None,
         })
     }
 
@@ -221,5 +233,355 @@ impl App {
         }
         let path = self.library_path(dir)?.join(name);
         std::fs::create_dir(&path).map_err(|source| AppError::Io { path, source })
+    }
+
+    // -- copying, deleting, bringing files in ---------------------------------
+
+    /// Copy files and folders into `to_dir`. A name already taken there gets
+    /// " - copy" (then " - copy 2" and so on), so copying into the same
+    /// folder duplicates.
+    pub fn library_copy(&self, paths: &[String], to_dir: &str) -> Result<LibraryChange> {
+        let (to, dest) = self.destination(to_dir)?;
+        let mut change = LibraryChange::default();
+        let mut touched = BTreeSet::new();
+        for path in paths {
+            let names = parts(path);
+            let Some(name) = names.last() else { continue };
+            let src = self.library_path(path)?;
+            if names.len() < 2 {
+                change
+                    .skipped
+                    .push(format!("{name}: copy a mod's files, not its own folder"));
+                continue;
+            }
+            if !src.exists() {
+                change
+                    .skipped
+                    .push(format!("{name}: it is no longer there"));
+                continue;
+            }
+            if src.is_dir() && dest.starts_with(&src) {
+                change
+                    .skipped
+                    .push(format!("{name}: a folder cannot be copied into itself"));
+                continue;
+            }
+            let target = free_name(&dest, name);
+            match copy_any(&src, &target) {
+                Ok(()) => change.moved += 1,
+                Err(error) => change.skipped.push(format!("{name}: {error}")),
+            }
+        }
+        if change.moved > 0 {
+            touched.insert(parts(&to)[0].to_string());
+        }
+        change.mod_ids = self.mods_in(&touched)?;
+        Ok(change)
+    }
+
+    /// Bring files and folders from elsewhere on the computer into `to_dir`
+    /// — dropped onto the explorer from the system's file manager. They are
+    /// copied; the originals stay where they are.
+    pub fn library_import(&self, sources: &[String], to_dir: &str) -> Result<LibraryChange> {
+        let (to, dest) = self.destination(to_dir)?;
+        let mut change = LibraryChange::default();
+        for source in sources {
+            let src = PathBuf::from(source);
+            let name = src
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| source.clone());
+            if !src.exists() {
+                change
+                    .skipped
+                    .push(format!("{name}: it is no longer there"));
+                continue;
+            }
+            if dest.starts_with(&src) {
+                change
+                    .skipped
+                    .push(format!("{name}: a folder cannot be copied into itself"));
+                continue;
+            }
+            let target = free_name(&dest, &name);
+            match copy_any(&src, &target) {
+                Ok(()) => change.moved += 1,
+                Err(error) => change.skipped.push(format!("{name}: {error}")),
+            }
+        }
+        if change.moved > 0 {
+            change.mod_ids = self.mods_in(&BTreeSet::from([parts(&to)[0].to_string()]))?;
+        }
+        Ok(change)
+    }
+
+    /// Delete files and folders inside mods — into the library's trash, so
+    /// the change can be taken back with [`App::library_restore`] for a week.
+    /// A mod's own folder goes with uninstalling the mod, not from here.
+    pub fn library_delete(&self, paths: &[String]) -> Result<LibraryChange> {
+        self.purge_trash();
+        let id = format!(
+            "{}",
+            std::time::SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_millis())
+                .unwrap_or(0)
+        );
+        let bin = self.trash_dir().join(&id);
+        let mut change = LibraryChange::default();
+        let mut touched = BTreeSet::new();
+        let mut restore: Vec<String> = Vec::new();
+        for path in paths {
+            let names = parts(path);
+            let Some(name) = names.last() else { continue };
+            let src = self.library_path(path)?;
+            if names.len() < 2 {
+                change.skipped.push(format!(
+                    "{name}: a mod's own folder goes when the mod is uninstalled"
+                ));
+                continue;
+            }
+            if !src.exists() {
+                continue;
+            }
+            let target = bin.join(restore.len().to_string());
+            if let Err(error) = std::fs::create_dir_all(&bin).and_then(|()| {
+                std::fs::rename(&src, &target).or_else(|_| {
+                    copy_any(&src, &target)?;
+                    remove_any(&src)
+                })
+            }) {
+                change.skipped.push(format!("{name}: {error}"));
+                continue;
+            }
+            restore.push(names.join("/"));
+            change.moved += 1;
+            touched.insert(names[0].to_string());
+        }
+        if !restore.is_empty() {
+            let manifest = bin.join(TRASH_MANIFEST);
+            std::fs::write(&manifest, serde_json::to_vec(&restore)?)
+                .map_err(|e| AppError::io(&manifest, e))?;
+            change.undo = Some(id);
+        }
+        change.mod_ids = self.mods_in(&touched)?;
+        Ok(change)
+    }
+
+    /// Put back what a delete took out, where it was. What finds its place
+    /// taken stays in the trash and is reported.
+    pub fn library_restore(&self, undo: &str) -> Result<LibraryChange> {
+        if !undo.chars().all(|c| c.is_ascii_digit()) || undo.is_empty() {
+            return Err(AppError::Invalid(
+                "there is nothing like that to undo".into(),
+            ));
+        }
+        let bin = self.trash_dir().join(undo);
+        let manifest = bin.join(TRASH_MANIFEST);
+        let text = std::fs::read(&manifest).map_err(|e| AppError::io(&manifest, e))?;
+        let restore: Vec<String> = serde_json::from_slice(&text)?;
+        let mut change = LibraryChange::default();
+        let mut touched = BTreeSet::new();
+        let mut left = false;
+        for (index, path) in restore.iter().enumerate() {
+            let held = bin.join(index.to_string());
+            let target = self.library_path(path)?;
+            let name = parts(path).last().copied().unwrap_or_default().to_string();
+            if target.exists() {
+                change
+                    .skipped
+                    .push(format!("{name}: something else is in its place now"));
+                left = true;
+                continue;
+            }
+            if let Some(parent) = target.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
+            }
+            match std::fs::rename(&held, &target) {
+                Ok(()) => {
+                    change.moved += 1;
+                    touched.insert(parts(path)[0].to_string());
+                }
+                Err(error) => {
+                    change.skipped.push(format!("{name}: {error}"));
+                    left = true;
+                }
+            }
+        }
+        if !left {
+            let _ = std::fs::remove_dir_all(&bin);
+        }
+        change.mod_ids = self.mods_in(&touched)?;
+        Ok(change)
+    }
+
+    /// What a file holds, for the explorer's preview: a picture, the start
+    /// of a text file, or nothing for anything else.
+    pub fn library_preview(&self, path: &str) -> Result<LibraryPreview> {
+        let full = self.library_path(path)?;
+        let meta = std::fs::metadata(&full).map_err(|e| AppError::io(&full, e))?;
+        let size = meta.len();
+        let ext = full
+            .extension()
+            .map(|e| e.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_default();
+        let none = || LibraryPreview {
+            kind: "none".into(),
+            image: None,
+            text: None,
+            truncated: false,
+            size: size as i64,
+        };
+        if meta.is_dir() {
+            return Ok(none());
+        }
+        let mime = match ext.as_str() {
+            "png" => Some("image/png"),
+            "jpg" | "jpeg" => Some("image/jpeg"),
+            "webp" => Some("image/webp"),
+            "gif" => Some("image/gif"),
+            "bmp" => Some("image/bmp"),
+            _ => None,
+        };
+        if let Some(mime) = mime {
+            if size > PREVIEW_IMAGE_BYTES {
+                return Ok(none());
+            }
+            let bytes = std::fs::read(&full).map_err(|e| AppError::io(&full, e))?;
+            return Ok(LibraryPreview {
+                kind: "image".into(),
+                image: Some(format!(
+                    "data:{mime};base64,{}",
+                    base64::engine::general_purpose::STANDARD.encode(bytes)
+                )),
+                text: None,
+                truncated: false,
+                size: size as i64,
+            });
+        }
+        let texty = matches!(
+            ext.as_str(),
+            "txt"
+                | "md"
+                | "ini"
+                | "cfg"
+                | "conf"
+                | "json"
+                | "lua"
+                | "toml"
+                | "yaml"
+                | "yml"
+                | "xml"
+                | "log"
+                | "csv"
+                | "nfo"
+        );
+        if !texty {
+            return Ok(none());
+        }
+        use std::io::Read;
+        let mut bytes = Vec::new();
+        std::fs::File::open(&full)
+            .and_then(|file| file.take(PREVIEW_TEXT_BYTES).read_to_end(&mut bytes))
+            .map_err(|e| AppError::io(&full, e))?;
+        let text = match bytes.strip_prefix(&[0xFF, 0xFE]) {
+            Some(rest) => String::from_utf16_lossy(
+                &rest
+                    .chunks_exact(2)
+                    .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+                    .collect::<Vec<_>>(),
+            ),
+            None => {
+                String::from_utf8_lossy(bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&bytes))
+                    .into_owned()
+            }
+        };
+        Ok(LibraryPreview {
+            kind: "text".into(),
+            image: None,
+            text: Some(text),
+            truncated: size > PREVIEW_TEXT_BYTES,
+            size: size as i64,
+        })
+    }
+
+    /// A folder inside a mod to put things in.
+    fn destination(&self, to_dir: &str) -> Result<(String, PathBuf)> {
+        let to = parts(to_dir).join("/");
+        if to.is_empty() {
+            return Err(AppError::Invalid(
+                "Choose a folder inside a mod: the top level holds only the mods' own folders."
+                    .into(),
+            ));
+        }
+        let dest = self.library_path(&to)?;
+        if !dest.is_dir() {
+            return Err(AppError::Invalid(format!("{to} is not a folder")));
+        }
+        Ok((to, dest))
+    }
+
+    fn trash_dir(&self) -> PathBuf {
+        self.library_root().join("trash")
+    }
+
+    /// Forget deletes older than [`TRASH_DAYS`].
+    fn purge_trash(&self) {
+        let Ok(entries) = std::fs::read_dir(self.trash_dir()) else {
+            return;
+        };
+        let keep = std::time::Duration::from_secs(TRASH_DAYS * 24 * 60 * 60);
+        for entry in entries.flatten() {
+            let old = entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.elapsed().ok())
+                .is_some_and(|age| age > keep);
+            if old {
+                let _ = std::fs::remove_dir_all(entry.path());
+            }
+        }
+    }
+}
+
+/// `name` in `dir`, or the first of "name - copy", "name - copy 2"… that is
+/// free. The extension stays at the end.
+fn free_name(dir: &std::path::Path, name: &str) -> PathBuf {
+    let first = dir.join(name);
+    if !first.exists() {
+        return first;
+    }
+    let (stem, ext) = match name.rsplit_once('.') {
+        Some((stem, ext)) if !stem.is_empty() => (stem, format!(".{ext}")),
+        _ => (name, String::new()),
+    };
+    (1..)
+        .map(|n| {
+            let suffix = if n == 1 {
+                " - copy".to_string()
+            } else {
+                format!(" - copy {n}")
+            };
+            dir.join(format!("{stem}{suffix}{ext}"))
+        })
+        .find(|candidate| !candidate.exists())
+        .expect("an unused name")
+}
+
+fn copy_any(src: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+    if src.is_dir() {
+        std::fs::create_dir_all(to)?;
+        copy_tree(src, to).map_err(|e| std::io::Error::other(e.to_string()))
+    } else {
+        std::fs::copy(src, to).map(|_| ())
+    }
+}
+
+fn remove_any(path: &std::path::Path) -> std::io::Result<()> {
+    if path.is_dir() {
+        std::fs::remove_dir_all(path)
+    } else {
+        std::fs::remove_file(path)
     }
 }
