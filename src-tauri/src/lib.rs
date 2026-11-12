@@ -430,7 +430,7 @@ fn index_mod_assets(state: tauri::State<'_, AppState>) -> Result<usize, String> 
     with_app!(state, |app| app.index_missing_assets())
 }
 
-const USER_AGENT: &str = concat!("SBModManager/", env!("CARGO_PKG_VERSION"));
+const USER_AGENT: &str = concat!("Stelle/", env!("CARGO_PKG_VERSION"));
 
 // -- downloads --------------------------------------------------------------
 
@@ -927,5 +927,5 @@ pub fn run() {
             modlist::update_mods,
         ])
         .run(tauri::generate_context!())
-        .expect("failed to start SB Mod Manager");
+        .expect("failed to start Stelle");
 }

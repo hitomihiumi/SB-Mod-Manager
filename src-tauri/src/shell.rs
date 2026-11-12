@@ -153,8 +153,8 @@ pub fn create_profile_shortcut(
 
 fn manager_shortcut(exe: &std::path::Path, profile: &str, launch: bool) -> Shortcut {
     Shortcut {
-        name: format!("SB Mod Manager ({profile})"),
-        description: format!("Open SB Mod Manager with the “{profile}” profile"),
+        name: format!("Stelle ({profile})"),
+        description: format!("Open Stelle with the “{profile}” profile"),
         target: exe.to_path_buf(),
         arguments: sbmm_shell::arguments(Some(profile), launch),
         working_dir: exe.parent().map(|dir| dir.to_path_buf()),

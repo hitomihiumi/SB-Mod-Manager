@@ -102,7 +102,7 @@ async fn handle_one(
 }
 
 fn transport() -> ReqwestTransport {
-    ReqwestTransport::new("SB Mod Manager test").unwrap()
+    ReqwestTransport::new("Stelle test").unwrap()
 }
 
 async fn fetch_to(url: &str, dest: &Path) -> Result<u64, sbmm_nexus::NexusError> {

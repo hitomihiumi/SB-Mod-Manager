@@ -1,4 +1,4 @@
-# SB Mod Manager
+# Stelle
 
 A mod manager for **Stellar Blade** (PC). It works out what a downloaded
 archive is, puts each piece where the game expects it, and can put the game

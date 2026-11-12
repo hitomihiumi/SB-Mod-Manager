@@ -110,7 +110,7 @@ impl App {
     fn diagnostics_summary(&self, context: &[(String, String)]) -> Result<String> {
         let snapshot = self.snapshot()?;
         let folders = self.folders()?;
-        let mut out = String::from("SB Mod Manager diagnostics\n\n");
+        let mut out = String::from("Stelle diagnostics\n\n");
         for (label, value) in context {
             let _ = writeln!(out, "{label}: {value}");
         }

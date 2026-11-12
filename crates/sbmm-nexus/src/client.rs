@@ -170,7 +170,7 @@ impl<T: Transport> NexusClient<T> {
             transport,
             api_key: api_key.into(),
             domain: domain.into(),
-            app_name: "SB Mod Manager".to_string(),
+            app_name: "Stelle".to_string(),
             app_version: env!("CARGO_PKG_VERSION").to_string(),
             limit: Mutex::new(RateLimit::default()),
         }

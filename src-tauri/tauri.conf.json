@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "SB Mod Manager",
+  "productName": "Stelle",
   "version": "../package.json",
   "identifier": "dev.sbmm.manager",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "SB Mod Manager",
+        "title": "Stelle",
         "width": 1280,
         "height": 820,
         "minWidth": 960,
