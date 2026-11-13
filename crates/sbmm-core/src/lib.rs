@@ -1,4 +1,4 @@
-//! Domain layer for SB Mod Manager.
+//! Domain layer for Stelle.
 //!
 //! This crate is deliberately free of I/O and platform APIs so the interesting
 //! logic — figuring out what a downloaded archive actually *is*, and where its

@@ -22,7 +22,7 @@ export function SetupWizard() {
     <div className="grid h-full place-items-center px-8">
       <div className="w-full max-w-md">
         <div className="mb-6 animate-rise">
-          <h1 className="text-[28px] leading-tight font-light">SB Mod Manager</h1>
+          <h1 className="text-[28px] leading-tight font-light">Stelle</h1>
           <p className="mt-1.5 text-[13px] text-ink-muted">Point it at your Stellar Blade install.</p>
         </div>
 

@@ -1,7 +1,7 @@
 //! The manager's command line.
 //!
 //! ```text
-//! sb-mod-manager.exe --profile "Cosmetics only" --launch
+//! Stelle.exe --profile "Cosmetics only" --launch
 //! ```
 //!
 //! `--profile` (or `-p`) makes that profile active, `--launch` (or `-l`)

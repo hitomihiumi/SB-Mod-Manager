@@ -7,7 +7,7 @@ export function TitleBar() {
   return (
     <header data-tauri-drag-region className="drag-region flex h-9 shrink-0 items-center justify-between bg-base pl-5">
       <span data-tauri-drag-region className="text-[12px] text-ink-muted">
-        SB Mod Manager
+        Stelle
       </span>
       <div className="no-drag flex h-full">
         <WindowButton onClick={() => win.minimize()} label="Minimise">

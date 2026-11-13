@@ -32,7 +32,7 @@ pub fn file_name(name: &str) -> String {
         .collect();
     let cleaned = cleaned.trim().trim_end_matches(['.', ' ']);
     if cleaned.is_empty() {
-        "SB Mod Manager".to_string()
+        "Stelle".to_string()
     } else {
         cleaned.to_string()
     }
@@ -169,7 +169,7 @@ mod tests {
         );
         assert_eq!(file_name("a/b:c*d?"), "a_b_c_d_");
         assert_eq!(file_name("Фото режим. "), "Фото режим");
-        assert_eq!(file_name("..."), "SB Mod Manager");
+        assert_eq!(file_name("..."), "Stelle");
     }
 
     #[cfg(windows)]

@@ -137,7 +137,7 @@ fn worker(updates: Receiver<Presence>) {
         let activity = Activity::new()
             .details(&details)
             .state(&state)
-            .assets(Assets::new().large_image("icon").large_text("SB Mod Manager"))
+            .assets(Assets::new().large_image("icon").large_text("Stelle"))
             .timestamps(Timestamps::new().start(started));
 
         if open.set_activity(activity).is_err() {
