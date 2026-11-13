@@ -1,5 +1,7 @@
 # Features
 
+![The mods list, with groups and pending changes](screenshots/mods.png)
+
 Everything Stelle does, grouped by what you are trying to do. For where each
 kind of mod ends up, see [Where mods are installed](mod-types.md).
 
@@ -30,6 +32,8 @@ kind of mod ends up, see [Where mods are installed](mod-types.md).
 
 ## Running the game
 
+![Load order, with a rule the current order breaks](screenshots/load-order.png)
+
 - **Load order that applies.** Priority is written into pak file names
   (`0010_Outfit_P.pak`), and "load after" rules are kept as you reorder.
 - **Two deployment modes.** Hard links into the game folder, or an
@@ -59,6 +63,8 @@ Opens the named profile and starts the game. The same arguments are baked into
 the desktop shortcuts Stelle creates for each profile.
 
 ## Understanding your setup
+
+![Conflicts: which mod's asset the game loads](screenshots/conflicts.png)
 
 - **Conflicts.** Reads pak and utoc indexes to name the asset two mods both
   replace and which one wins. MO2-style `+N`/`−N`/*Redundant* flags cover
