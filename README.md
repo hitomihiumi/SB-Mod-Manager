@@ -14,13 +14,13 @@
   <p>
     <a href="https://github.com/hitomihiumi/SB-Mod-Manager/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/hitomihiumi/SB-Mod-Manager/ci.yml?branch=master&label=CI" alt="CI" /></a>
     <a href="https://github.com/hitomihiumi/SB-Mod-Manager/releases/latest"><img src="https://img.shields.io/github/v/release/hitomihiumi/SB-Mod-Manager?label=release" alt="Latest release" /></a>
-    <a href="Cargo.toml"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT" /></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT" /></a>
   </p>
   <br />
 </div>
 
 <p align="center">
-  <img src="docs/screenshot.png" alt="The mods list, with groups and pending changes" width="100%" />
+  <img src="docs/screenshots/mods.png" alt="The mods list, with groups and pending changes" width="100%" />
   <br />
   <sub>The mods list, with groups and pending changes</sub>
 </p>
@@ -59,6 +59,25 @@ reason a mod "doesn't work". Stelle gets it right for you.
     </td>
   </tr>
 </table>
+
+<details>
+<summary><strong>More screenshots</strong></summary>
+<br />
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="docs/screenshots/load-order.png"><img src="docs/screenshots/load-order.png" alt="Load order, with a rule the current order breaks" width="100%" /></a><br />
+      <strong>Load order</strong><br />
+      Drag to reorder; rules like "load after" are checked as you go.
+    </td>
+    <td width="50%" valign="top">
+      <a href="docs/screenshots/conflicts.png"><img src="docs/screenshots/conflicts.png" alt="Conflicts: which mod's asset the game loads" width="100%" /></a><br />
+      <strong>Conflicts</strong><br />
+      The asset two mods both replace, and which one wins.
+    </td>
+  </tr>
+</table>
+</details>
 
 - **See conflicts.** Reads pak and utoc indexes to name the asset two mods
   both replace and which one wins.
@@ -132,4 +151,4 @@ pnpm tauri build    # produce an installer
 
 ## License
 
-MIT
+[MIT](LICENSE) © hitomihiumi
