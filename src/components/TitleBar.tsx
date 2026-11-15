@@ -1,22 +1,24 @@
 import { Minus, Square, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
+import iconUrl from "../../src-tauri/icons/32x32.png";
+
 /** The window is frameless, so the chrome is ours to draw. */
 export function TitleBar() {
-  const win = getCurrentWindow();
   return (
-    <header data-tauri-drag-region className="drag-region flex h-9 shrink-0 items-center justify-between bg-base pl-5">
-      <span data-tauri-drag-region className="text-[12px] text-ink-muted">
+    <header data-tauri-drag-region className="drag-region glass-bar flex h-9 shrink-0 items-center justify-between pl-5">
+      <span data-tauri-drag-region className="flex items-center text-[12px] text-ink">
+        <img src={iconUrl} alt="" width={20} height={20} draggable={false} className="mr-2 size-5 rounded-[4px]" />
         Stelle
       </span>
       <div className="no-drag flex h-full">
-        <WindowButton onClick={() => win.minimize()} label="Minimise">
+        <WindowButton onClick={() => void getCurrentWindow().minimize()} label="Minimise">
           <Minus size={14} />
         </WindowButton>
-        <WindowButton onClick={() => win.toggleMaximize()} label="Maximise">
+        <WindowButton onClick={() => void getCurrentWindow().toggleMaximize()} label="Maximise">
           <Square size={11} />
         </WindowButton>
-        <WindowButton onClick={() => win.close()} label="Close" danger>
+        <WindowButton onClick={() => void getCurrentWindow().close()} label="Close" danger>
           <X size={14} />
         </WindowButton>
       </div>
@@ -41,7 +43,7 @@ function WindowButton({
       onClick={onClick}
       className={
         "grid h-full w-11 place-items-center text-ink-muted transition-colors duration-150 ease-quiet " +
-        (danger ? "hover:bg-danger/15 hover:text-danger" : "hover:bg-raised hover:text-ink")
+        (danger ? "hover:bg-danger/15 hover:text-danger" : "hover:bg-white/8 hover:text-ink")
       }
     >
       {children}

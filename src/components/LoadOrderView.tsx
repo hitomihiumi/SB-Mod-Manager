@@ -314,7 +314,7 @@ export function LoadOrderView() {
                 }}
                 className={clsx(
                   "group relative mb-1 flex h-10 touch-none items-center gap-2.5 rounded-sm px-2.5 transition-[background-color,opacity] duration-150 ease-quiet",
-                  isPicked ? "bg-raised" : "bg-surface hover:bg-raised/60",
+                  isPicked ? "bg-raised shadow-[inset_2px_0_0_var(--color-accent)]" : "bg-surface hover:bg-raised/60",
                   dragged && "opacity-40",
                   !mod.enabled && !dragged && "opacity-60",
                   drag ? "cursor-grabbing" : "cursor-default",

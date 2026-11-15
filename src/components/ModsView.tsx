@@ -363,7 +363,7 @@ function Toolbar({
           placeholder="Search mods"
           title="Search names, tags and notes (Ctrl+F)"
           aria-label="Search mods"
-          className="h-8 w-full border-b border-line bg-transparent pr-2 pl-6 text-[13px] transition-colors duration-150 ease-quiet placeholder:text-ink-muted focus:border-ink-muted focus:outline-none"
+          className="h-8 w-full border-b border-line bg-transparent pr-2 pl-6 text-[13px] transition-colors duration-150 ease-quiet placeholder:text-ink-muted focus:border-accent focus:outline-none"
         />
       </div>
 
@@ -538,7 +538,7 @@ function ModRow({
       onContextMenu={onMenu}
       className={clsx(
         "group flex h-full items-center gap-2.5 px-5 transition-colors duration-200 ease-quiet",
-        selected ? "bg-raised" : "hover:bg-surface",
+        selected ? "bg-raised shadow-[inset_2px_0_0_var(--color-accent)]" : "hover:bg-surface",
       )}
     >
       <Checkbox

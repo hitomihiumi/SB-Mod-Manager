@@ -34,7 +34,7 @@ export function SetupWizard() {
               <button
                 key={install.root}
                 onClick={() => void chooseGame(install.root)}
-                className="flex w-full items-center gap-3 bg-surface px-3 py-2.5 text-left transition-colors hover:bg-raised"
+                className="flex w-full items-center gap-3 rounded-lg border border-line bg-surface/70 px-3 py-2.5 text-left backdrop-blur-md transition-colors hover:border-accent/45 hover:bg-raised"
               >
                 <HardDrive size={16} className="shrink-0 text-ink-muted" />
                 <div className="min-w-0 flex-1">

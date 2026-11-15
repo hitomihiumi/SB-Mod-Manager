@@ -59,28 +59,34 @@ export default function App() {
 
   // Dropping archives onto the window is the primary way to install.
   useEffect(() => {
-    const unlisten = getCurrentWebview().onDragDropEvent((event) => {
-      // The window reports every drag, including a row being dragged inside it.
-      // Only a drag that carries files is an install, so only that shows the
-      // overlay; "over" fires continuously and says nothing about the content.
-      if (event.payload.type === "enter") {
-        setDropping(event.payload.paths.length > 0 ? (libraryDropTarget() ? "library" : "install") : false);
-      } else if (event.payload.type === "leave") setDropping(false);
-      else if (event.payload.type === "drop") {
-        setDropping(false);
-        // Over a mod's folder in the explorer, files are copied in there;
-        // anywhere else, dropped archives install.
-        const position = event.payload.position;
-        const target = libraryDropTarget(
-          position.x / window.devicePixelRatio,
-          position.y / window.devicePixelRatio,
-        );
-        if (target !== null) void importIntoLibrary(event.payload.paths, target);
-        else void stagePaths(event.payload.paths);
-      }
-    });
+    // The webview API exists only inside the desktop window.
+    let unlisten: Promise<() => void> | undefined;
+    try {
+      unlisten = getCurrentWebview().onDragDropEvent((event) => {
+        // The window reports every drag, including a row being dragged inside it.
+        // Only a drag that carries files is an install, so only that shows the
+        // overlay; "over" fires continuously and says nothing about the content.
+        if (event.payload.type === "enter") {
+          setDropping(event.payload.paths.length > 0 ? (libraryDropTarget() ? "library" : "install") : false);
+        } else if (event.payload.type === "leave") setDropping(false);
+        else if (event.payload.type === "drop") {
+          setDropping(false);
+          // Over a mod's folder in the explorer, files are copied in there;
+          // anywhere else, dropped archives install.
+          const position = event.payload.position;
+          const target = libraryDropTarget(
+            position.x / window.devicePixelRatio,
+            position.y / window.devicePixelRatio,
+          );
+          if (target !== null) void importIntoLibrary(event.payload.paths, target);
+          else void stagePaths(event.payload.paths);
+        }
+      });
+    } catch {
+      return;
+    }
     return () => {
-      void unlisten.then((off) => off());
+      void unlisten?.then((off) => off());
     };
   }, [stagePaths]);
 
@@ -189,7 +195,7 @@ export default function App() {
         <SetupWizard />
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">
-          <nav className="flex h-11 shrink-0 items-center gap-6 px-5" aria-label="Screens">
+          <nav className="glass-bar flex h-11 shrink-0 items-center gap-6 border-b border-line px-5" aria-label="Screens">
             {NAV.map((item, index) => {
               const count = item.id === "downloads" ? active : 0;
               const current = view === item.id;
@@ -204,7 +210,15 @@ export default function App() {
                     current ? "text-ink" : "text-ink-muted hover:text-ink-soft",
                   )}
                 >
-                  {item.label}
+                  <span
+                    className={clsx(
+                      "relative",
+                      current &&
+                        "after:absolute after:inset-x-0 after:-bottom-1.5 after:h-px after:bg-accent after:shadow-star",
+                    )}
+                  >
+                    {item.label}
+                  </span>
                   {count > 0 && <span className="font-mono text-[10.5px] text-ink-soft">{count}</span>}
                 </button>
               );
@@ -239,8 +253,8 @@ export default function App() {
       )}
 
       {dropping && (
-        <div className="pointer-events-none fixed inset-0 z-40 grid animate-fade place-items-center bg-base/85">
-          <div className="border border-dashed border-ink-muted px-8 py-6 text-center">
+        <div className="pointer-events-none fixed inset-0 z-40 grid animate-fade place-items-center bg-base/55 backdrop-blur-md">
+          <div className="rounded-xl border border-dashed border-accent/55 bg-hover/50 px-8 py-6 text-center shadow-star">
             {dropping === "library" ? (
               <>
                 <p className="text-[15px] font-light">Drop to copy into the mod</p>
@@ -259,7 +273,7 @@ export default function App() {
       )}
 
       {busy && (
-        <div className="fixed inset-x-0 bottom-0 z-40 flex animate-rise items-center gap-2 bg-raised px-5 py-2.5 text-[12px] text-ink-soft">
+        <div className="glass-bar fixed inset-x-0 bottom-0 z-40 flex animate-rise items-center gap-2 border-t border-line px-5 py-2.5 text-[12px] text-ink-soft">
           <Loader2 size={13} className="animate-spin" />
           <span className="truncate">{busy.label}</span>
           {busy.total > 1 && (
@@ -324,7 +338,7 @@ function ApplyBar() {
   if (pending.length === 0 && drift.length === 0) return null;
 
   return (
-    <div className="flex h-12 shrink-0 animate-bar items-center gap-4 bg-surface px-5">
+    <div className="glass-bar flex h-12 shrink-0 animate-bar items-center gap-4 border-t border-line px-5">
       {drift.length > 0 && (
         <span className="flex items-center gap-1.5 text-[12px] text-warn">
           <AlertTriangle size={13} />
@@ -372,7 +386,7 @@ function FoundBar() {
   if (found.length === 0) return null;
   const names = found.map((a) => a.name);
   return (
-    <div className="fixed bottom-14 left-1/2 z-40 flex w-[min(640px,90vw)] -translate-x-1/2 animate-rise items-center gap-3 bg-hover px-4 py-3">
+    <div className="glass fixed bottom-14 left-1/2 z-40 flex w-[min(640px,90vw)] -translate-x-1/2 animate-rise items-center gap-3 rounded-xl px-4 py-3">
       <Download size={15} className="shrink-0 text-ink-soft" />
       <p className="min-w-0 flex-1 text-[12px] leading-relaxed">
         {found.length === 1 ? "New mod archive" : `${found.length} new mod archives`} in your
@@ -403,7 +417,7 @@ function Toasts() {
       {toasts.length > 1 && (
         <button
           onClick={dismissAll}
-          className="self-end bg-hover px-2.5 py-1 text-[11px] text-ink-soft transition-colors duration-150 ease-quiet hover:text-ink"
+          className="glass-bar self-end rounded-md border border-line px-2.5 py-1 text-[11px] text-ink-soft transition-colors duration-150 ease-quiet hover:text-ink"
         >
           Dismiss all ({toasts.length})
         </button>
@@ -412,8 +426,7 @@ function Toasts() {
         {toasts.map((toast) => (
           <div
             key={toast.id}
-            // Opaque and one layer up, so whatever is underneath never shows through.
-            className="flex shrink-0 animate-rise items-start gap-3 bg-hover px-4 py-3"
+            className="glass flex shrink-0 animate-rise items-start gap-3 rounded-xl px-4 py-3"
           >
             <span
               className={clsx(
@@ -496,7 +509,7 @@ function ShortcutsDialog({ onClose }: { onClose: () => void }) {
             <ul className="space-y-1">
               {section.keys.map(([keys, what]) => (
                 <li key={keys} className="flex items-center gap-3 text-[12px]">
-                  <kbd className="w-36 shrink-0 bg-base px-1.5 py-0.5 text-center font-mono text-[11px] text-ink-soft">
+                  <kbd className="w-36 shrink-0 rounded-md border border-line bg-white/5 px-1.5 py-0.5 text-center font-mono text-[11px] text-ink-soft">
                     {keys}
                   </kbd>
                   <span className="text-ink-soft">{what}</span>
@@ -540,7 +553,7 @@ function PlayButton() {
       aria-label={label}
       className="group flex items-center gap-2.5 text-[14px] font-light text-ink disabled:opacity-50"
     >
-      <span className="grid size-[26px] place-items-center rounded-full border border-ink-muted transition-[border-color,transform] duration-200 ease-quiet group-hover:border-ink group-active:scale-90">
+      <span className="grid size-[26px] place-items-center rounded-full bg-accent text-accent-ink shadow-star transition-[filter,transform] duration-200 ease-quiet group-hover:brightness-110 group-active:scale-95">
         {starting ? (
           <Loader2 size={11} className="animate-spin" />
         ) : (

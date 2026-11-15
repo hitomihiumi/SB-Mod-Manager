@@ -86,7 +86,7 @@ function Panel({ items, x, y, side }: { items: MenuItem[]; x: number; y: number;
       role="menu"
       onMouseDown={(event) => event.stopPropagation()}
       onContextMenu={(event) => event.preventDefault()}
-      className="fixed z-[60] min-w-48 animate-rise bg-hover p-1"
+      className="glass fixed z-[60] min-w-48 animate-rise rounded-xl p-1"
       style={place}
     >
       {items.map((item, index) =>
@@ -104,8 +104,8 @@ function Panel({ items, x, y, side }: { items: MenuItem[]; x: number; y: number;
               }}
               className={clsx(
                 "flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left text-[12px] disabled:opacity-40",
-                item.danger ? "text-danger hover:bg-danger/10" : "transition-colors duration-100 ease-quiet hover:bg-line",
-                open === index && item.items && "bg-line",
+                item.danger ? "text-danger hover:bg-danger/10" : "transition-colors duration-100 ease-quiet hover:bg-white/8",
+                open === index && item.items && "bg-white/8",
               )}
             >
               <span className="grid w-4 shrink-0 place-items-center text-ink-muted">{item.icon}</span>

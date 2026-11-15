@@ -268,8 +268,8 @@ export function SettingsView() {
               onClick={() => setTab(group.id)}
               className={clsx(
                 "group/tab relative flex flex-col py-1.5 pl-3 text-left",
-                "before:absolute before:top-2 before:bottom-2 before:left-0 before:w-px before:transition-colors before:duration-150",
-                selected ? "before:bg-ink" : "before:bg-transparent group-hover/tab:before:bg-line-strong",
+                "before:absolute before:top-2 before:bottom-2 before:left-0 before:w-0.5 before:transition-colors before:duration-150",
+                selected ? "before:bg-accent" : "before:bg-transparent group-hover/tab:before:bg-line-strong",
               )}
             >
               <span
