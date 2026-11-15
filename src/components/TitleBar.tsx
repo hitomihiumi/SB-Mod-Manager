@@ -1,7 +1,7 @@
 import { Minus, Square, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
-import iconUrl from "../../src-tauri/icons/32x32.png";
+const iconUrl = new URL("../../src-tauri/icons/32x32.png", import.meta.url).href;
 
 /** The window is frameless, so the chrome is ours to draw. */
 export function TitleBar() {
