@@ -44,6 +44,11 @@ export type View =
   | "reshade"
   | "settings";
 
+/** Screen id sent to Discord RPC — matches `set_discord_screen` on the backend. */
+export function discordScreen(view: View, settingsTab: SettingsTab): string {
+  return view === "settings" ? `settings:${settingsTab}` : view;
+}
+
 /** The groups the settings screen is divided into. */
 export type SettingsTab = "game" | "library" | "nexus" | "graphics" | "backups" | "app";
 
@@ -162,6 +167,7 @@ export const useApp = create<AppStore>((set, get) => ({
     await get().refresh();
     await get().refreshDownloads();
     set({ ready: true });
+    void ipc.setDiscordScreen(discordScreen(get().view, get().settingsTab));
     await get().takeNotices();
   },
 
@@ -267,9 +273,20 @@ export const useApp = create<AppStore>((set, get) => ({
     }
   },
 
-  setView: (view) => set({ view }),
-  setSettingsTab: (settingsTab) => set({ settingsTab }),
-  openSettings: (settingsTab) => set({ view: "settings", settingsTab }),
+  setView: (view) => {
+    set({ view });
+    void ipc.setDiscordScreen(discordScreen(view, get().settingsTab));
+  },
+  setSettingsTab: (settingsTab) => {
+    set({ settingsTab });
+    if (get().view === "settings") {
+      void ipc.setDiscordScreen(discordScreen("settings", settingsTab));
+    }
+  },
+  openSettings: (settingsTab) => {
+    set({ view: "settings", settingsTab });
+    void ipc.setDiscordScreen(discordScreen("settings", settingsTab));
+  },
   showFileConflicts: (modId, name) => set({ view: "files", conflictFocus: { modId, name } }),
   setConflictFocus: (conflictFocus) => set({ conflictFocus }),
   setSearch: (search) => set({ search }),

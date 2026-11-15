@@ -36,7 +36,7 @@ use tauri::{Emitter, Manager};
 use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_updater::UpdaterExt;
 
-use discord::{Discord, Presence};
+use discord::{Discord, Presence, Screen};
 use downloads::Downloads;
 
 struct AppState(Mutex<App>);
@@ -68,19 +68,26 @@ fn snapshot(
     let snapshot = with_app!(state, |app| app.snapshot())?;
     // The window asks for a snapshot after everything that could change what
     // the presence says, so this is the one place it needs refreshing.
-    discord.update(presence_from(&snapshot, &downloads));
+    discord.update(presence_from(&snapshot, &downloads, discord.screen()));
     Ok(snapshot)
 }
 
 /// Counts only — see the module docs for why nothing is named.
-fn presence_from(snapshot: &AppSnapshot, downloads: &Downloads) -> Presence {
+fn presence_from(snapshot: &AppSnapshot, downloads: &Downloads, screen: Screen) -> Presence {
+    let items = downloads.queue.items();
     Presence {
         enabled: snapshot.discord_rpc,
         installed: snapshot.mods.len(),
         enabled_mods: snapshot.mods.iter().filter(|m| m.enabled).count(),
-        downloading: downloads
-            .queue
-            .items()
+        pending: snapshot.pending.len(),
+        drift: snapshot.drift.len(),
+        game_configured: snapshot.game.is_some(),
+        game_update_drift: snapshot
+            .game_update
+            .as_ref()
+            .map(|u| u.drifted)
+            .unwrap_or(0),
+        downloading: items
             .iter()
             .filter(|i| {
                 matches!(
@@ -89,6 +96,11 @@ fn presence_from(snapshot: &AppSnapshot, downloads: &Downloads) -> Presence {
                 )
             })
             .count(),
+        awaiting_action: items
+            .iter()
+            .filter(|i| matches!(i.state, sbmm_nexus::DownloadState::NeedsUserAction))
+            .count(),
+        screen,
     }
 }
 
@@ -103,7 +115,21 @@ fn set_discord_rpc(
     // Switching it off has to take down what is already showing, so the new
     // state is published rather than waiting for the next snapshot.
     let snapshot = with_app!(state, |app| app.snapshot())?;
-    discord.update(presence_from(&snapshot, &downloads));
+    discord.update(presence_from(&snapshot, &downloads, discord.screen()));
+    Ok(())
+}
+
+#[tauri::command(async)]
+fn set_discord_screen(
+    state: tauri::State<'_, AppState>,
+    discord: tauri::State<'_, Discord>,
+    downloads: tauri::State<'_, Downloads>,
+    screen: String,
+) -> Result<(), String> {
+    let screen = Screen::parse(&screen).ok_or_else(|| format!("unknown screen: {screen}"))?;
+    discord.set_screen(screen);
+    let snapshot = with_app!(state, |app| app.snapshot())?;
+    discord.update(presence_from(&snapshot, &downloads, screen));
     Ok(())
 }
 
@@ -848,6 +874,7 @@ pub fn run() {
             install_update,
             set_update_channel,
             set_discord_rpc,
+            set_discord_screen,
             add_nxm_link,
             check_mod_updates,
             download_queue,
