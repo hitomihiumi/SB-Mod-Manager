@@ -417,7 +417,7 @@ function DiscordSection() {
   return (
     <Section
       title="Discord"
-      hint="Shows on your Discord profile that the manager is open. Only counts are sent — never the name of a mod, a collection or a folder."
+      hint="Shows on your Discord profile what you are doing in the manager. Only counts are sent — never the name of a mod, a collection or a folder."
     >
       <SwitchRow
         label="Show activity on Discord"

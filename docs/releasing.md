@@ -24,8 +24,9 @@ Losing the private key means existing installs can no longer update.
 ## Discord presence
 
 A fork can use its own application id: set `APP_ID` in
-`src-tauri/src/discord.rs` and upload an art asset named `icon` to that
-application's Rich Presence assets.
+`src-tauri/src/discord.rs` and upload Rich Presence assets to that application.
+`icon` is always the large image; optional keys in `ActivityKind::small_image`
+(`download`, `order`, `collections`, and others) show as the small overlay.
 
 ## Rebranding a fork
 

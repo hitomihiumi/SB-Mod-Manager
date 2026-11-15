@@ -615,6 +615,8 @@ export const ipc = {
   setUpdateChannel: (channel: UpdateChannel) =>
     invoke<void>("set_update_channel", { channel }),
   setDiscordRpc: (enabled: boolean) => invoke<void>("set_discord_rpc", { enabled }),
+  /** Which screen drives the idle presence line (`settings:app`, `mods`, …). */
+  setDiscordScreen: (screen: string) => invoke<void>("set_discord_screen", { screen }),
   setDeploymentMode: (mode: DeploymentMode) =>
     invoke<ApplyReport>("set_deployment_mode", { mode }),
   launchGame: () => invoke<string>("launch_game"),

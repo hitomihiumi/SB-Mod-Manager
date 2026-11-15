@@ -25,9 +25,147 @@ use discord_rich_presence::{DiscordIpc, DiscordIpcClient};
 /// <https://discord.com/developers/applications>; it decides the name and the
 /// artwork Discord shows, so there is nothing sensible to guess and borrowing
 /// another app's id would put somebody else's branding on the user's profile.
-/// Upload an icon named `icon` to that application's Rich Presence assets to
-/// match [`Assets::large_image`] below. See the README.
+/// Upload an icon named `icon` to that application's Rich Presence assets as the
+/// large image. Optional keys in [`ActivityKind::small_image`] are shown as the
+/// small overlay. See the README.
 const APP_ID: &str = "1561824958705832067";
+
+const MAIN_IMAGE: &str = "icon";
+const MAIN_IMAGE_TEXT: &str = "Stelle — Stellar Blade Mod Manager";
+
+/// Which part of the UI the user is on. Drives the idle line when nothing
+/// urgent (downloads, pending apply, game update) is going on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Screen {
+    #[default]
+    Mods,
+    Order,
+    Conflicts,
+    Files,
+    Downloads,
+    Collections,
+    Reshade,
+    SettingsGame,
+    SettingsLibrary,
+    SettingsNexus,
+    SettingsGraphics,
+    SettingsBackups,
+    SettingsApp,
+}
+
+impl Screen {
+    pub fn parse(raw: &str) -> Option<Screen> {
+        match raw {
+            "mods" => Some(Screen::Mods),
+            "order" => Some(Screen::Order),
+            "conflicts" => Some(Screen::Conflicts),
+            "files" => Some(Screen::Files),
+            "downloads" => Some(Screen::Downloads),
+            "collections" => Some(Screen::Collections),
+            "reshade" => Some(Screen::Reshade),
+            "settings:game" => Some(Screen::SettingsGame),
+            "settings:library" => Some(Screen::SettingsLibrary),
+            "settings:nexus" => Some(Screen::SettingsNexus),
+            "settings:graphics" => Some(Screen::SettingsGraphics),
+            "settings:backups" => Some(Screen::SettingsBackups),
+            "settings:app" => Some(Screen::SettingsApp),
+            _ => None,
+        }
+    }
+}
+
+/// The single activity Discord should show after priorities are applied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ActivityKind {
+    Downloading,
+    AwaitingNexus,
+    Applying,
+    GameUpdated,
+    Setup,
+    Idle(Screen),
+}
+
+impl ActivityKind {
+    /// Per-activity art in the corner; `None` keeps only the main logo.
+    fn small_image(self) -> Option<&'static str> {
+        Some(match self {
+            ActivityKind::Downloading | ActivityKind::AwaitingNexus => "download",
+            ActivityKind::Applying => "apply",
+            ActivityKind::GameUpdated => "update",
+            ActivityKind::Setup => "setup",
+            ActivityKind::Idle(screen) => match screen {
+                Screen::Mods | Screen::SettingsApp => return None,
+                Screen::Order => "order",
+                Screen::Conflicts => "conflicts",
+                Screen::Files => "files",
+                Screen::Downloads => "download",
+                Screen::Collections => "collections",
+                Screen::Reshade | Screen::SettingsGraphics => "graphics",
+                Screen::SettingsBackups => "backup",
+                Screen::SettingsNexus => "nexus",
+                Screen::SettingsGame | Screen::SettingsLibrary => "setup",
+            },
+        })
+    }
+
+    fn details(self, presence: &Presence) -> String {
+        match self {
+            ActivityKind::Downloading => format!(
+                "Downloading {} mod{}",
+                presence.downloading,
+                if presence.downloading == 1 { "" } else { "s" }
+            ),
+            ActivityKind::AwaitingNexus => format!(
+                "Waiting on Nexus for {} mod{}",
+                presence.awaiting_action,
+                if presence.awaiting_action == 1 { "" } else { "s" }
+            ),
+            ActivityKind::Applying => format!(
+                "Applying {} change{}",
+                presence.pending,
+                if presence.pending == 1 { "" } else { "s" }
+            ),
+            ActivityKind::GameUpdated => "Game was updated".to_string(),
+            ActivityKind::Setup => "Setting up".to_string(),
+            ActivityKind::Idle(screen) => match screen {
+                Screen::Mods => "Managing mods".to_string(),
+                Screen::Order => "Sorting load order".to_string(),
+                Screen::Conflicts => "Reviewing conflicts".to_string(),
+                Screen::Files => "Browsing mod files".to_string(),
+                Screen::Downloads => "In the download queue".to_string(),
+                Screen::Collections => "Browsing collections".to_string(),
+                Screen::Reshade => "Tuning ReShade".to_string(),
+                Screen::SettingsGame => "Configuring the game".to_string(),
+                Screen::SettingsLibrary => "Library settings".to_string(),
+                Screen::SettingsNexus => "Nexus settings".to_string(),
+                Screen::SettingsGraphics => "Graphics settings".to_string(),
+                Screen::SettingsBackups => "Backups & safety".to_string(),
+                Screen::SettingsApp => "App settings".to_string(),
+            },
+        }
+    }
+
+    fn state(self, presence: &Presence) -> String {
+        if let ActivityKind::GameUpdated = self {
+            return format!(
+                "{} file{} need attention",
+                presence.game_update_drift,
+                if presence.game_update_drift == 1 { "" } else { "s" }
+            );
+        }
+        if let ActivityKind::Setup = self {
+            return if presence.installed == 0 {
+                "Nothing installed yet".to_string()
+            } else {
+                "Choose a game folder".to_string()
+            };
+        }
+        if presence.installed == 0 {
+            return "Nothing installed yet".to_string();
+        }
+        format!("{} of {} enabled", presence.enabled_mods, presence.installed)
+    }
+}
 
 /// What the presence should say.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,31 +174,59 @@ pub struct Presence {
     /// How many mods are installed, and how many of those are switched on.
     pub installed: usize,
     pub enabled_mods: usize,
-    /// Set while downloads are in flight.
+    pub pending: usize,
+    /// Files the game changed outside the manager.
+    pub drift: usize,
+    pub game_configured: bool,
+    pub game_update_drift: usize,
+    /// Active transfers (queued or running).
     pub downloading: usize,
+    /// Queue items waiting for a click on Nexus.
+    pub awaiting_action: usize,
+    pub screen: Screen,
 }
 
 impl Presence {
-    /// The line Discord shows under the app name.
-    ///
-    /// Counts only. Naming the mod being downloaded would put the contents of
-    /// somebody's load order in front of their friends list.
-    pub fn details(&self) -> String {
+    fn activity_kind(&self) -> ActivityKind {
         if self.downloading > 0 {
-            return format!(
-                "Downloading {} mod{}",
-                self.downloading,
-                if self.downloading == 1 { "" } else { "s" }
-            );
+            return ActivityKind::Downloading;
         }
-        "Managing mods".to_string()
+        if self.awaiting_action > 0 {
+            return ActivityKind::AwaitingNexus;
+        }
+        if self.pending > 0 {
+            return ActivityKind::Applying;
+        }
+        if self.game_update_drift > 0 {
+            return ActivityKind::GameUpdated;
+        }
+        if !self.game_configured {
+            return ActivityKind::Setup;
+        }
+        ActivityKind::Idle(self.screen)
+    }
+
+    pub fn details(&self) -> String {
+        self.activity_kind().details(self)
     }
 
     pub fn state(&self) -> String {
-        if self.installed == 0 {
-            return "Nothing installed yet".to_string();
+        self.activity_kind().state(self)
+    }
+
+    fn build_activity(&self, started: i64) -> Activity<'_> {
+        let kind = self.activity_kind();
+        let mut assets = Assets::new()
+            .large_image(MAIN_IMAGE)
+            .large_text(MAIN_IMAGE_TEXT);
+        if let Some(image) = kind.small_image() {
+            assets = assets.small_image(image);
         }
-        format!("{} of {} enabled", self.enabled_mods, self.installed)
+        Activity::new()
+            .details(self.details())
+            .state(self.state())
+            .assets(assets)
+            .timestamps(Timestamps::new().start(started))
     }
 }
 
@@ -68,6 +234,7 @@ impl Presence {
 pub struct Discord {
     updates: SyncSender<Presence>,
     last: Mutex<Option<Presence>>,
+    screen: Mutex<Screen>,
 }
 
 impl Discord {
@@ -86,6 +253,17 @@ impl Discord {
         Discord {
             updates: tx,
             last: Mutex::new(None),
+            screen: Mutex::new(Screen::default()),
+        }
+    }
+
+    pub fn screen(&self) -> Screen {
+        self.screen.lock().map(|s| *s).unwrap_or_default()
+    }
+
+    pub fn set_screen(&self, screen: Screen) {
+        if let Ok(mut guard) = self.screen.lock() {
+            *guard = screen;
         }
     }
 
@@ -132,13 +310,7 @@ fn worker(updates: Receiver<Presence>) {
             continue;
         };
 
-        let details = presence.details();
-        let state = presence.state();
-        let activity = Activity::new()
-            .details(&details)
-            .state(&state)
-            .assets(Assets::new().large_image("icon").large_text("Stelle"))
-            .timestamps(Timestamps::new().start(started));
+        let activity = presence.build_activity(started);
 
         if open.set_activity(activity).is_err() {
             // Discord went away mid-session. Drop the socket so the next
@@ -162,31 +334,76 @@ fn connect() -> Option<DiscordIpcClient> {
 mod tests {
     use super::*;
 
-    fn presence(installed: usize, enabled_mods: usize, downloading: usize) -> Presence {
+    fn presence() -> Presence {
         Presence {
             enabled: true,
-            installed,
-            enabled_mods,
-            downloading,
+            installed: 42,
+            enabled_mods: 17,
+            pending: 0,
+            drift: 0,
+            game_configured: true,
+            game_update_drift: 0,
+            downloading: 0,
+            awaiting_action: 0,
+            screen: Screen::Mods,
         }
     }
 
     #[test]
     fn the_presence_reports_counts_and_never_names_anything() {
-        let p = presence(42, 17, 0);
+        let p = presence();
         assert_eq!(p.details(), "Managing mods");
         assert_eq!(p.state(), "17 of 42 enabled");
     }
 
     #[test]
     fn downloading_is_shown_as_a_count_not_as_a_mod_name() {
-        assert_eq!(presence(10, 3, 1).details(), "Downloading 1 mod");
-        assert_eq!(presence(10, 3, 5).details(), "Downloading 5 mods");
+        let mut p = presence();
+        p.downloading = 1;
+        assert_eq!(p.details(), "Downloading 1 mod");
+        p.downloading = 5;
+        assert_eq!(p.details(), "Downloading 5 mods");
     }
 
     #[test]
     fn an_empty_install_reads_as_empty_rather_than_zero_of_zero() {
-        assert_eq!(presence(0, 0, 0).state(), "Nothing installed yet");
+        let mut p = presence();
+        p.installed = 0;
+        p.enabled_mods = 0;
+        assert_eq!(p.state(), "Nothing installed yet");
+    }
+
+    #[test]
+    fn pending_changes_take_priority_over_the_current_screen() {
+        let mut p = presence();
+        p.screen = Screen::Order;
+        p.pending = 3;
+        assert_eq!(p.details(), "Applying 3 changes");
+    }
+
+    #[test]
+    fn the_active_screen_changes_the_idle_line() {
+        let mut p = presence();
+        p.screen = Screen::Collections;
+        assert_eq!(p.details(), "Browsing collections");
+        p.screen = Screen::SettingsGraphics;
+        assert_eq!(p.details(), "Graphics settings");
+    }
+
+    #[test]
+    fn game_update_uses_drift_counts_not_names() {
+        let mut p = presence();
+        p.game_update_drift = 2;
+        assert_eq!(p.details(), "Game was updated");
+        assert_eq!(p.state(), "2 files need attention");
+    }
+
+    #[test]
+    fn setup_when_no_game_is_configured() {
+        let mut p = presence();
+        p.game_configured = false;
+        assert_eq!(p.details(), "Setting up");
+        assert_eq!(p.state(), "Choose a game folder");
     }
 
     /// Presence is cosmetic and the socket is slow, so repeating the same
@@ -194,7 +411,7 @@ mod tests {
     #[test]
     fn an_unchanged_presence_is_not_published_twice() {
         let discord = Discord::start();
-        let p = presence(3, 1, 0);
+        let p = presence();
 
         discord.update(p.clone());
         let after_first = discord.last.lock().unwrap().clone();
