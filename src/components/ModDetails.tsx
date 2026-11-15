@@ -60,7 +60,7 @@ export function ModDetails({ mod, onClose }: { mod: ModView; onClose: () => void
   }
 
   return (
-    <aside className="flex w-80 shrink-0 animate-fade flex-col bg-surface">
+    <aside className="flex w-80 shrink-0 animate-fade flex-col border-l border-line bg-surface/55 backdrop-blur-xl">
       <div className="flex items-start gap-2 px-5 pt-5 pb-3">
         <div className="min-w-0 flex-1">
           <h3 className="truncate text-[20px] leading-tight font-light" title={mod.name}>

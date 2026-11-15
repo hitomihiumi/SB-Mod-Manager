@@ -4,8 +4,8 @@
  * Hand-rolled rather than pulled from a component library: the surface used
  * here is small, and the whole point of the project is a light footprint.
  *
- * The look is deliberately quiet: no fills in the accent colour, no borders
- * where a change of tone says the same thing, and state shown by brightness.
+ * The look is night glass. Tone still separates the lists. The star colour
+ * is a fill only on the one action that commits (Apply, confirm, Play).
  * Everything that moves does so on the same curve (`ease-quiet`).
  */
 import clsx from "clsx";
@@ -26,13 +26,13 @@ export function Button({
     <button
       className={clsx(
         "no-drag inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-sm font-normal",
-        "transition-[color,background-color,text-decoration-color,opacity] duration-150 ease-quiet disabled:pointer-events-none disabled:opacity-40",
+        "transition-[color,background-color,border-color,filter,opacity] duration-150 ease-quiet disabled:pointer-events-none disabled:opacity-40",
         size === "sm" ? "h-7 px-2.5 text-[12px]" : "h-8 px-3 text-[13px]",
-        // The main action is a word with an underline, not a coloured block.
         variant === "primary" &&
-          "text-ink underline decoration-ink-muted decoration-1 underline-offset-[5px] hover:decoration-ink active:opacity-70",
-        variant === "ghost" && "text-ink-soft hover:bg-raised hover:text-ink",
-        variant === "outline" && "bg-raised text-ink-soft hover:bg-hover hover:text-ink",
+          "bg-accent font-medium text-accent-ink hover:brightness-110 active:brightness-95",
+        variant === "ghost" && "text-ink-soft hover:bg-white/8 hover:text-ink",
+        variant === "outline" &&
+          "border border-line-strong bg-white/5 text-ink-soft hover:border-accent/50 hover:text-ink",
         variant === "danger" && "text-danger hover:bg-danger/10",
         className,
       )}
@@ -143,15 +143,15 @@ export function Dialog({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 grid animate-fade place-items-center bg-base/75 p-6">
+    <div className="fixed inset-0 z-50 grid animate-fade place-items-center bg-base/60 p-6">
       <div
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="flex max-h-full w-full animate-rise flex-col overflow-hidden bg-hover"
+        className="glass flex max-h-full w-full animate-rise flex-col overflow-hidden rounded-xl"
         style={{ maxWidth: width }}
       >
-        <header className="flex h-12 shrink-0 items-center justify-between pr-3 pl-5">
+        <header className="flex h-12 shrink-0 items-center justify-between border-b border-line pr-3 pl-5">
           <h2 className="text-[15px] font-light">{title}</h2>
           <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close">
             <X size={14} />
@@ -197,13 +197,13 @@ export function Switch({
       }}
       className={clsx(
         "relative h-[18px] w-8 shrink-0 rounded-full transition-colors duration-200 ease-quiet disabled:opacity-40",
-        checked ? "bg-ink-soft" : "bg-hover hover:bg-line-strong",
+        checked ? "bg-accent" : "bg-hover hover:bg-line-strong",
       )}
     >
       <span
         className={clsx(
           "absolute top-[3px] size-3 rounded-full transition-[left,background-color] duration-200 ease-quiet",
-          checked ? "left-[17px] bg-base" : "left-[3px] bg-ink-muted",
+          checked ? "left-[17px] bg-accent-ink" : "left-[3px] bg-ink-muted",
         )}
       />
     </button>
@@ -266,9 +266,9 @@ export function ChoiceCard({
       disabled={disabled}
       onClick={onSelect}
       className={clsx(
-        "no-drag flex w-full items-start gap-2.5 rounded-sm border px-3 py-2.5 text-left transition-colors duration-150 ease-quiet disabled:opacity-60",
+        "no-drag flex w-full items-start gap-2.5 rounded-lg border px-3 py-2.5 text-left transition-colors duration-150 ease-quiet disabled:opacity-60",
         selected
-          ? "border-ink-muted bg-raised"
+          ? "border-accent/45 bg-raised"
           : "border-line bg-transparent hover:border-line-strong hover:bg-raised/50",
       )}
     >
@@ -285,7 +285,7 @@ export function ChoiceCard({
       <span
         className={clsx(
           "mt-0.5 grid size-4 shrink-0 place-items-center rounded-full border transition-colors duration-150 ease-quiet",
-          selected ? "border-ink bg-ink text-base" : "border-line-strong",
+          selected ? "border-accent bg-accent text-accent-ink" : "border-line-strong",
         )}
       >
         {selected && <Check size={10} strokeWidth={3} />}
@@ -305,7 +305,7 @@ export function Section({
   children: ReactNode;
 }) {
   return (
-    <section className="bg-surface p-5">
+    <section className="rounded-lg border border-line bg-surface/80 p-5 backdrop-blur-md">
       <h3 className="text-[14px] font-normal">{title}</h3>
       {hint && <p className="mt-1 mb-3.5 text-[12px] text-ink-muted">{hint}</p>}
       {children}
@@ -327,7 +327,7 @@ export function Empty({
   return (
     <div className="grid h-full animate-rise place-items-center px-8 text-center">
       <div className="max-w-sm">
-        <div className="mx-auto mb-3 grid size-11 place-items-center rounded-full bg-surface text-ink-muted">
+        <div className="mx-auto mb-3 grid size-11 place-items-center rounded-full border border-line bg-white/5 text-ink-muted backdrop-blur-md">
           {icon}
         </div>
         <p className="text-[15px] font-light">{title}</p>
