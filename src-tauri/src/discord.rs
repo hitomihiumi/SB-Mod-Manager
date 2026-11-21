@@ -11,9 +11,10 @@
 //! background, failures are silent, and a dropped socket is reconnected on the
 //! next update rather than retried in a loop.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender};
-use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use discord_rich_presence::activity::{Activity, Assets, Timestamps};
 use discord_rich_presence::{DiscordIpc, DiscordIpcClient};
@@ -77,6 +78,7 @@ impl Screen {
 /// The single activity Discord should show after priorities are applied.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ActivityKind {
+    Playing,
     Downloading,
     AwaitingNexus,
     Applying,
@@ -89,7 +91,8 @@ impl ActivityKind {
     /// Per-activity art in the corner; `None` keeps only the main logo.
     fn small_image(self) -> Option<&'static str> {
         Some(match self {
-            ActivityKind::Downloading | ActivityKind::AwaitingNexus => "download",
+            ActivityKind::Playing => "playing",
+            ActivityKind::Downloading |ActivityKind::AwaitingNexus => "download",
             ActivityKind::Applying => "apply",
             ActivityKind::GameUpdated => "update",
             ActivityKind::Setup => "setup",
@@ -110,6 +113,7 @@ impl ActivityKind {
 
     fn details(self, presence: &Presence) -> String {
         match self {
+            ActivityKind::Playing => "Playing Stellar Blade".to_string(),
             ActivityKind::Downloading => format!(
                 "Downloading {} mod{}",
                 presence.downloading,
@@ -146,6 +150,13 @@ impl ActivityKind {
     }
 
     fn state(self, presence: &Presence) -> String {
+        if let ActivityKind::Playing = self {
+            return if presence.installed == 0 {
+                "Without mods".to_string()
+            } else {
+                format!("{} of {} mods enabled", presence.enabled_mods, presence.installed)
+            };
+        }
         if let ActivityKind::GameUpdated = self {
             return format!(
                 "{} file{} need attention",
@@ -184,10 +195,15 @@ pub struct Presence {
     /// Queue items waiting for a click on Nexus.
     pub awaiting_action: usize,
     pub screen: Screen,
+    /// The game process is alive right now.
+    pub game_running: bool,
 }
 
 impl Presence {
     fn activity_kind(&self) -> ActivityKind {
+        if self.game_running {
+            return ActivityKind::Playing;
+        }
         if self.downloading > 0 {
             return ActivityKind::Downloading;
         }
@@ -233,8 +249,54 @@ impl Presence {
 /// A handle the app writes updates to; the work happens on its own thread.
 pub struct Discord {
     updates: SyncSender<Presence>,
-    last: Mutex<Option<Presence>>,
+    last: Arc<Mutex<Option<Presence>>>,
     screen: Mutex<Screen>,
+    game_running: Arc<AtomicBool>,
+}
+
+/// Name of the game's process, compared case-insensitively.
+const GAME_PROCESS: &str = "SB-Win64-Shipping.exe";
+
+#[cfg(windows)]
+fn game_process_alive() -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
+    };
+
+    // SAFETY: plain snapshot enumeration; the handle is closed on every path
+    // and the entry struct is zeroed with its size field set as the API asks.
+    unsafe {
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snapshot == INVALID_HANDLE_VALUE {
+            return false;
+        }
+        let mut entry: PROCESSENTRY32W = std::mem::zeroed();
+        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+        let mut found = false;
+        let mut ok = Process32FirstW(snapshot, &mut entry) != 0;
+        while ok {
+            let len = entry
+                .szExeFile
+                .iter()
+                .position(|&c| c == 0)
+                .unwrap_or(entry.szExeFile.len());
+            let name = String::from_utf16_lossy(&entry.szExeFile[..len]);
+            if name.eq_ignore_ascii_case(GAME_PROCESS) {
+                found = true;
+                break;
+            }
+            ok = Process32NextW(snapshot, &mut entry) != 0;
+        }
+        CloseHandle(snapshot);
+        found
+    }
+}
+
+#[cfg(not(windows))]
+fn game_process_alive() -> bool {
+    false
 }
 
 impl Discord {
@@ -250,11 +312,44 @@ impl Discord {
             .spawn(move || worker(rx))
             .ok();
 
+        let last: Arc<Mutex<Option<Presence>>> = Arc::new(Mutex::new(None));
+        let game_running = Arc::new(AtomicBool::new(false));
+
+        // The game can be started from Steam or a shortcut, so launching it
+        // through the manager is not the only signal. Watch the process and
+        // republish the last presence whenever it appears or exits.
+        {
+            let tx = tx.clone();
+            let last = Arc::clone(&last);
+            let game_running = Arc::clone(&game_running);
+            std::thread::Builder::new()
+                .name("discord-game-watch".into())
+                .spawn(move || loop {
+                    let alive = game_process_alive();
+                    if game_running.swap(alive, Ordering::Relaxed) != alive {
+                        if let Ok(mut guard) = last.lock() {
+                            if let Some(mut presence) = guard.clone() {
+                                presence.game_running = alive;
+                                *guard = Some(presence.clone());
+                                let _ = tx.try_send(presence);
+                            }
+                        }
+                    }
+                    std::thread::sleep(Duration::from_secs(5));
+                })
+                .ok();
+        }
+
         Discord {
             updates: tx,
-            last: Mutex::new(None),
+            last,
             screen: Mutex::new(Screen::default()),
+            game_running,
         }
+    }
+
+    pub fn game_running(&self) -> bool {
+        self.game_running.load(Ordering::Relaxed)
     }
 
     pub fn screen(&self) -> Screen {
@@ -346,7 +441,18 @@ mod tests {
             downloading: 0,
             awaiting_action: 0,
             screen: Screen::Mods,
+            game_running: false,
         }
+    }
+
+    #[test]
+    fn a_running_game_outranks_everything_else() {
+        let mut p = presence();
+        p.downloading = 2;
+        p.pending = 1;
+        p.game_running = true;
+        assert_eq!(p.details(), "Playing Stellar Blade");
+        assert_eq!(p.state(), "17 of 42 mods enabled");
     }
 
     #[test]

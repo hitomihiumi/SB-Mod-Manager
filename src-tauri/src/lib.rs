@@ -68,14 +68,20 @@ fn snapshot(
     let snapshot = with_app!(state, |app| app.snapshot())?;
     // The window asks for a snapshot after everything that could change what
     // the presence says, so this is the one place it needs refreshing.
-    discord.update(presence_from(&snapshot, &downloads, discord.screen()));
+    discord.update(presence_from(&snapshot, &downloads, discord.screen(), discord.game_running()));
     Ok(snapshot)
 }
 
 /// Counts only — see the module docs for why nothing is named.
-fn presence_from(snapshot: &AppSnapshot, downloads: &Downloads, screen: Screen) -> Presence {
+fn presence_from(
+    snapshot: &AppSnapshot,
+    downloads: &Downloads,
+    screen: Screen,
+    game_running: bool,
+) -> Presence {
     let items = downloads.queue.items();
     Presence {
+        game_running,
         enabled: snapshot.discord_rpc,
         installed: snapshot.mods.len(),
         enabled_mods: snapshot.mods.iter().filter(|m| m.enabled).count(),
@@ -115,7 +121,7 @@ fn set_discord_rpc(
     // Switching it off has to take down what is already showing, so the new
     // state is published rather than waiting for the next snapshot.
     let snapshot = with_app!(state, |app| app.snapshot())?;
-    discord.update(presence_from(&snapshot, &downloads, discord.screen()));
+    discord.update(presence_from(&snapshot, &downloads, discord.screen(), discord.game_running()));
     Ok(())
 }
 
@@ -129,7 +135,7 @@ fn set_discord_screen(
     let screen = Screen::parse(&screen).ok_or_else(|| format!("unknown screen: {screen}"))?;
     discord.set_screen(screen);
     let snapshot = with_app!(state, |app| app.snapshot())?;
-    discord.update(presence_from(&snapshot, &downloads, screen));
+    discord.update(presence_from(&snapshot, &downloads, screen, discord.game_running()));
     Ok(())
 }
 
